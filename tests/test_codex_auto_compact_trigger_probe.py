@@ -76,3 +76,28 @@ def test_configured_scope_defaults_to_total(tmp_path: Path):
     missing = tmp_path / "missing.toml"
 
     assert probe.configured_auto_compact_scope(missing) == "total"
+
+
+def test_dense_payload_is_deterministic_and_character_compact():
+    first = probe._dense_deterministic_payload(7, 20_000)
+    second = probe._dense_deterministic_payload(7, 20_000)
+
+    assert first == second
+    assert len(first.encode("utf-8")) <= 20_000
+    assert len(first.encode("utf-8")) >= 19_990
+    assert len(first) < 7_000
+
+
+def test_dense_filler_stays_small_in_browser_characters():
+    prompt = probe.build_dense_filler_prompt(3, 20_000)
+
+    assert base.TOKEN not in prompt
+    assert "LARGE_CONTEXT_FILLER_ACK_03" in prompt
+    assert len(prompt) < 8_000
+
+
+def test_dense_filler_changes_between_rounds():
+    assert (
+        probe._dense_deterministic_payload(1, 20_000)
+        != probe._dense_deterministic_payload(2, 20_000)
+    )

@@ -115,6 +115,77 @@ def build_trigger_prompt() -> str:
     return prompt
 
 
+
+def _dense_deterministic_payload(
+    round_index: int,
+    target_bytes: int,
+) -> str:
+    """Build token-dense deterministic Unicode with low browser character count.
+
+    Every generated code point is inside the three-byte CJK Unified Ideographs
+    block. This keeps roughly the same byte budget used by the acceptance
+    harness while avoiding enormous ASCII transcripts when a resumed Codex CLI
+    turn must replay full history through the ChatGPT Web composer.
+    """
+
+    if target_bytes < 1024:
+        raise ValueError("target_bytes must be >= 1024")
+
+    char_count = max(1, target_bytes // 3)
+    first = 0x4E00
+    span = 0x9FFF - first + 1
+
+    state = (
+        (int(round_index) * 0x9E3779B1)
+        ^ 0xA5A5A5A5
+    ) & 0xFFFFFFFF
+
+    chars: list[str] = []
+
+    for _ in range(char_count):
+        state = (
+            1664525 * state + 1013904223
+        ) & 0xFFFFFFFF
+        chars.append(chr(first + (state % span)))
+
+    payload = "".join(chars)
+
+    if len(payload.encode("utf-8")) > target_bytes:
+        raise AssertionError("dense payload exceeded byte budget")
+
+    return payload
+
+
+def build_dense_filler_prompt(
+    round_index: int,
+    target_bytes: int,
+) -> str:
+    ack = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
+    payload = _dense_deterministic_payload(
+        round_index,
+        target_bytes,
+    )
+
+    prompt = (
+        f"P1.2 synthetic dense context filler round {round_index}.\n"
+        "Do not call tools. Do not search files, logs, memory stores, or local "
+        "session history. Do not repeat or ask for any synthetic token from "
+        "earlier turns. Treat the following deterministic material as context "
+        "that must pass through the same Codex thread.\n"
+        "--- BEGIN SYNTHETIC DENSE FILLER ---\n"
+        + payload
+        + "\n--- END SYNTHETIC DENSE FILLER ---\n"
+        + f"Reply with exactly {ack} and nothing else."
+    )
+
+    if base.TOKEN in prompt:
+        raise AssertionError(
+            "dense filler prompt leaked the context token"
+        )
+
+    return prompt
+
+
 def _read_jsonl(path: Path):
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -261,6 +332,14 @@ def run(
     print(f"TRIGGER_TARGET_LIMIT={trigger_limit}")
     print(f"COARSE_BYTES={coarse_bytes}")
     print(f"FINE_BYTES={fine_bytes}")
+    print(
+        "COARSE_PROMPT_CHARS="
+        + str(len(build_dense_filler_prompt(1, coarse_bytes)))
+    )
+    print(
+        "FINE_PROMPT_CHARS="
+        + str(len(build_dense_filler_prompt(1, fine_bytes)))
+    )
     print(f"PRIVATE_TRACE_DIR={trace_dir}")
 
     seed = _run_turn_preserving_failure(
@@ -297,7 +376,7 @@ def run(
         observation = _run_turn_preserving_failure(
             codex=codex_path,
             root=root,
-            prompt=base.build_filler_prompt(round_index, coarse_bytes),
+            prompt=build_dense_filler_prompt(round_index, coarse_bytes),
             trace_path=trace_dir / f"trigger-probe-{round_index:02d}-coarse.jsonl",
             thread_id=thread_id,
             timeout_sec=timeout_sec,
@@ -329,7 +408,7 @@ def run(
         observation = _run_turn_preserving_failure(
             codex=codex_path,
             root=root,
-            prompt=base.build_filler_prompt(round_index, fine_bytes),
+            prompt=build_dense_filler_prompt(round_index, fine_bytes),
             trace_path=trace_dir / f"trigger-probe-{round_index:02d}-fine.jsonl",
             thread_id=thread_id,
             timeout_sec=timeout_sec,
