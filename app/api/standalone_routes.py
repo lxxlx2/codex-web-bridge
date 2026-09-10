@@ -29,8 +29,8 @@ from app.services.codex_stream_compat import install_codex_stream_compat
 # those module-local by-value references explicitly as well.
 codex_runtime_api._run_chat_completion_final = execute_chatgpt_nonstream
 
-from app.api import codex_compact as codex_compact_api
-from app.api import codex_responses_v2 as codex_responses_v2_api
+import app.api.codex_compact as codex_compact_api
+import app.api.codex_responses_v2 as codex_responses_v2_api
 
 codex_compact_api._run_chat_completion_final = execute_chatgpt_nonstream
 codex_responses_v2_api._run_chat_completion_final = execute_chatgpt_nonstream
