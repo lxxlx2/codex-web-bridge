@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 
-from app.api.chat import ResponsesRequest
+from app.api.chat import ChatRequest, ResponsesRequest
 from app.api.codex_responses_v2 import (
+    _browser_delta_chat_request,
     _browser_delta_request,
     _clone_for_required_tool_retry,
     _response_id_from_sse,
@@ -152,3 +153,157 @@ def test_response_id_is_recovered_from_minimal_sse():
         + "\n\n"
     ]
     assert _response_id_from_sse(chunks) == "resp_live_123"
+
+
+def test_browser_delta_chat_request_preserves_tool_provenance():
+    tools = [
+        {
+            "type": "function",
+            "name": "exec_command",
+            "description": "Run a command in the client workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"],
+            },
+        }
+    ]
+
+    incoming = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_previous",
+        input=[
+            {
+                "type": "function_call_output",
+                "call_id": "call_write",
+                "output": "Process exited with code 0",
+            }
+        ],
+        stream=True,
+        tools=tools,
+    )
+
+    state_chat = ChatRequest(
+        model="chatgpt",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Use exec_command to create context/result.txt, "
+                    "then read it and confirm the result."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_write",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"printf test > context/result.txt"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_write",
+                "name": "exec_command",
+                "content": "Process exited with code 0",
+            },
+        ],
+        stream=False,
+    )
+
+    delta = _browser_delta_chat_request(state_chat, incoming)
+
+    assert len(delta.messages) == 2
+    assert delta.messages[0]["role"] == "assistant"
+    assert delta.messages[0]["tool_calls"][0]["id"] == "call_write"
+    assert (
+        delta.messages[0]["tool_calls"][0]["function"]["name"]
+        == "exec_command"
+    )
+    assert delta.messages[1]["role"] == "tool"
+    assert delta.messages[1]["tool_call_id"] == "call_write"
+
+
+def test_affinity_tool_result_delta_enables_post_tool_workspace_repair():
+    from app.services.client_tool_policy import (
+        should_repair_client_workspace_refusal,
+    )
+
+    incoming = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_previous",
+        input=[
+            {
+                "type": "function_call_output",
+                "call_id": "call_write",
+                "output": "Process exited with code 0",
+            }
+        ],
+        stream=True,
+        tools=[
+            {
+                "type": "function",
+                "name": "exec_command",
+                "description": "Run a command in the local client workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"cmd": {"type": "string"}},
+                    "required": ["cmd"],
+                },
+            }
+        ],
+    )
+
+    state_chat = ChatRequest(
+        model="chatgpt",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_write",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"echo ok"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_write",
+                "name": "exec_command",
+                "content": "Process exited with code 0",
+            },
+        ],
+        stream=False,
+    )
+
+    delta = _browser_delta_chat_request(state_chat, incoming)
+
+    refusal = (
+        "当前环境没有实际暴露 `exec_command` 客户端函数，"
+        "因此无法执行最后一次读取校验。"
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=delta.messages,
+        tools=delta.tools or [],
+        tool_choice=delta.tool_choice,
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True

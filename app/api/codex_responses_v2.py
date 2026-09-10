@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.chat import (
+    ChatRequest,
     ResponsesRequest,
     _build_responses_object,
     _new_response_id,
@@ -416,6 +417,115 @@ def _browser_delta_request(body: ResponsesRequest) -> ResponsesRequest:
     return cloned
 
 
+
+def _function_output_call_ids(source: Any) -> set[str]:
+    """Return call ids carried by the current Responses tool-result delta."""
+
+    if not isinstance(source, list):
+        return set()
+
+    call_ids: set[str] = set()
+    for item in source:
+        if not isinstance(item, dict):
+            continue
+
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type not in {"function_call_output", "tool_result"}:
+            continue
+
+        call_id = str(
+            item.get("call_id")
+            or item.get("tool_call_id")
+            or item.get("id")
+            or ""
+        ).strip()
+
+        if call_id:
+            call_ids.add(call_id)
+
+    return call_ids
+
+
+def _browser_delta_chat_request(
+    state_chat_body: ChatRequest,
+    browser_source_body: ResponsesRequest,
+) -> ChatRequest:
+    """Build an affinity delta while retaining minimal client-tool provenance.
+
+    A lone Responses function_call_output cannot be represented faithfully as a
+    Chat Completions tool message because its matching assistant function call
+    has been removed together with previous_response_id. In that case recover
+    only the matching assistant call plus the trailing tool-result delta from
+    the hydrated state.
+
+    This preserves tool-history semantics for validation and repair without
+    replaying the complete conversation into the already-affined ChatGPT tab.
+    """
+
+    delta_body = _responses_request_to_chat_request(
+        _browser_delta_request(browser_source_body),
+        stream=False,
+    )
+
+    call_ids = _function_output_call_ids(browser_source_body.input)
+    if not call_ids:
+        return delta_body
+
+    messages = (
+        state_chat_body.messages
+        if isinstance(state_chat_body.messages, list)
+        else []
+    )
+
+    start_index: Optional[int] = None
+
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+
+        assistant_call_ids = {
+            str(call.get("id") or "").strip()
+            for call in tool_calls
+            if isinstance(call, dict)
+            and str(call.get("id") or "").strip()
+        }
+
+        if assistant_call_ids & call_ids:
+            start_index = index
+            break
+
+    if start_index is None:
+        return delta_body
+
+    tail = messages[start_index:]
+
+    matching_tool_result = any(
+        isinstance(message, dict)
+        and str(message.get("role") or "").strip().lower() == "tool"
+        and str(message.get("tool_call_id") or "").strip() in call_ids
+        for message in tail
+    )
+
+    if not matching_tool_result:
+        return delta_body
+
+    if hasattr(delta_body, "model_copy"):
+        return delta_body.model_copy(
+            update={"messages": [dict(message) for message in tail]}
+        )
+
+    return delta_body.copy(
+        update={"messages": [dict(message) for message in tail]}
+    )
+
+
 def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, bool, str, str]:
     """Prepare browser state and return hydrated state body plus affinity metadata."""
 
@@ -470,7 +580,7 @@ async def _stream_codex_v2_attempt(
     sequence = 1
     state_chat_body = _responses_request_to_chat_request(state_body, stream=False)
     browser_body = (
-        _responses_request_to_chat_request(_browser_delta_request(browser_source_body), stream=False)
+        _browser_delta_chat_request(state_chat_body, browser_source_body)
         if reuse_web_conversation
         else state_chat_body
     )
