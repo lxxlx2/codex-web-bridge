@@ -56,14 +56,8 @@ CHATGPT_ROUTE_DOMAIN = "chatgpt.com"
 WORKER_POLL_SECONDS = 0.5
 
 _RESPONSE_FORMAT_HINTS = {
-    "json_object": (
-        "\n\n[System instruction: Return a valid JSON object only. "
-        "Do not wrap it in a Markdown code fence or add non-JSON text.]"
-    ),
-    "json_schema": (
-        "\n\n[System instruction: Return valid JSON that strictly follows this JSON Schema. "
-        "Do not wrap it in a Markdown code fence:\n{schema}]"
-    ),
+    "json_object": "\n\n[系统指令：请以 JSON 格式输出你的回复。确保输出是有效的 JSON 对象，不要包含 ```json 代码块标记或任何其他非 JSON 文字。]",
+    "json_schema": "\n\n[系统指令：请严格按照以下 JSON Schema 格式输出你的回复，确保输出是有效的 JSON，不要包含代码块标记：\n{schema}]",
     "text": "",
 }
 
