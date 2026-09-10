@@ -107,3 +107,24 @@ jobs:
             tests/test_codex_chatgpt_executor_parity.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py
+
+  codex-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Run broad Codex regression
+        run: |
+          python -m pytest -q \
+            tests/test_codex*.py \
+            tests/test_client_tool_policy*.py \
+            tests/test_chatgpt_web_*.py \
+            tests/test_install_codex_uwa_commands.py \
+            tests/test_security_hardening.py
