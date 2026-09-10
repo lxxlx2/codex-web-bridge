@@ -6,35 +6,35 @@ The S1 audit combines a static local-import closure, import-only runtime tracing
 
 ## Current evidence
 
-The integration tree contains 297 Python files. The conservative Codex bridge seed set contains 25 explicit core files. The integration-tree static closure reaches 143 Python files and import-only runtime tracing loads 165 local Python files. Forty-six validation files are currently useful for standalone release work. Seventy-six Python files are already classified as exclusion candidates, although S2 still has to prove deletion safety on the extracted tree.
+The integration tree contains 297 Python files. The conservative Codex bridge seed set contains 25 explicit core files. The integration-tree static closure reaches 143 Python files and import-only runtime tracing loads 165 local Python files. Forty-six validation files were identified as useful for standalone release work. Seventy-six Python files were initially classified as exclusion candidates before S2 deletion-safety proof.
 
-The current production requirements file contains 15 direct entries. The static bridge closure sees 14 external import roots, while runtime import tracing naturally sees a larger transitive dependency set.
+The source requirements file contains 15 direct entries. The source bridge closure sees 14 external import roots, while runtime import tracing naturally sees a larger transitive dependency set.
 
 ## Main coupling findings
 
-Two package side effects account for a large amount of artificial coupling:
+Two package side effects accounted for a large amount of artificial coupling:
 
-1. `app/api/__init__.py` imports `app.api.routes` at package-import time. That route aggregator pulls unrelated generic API surfaces such as Anthropic, browser/config/system/tab/command/provider routes into the static and runtime closure. Codex remote-compaction reaches this package through `from app.api import codex_responses_v2`.
-2. `app/core/parsers/__init__.py` imports and registers every built-in provider parser at package-import time. The Codex path reaches the parser package through the generic network-monitor/runtime stack, which loads unrelated provider parsers as side effects.
+1. `app/api/__init__.py` imported `app.api.routes` at package-import time. That route aggregator pulled unrelated generic API surfaces such as Anthropic, browser/config/system/tab/command/provider routes into the static and runtime closure.
+2. `app/core/parsers/__init__.py` imported and registered every built-in provider parser at package-import time. The Codex path reached the parser package through the generic network-monitor/runtime stack, loading unrelated provider parsers as side effects.
 
-These are S2 decoupling targets. The preferred fix is to narrow imports and registration boundaries rather than carry every generic provider into the standalone repository.
+S2 narrowed both boundaries and validated the resulting Codex-only startup graph in standalone CI.
 
 ## Shared chat runtime
 
-Codex currently reuses a subset of `app/api/chat.py` for Responses request models, conversion, result construction, backing ChatGPT-Web execution, state persistence and auth. Symbol-level analysis confirms this file is a major shared-runtime coupling point.
+The source baseline reused a subset of `app/api/chat.py` for Responses request models, conversion, result construction, backing ChatGPT-Web execution, state persistence and auth. Symbol-level analysis confirmed this file as a major shared-runtime coupling point.
 
-S2 should extract the selected Responses/chat symbols into a narrow bridge runtime module and leave the broad generic chat route behind once parity tests confirm the split.
+S2 extracted the Responses/runtime seam, ChatGPT Web executor and standalone Responses fallback, then removed the legacy generic chat runtime after frozen-contract parity tests replaced the old legacy-module test oracle.
 
 ## Dependency implications
 
-The integration closure currently reaches `DrissionPage`, Pillow, BeautifulSoup, FastAPI, Pydantic, requests, jsonschema, psutil, pyperclip and platform-specific/runtime helpers. Some direct requirements such as `reportlab` and Windows clipboard support appear because generic integration-tree paths are still coupled in.
-
-S2 must regenerate the dependency set after router/parser/chat decoupling. Packages are removed only when the standalone import graph and CI/live parity show they are no longer needed.
+The source integration closure reached `DrissionPage`, Pillow, BeautifulSoup, FastAPI, Pydantic, requests, jsonschema, psutil, pyperclip and platform/runtime helpers. The standalone dependency set is now audited against the extracted tree rather than inferred from the larger integration source.
 
 ## Non-Python assets
 
-The conservative source scan finds browser/site/config JSON assets and several dynamic/private runtime paths. The bootstrap copies the public config candidates needed for the first extracted tree and records them in the candidate manifest. Static dashboard/UI assets are not automatically treated as release requirements; S2 parity determines whether any are actually needed.
+The conservative source scan identified browser/site/config JSON assets and several dynamic/private runtime paths. The bootstrap copied public config candidates required by the extracted tree and recorded them in the candidate manifest. Private runtime state remains outside the repository.
 
-## S1 to S2 handoff
+## S1 closure
 
-S1 has enough evidence to start the conservative extraction in this repository. S1 remains open until the bootstrapped standalone tree is available and its actual import/runtime graph can be compared with the integration-tree audit. S2 then removes generic surfaces incrementally with CI evidence after each decoupling step.
+S1 is PASS / CLOSED. Its source-baseline, import/runtime, asset, dependency and provenance evidence was sufficient to drive S2 extraction. S2 subsequently proved the extracted tree independently and is also PASS / CLOSED.
+
+The current post-S2 dependency evidence and final deletion tranche are recorded in `docs/STANDALONE_S2_CLOSURE_2026-09-10.md`. S3 live parity is the current release gate.
