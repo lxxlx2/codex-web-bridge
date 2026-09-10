@@ -12,17 +12,20 @@ def _source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _imports(path: str) -> set[str]:
+    tree = ast.parse(_source(path))
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
+        elif isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+    return imports
+
+
 class StandaloneEntrypointTests(unittest.TestCase):
     def test_standalone_route_aggregate_is_codex_only(self) -> None:
-        source = _source("app/api/standalone_routes.py")
-        tree = ast.parse(source)
-        imports = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imports.add(node.module)
-            elif isinstance(node, ast.Import):
-                imports.update(alias.name for alias in node.names)
-
+        imports = _imports("app/api/standalone_routes.py")
         self.assertIn("app.api.codex_compat", imports)
         self.assertIn("app.api.codex_compact", imports)
         self.assertIn("app.api.codex_responses_v2", imports)
@@ -37,6 +40,14 @@ class StandaloneEntrypointTests(unittest.TestCase):
             "app.api.routes",
         }:
             self.assertNotIn(forbidden, imports)
+
+    def test_codex_model_catalog_no_longer_imports_generic_chat_api(self) -> None:
+        imports = _imports("app/api/codex_compat.py")
+        source = _source("app/api/codex_compat.py")
+        self.assertNotIn("app.api.chat", imports)
+        self.assertIn("app.api.deps", imports)
+        self.assertIn('"id": "chatgpt"', source)
+        self.assertIn("verify_service_auth", source)
 
     def test_main_uses_standalone_routes_and_minimal_health_surface(self) -> None:
         source = _source("main.py")
