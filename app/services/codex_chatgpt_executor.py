@@ -1,21 +1,23 @@
 """Codex-only non-stream ChatGPT Web execution seam.
 
 The Codex Responses bridge always asks its backing chat worker for a final
-non-stream OpenAI-compatible payload.  The historical Universal Web API chat
+non-stream OpenAI-compatible payload. The historical Universal Web API chat
 entrypoint performed generic model discovery and provider routing before it ever
-reached the ChatGPT tab.  Standalone only exposes the logical ``chatgpt`` route,
+reached the ChatGPT tab. Standalone only exposes the logical ``chatgpt`` route,
 so that generic routing layer is unnecessary here.
 
 This module preserves the validated request-manager lifecycle, tracked blocking
-worker cleanup, tool-calling repair loop and browser workflow implementation,
-while selecting the controlled ``chatgpt.com`` route explicitly.  It does not
-execute client tools: tool calls remain model output for Codex Desktop/CLI to
-execute under the client's sandbox and approval policy.
+worker cleanup, tool-calling repair loop, response-format prompting and browser
+workflow implementation while selecting the controlled ``chatgpt.com`` route
+explicitly. It does not execute client tools: tool calls remain model output for
+Codex Desktop/CLI to execute under the client's sandbox and approval policy.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
+import json
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -52,6 +54,18 @@ from app.services.tool_calling import (
 logger = get_logger("CODEX.CHATGPT.EXECUTOR")
 CHATGPT_ROUTE_DOMAIN = "chatgpt.com"
 WORKER_POLL_SECONDS = 0.5
+
+_RESPONSE_FORMAT_HINTS = {
+    "json_object": (
+        "\n\n[System instruction: Return a valid JSON object only. "
+        "Do not wrap it in a Markdown code fence or add non-JSON text.]"
+    ),
+    "json_schema": (
+        "\n\n[System instruction: Return valid JSON that strictly follows this JSON Schema. "
+        "Do not wrap it in a Markdown code fence:\n{schema}]"
+    ),
+    "text": "",
+}
 
 
 class CodexChatGPTExecutionError(RuntimeError):
@@ -108,6 +122,61 @@ def _browser_payload_error(data: Dict[str, Any]) -> Optional[CodexChatGPTExecuti
         code="browser_execution_failed",
         status_code=500,
     )
+
+
+def _response_format_hint(response_format: Any) -> str:
+    if not isinstance(response_format, dict) or not response_format:
+        return ""
+    format_type = str(response_format.get("type") or "text").strip().lower() or "text"
+    template = _RESPONSE_FORMAT_HINTS.get(format_type, "")
+    if not template:
+        return ""
+    if format_type != "json_schema":
+        return template
+
+    json_schema = response_format.get("json_schema", {})
+    schema_content = (
+        json_schema.get("schema", json_schema)
+        if isinstance(json_schema, dict)
+        else json_schema
+    )
+    try:
+        schema_text = json.dumps(schema_content, ensure_ascii=False, indent=2)
+    except Exception:
+        schema_text = str(schema_content)
+    return template.replace("{schema}", schema_text)
+
+
+def _apply_response_format(messages: List[Dict[str, Any]], response_format: Any) -> List[Dict[str, Any]]:
+    """Append the Responses format contract to the latest user text part."""
+
+    hint = _response_format_hint(response_format)
+    if not hint:
+        return messages
+
+    updated = copy.deepcopy(messages)
+    for message in reversed(updated):
+        if not isinstance(message, dict) or str(message.get("role") or "") != "user":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, str):
+            message["content"] = content + hint
+            return updated
+        if isinstance(content, list):
+            for item in reversed(content):
+                if isinstance(item, dict) and str(item.get("type") or "") == "text":
+                    item["text"] = str(item.get("text") or "") + hint
+                    return updated
+            content.append({"type": "text", "text": hint})
+            return updated
+    return updated
+
+
+def _body_with_response_format_hint(body: ChatRequest) -> ChatRequest:
+    messages = _apply_response_format(body.messages, body.response_format)
+    if messages is body.messages:
+        return body
+    return body.model_copy(update={"messages": messages})
 
 
 def _execute_browser_non_stream_messages(
@@ -259,6 +328,7 @@ async def execute_chatgpt_nonstream(
     """Execute the backing request without generic provider/model routing."""
 
     del authenticated
+    effective_body = _body_with_response_format_hint(body)
     client_fp = cancel_storm_guard.get_client_fingerprint(request)
     await cancel_storm_guard.maybe_backoff(client_fp)
     ctx = request_manager.create_request(client_fp=client_fp)
@@ -269,10 +339,10 @@ async def execute_chatgpt_nonstream(
         await asyncio.to_thread(
             request_manager.record_request_input,
             ctx,
-            body.model_dump(),
+            effective_body.model_dump(),
             endpoint="/v1/responses:chatgpt-backing",
             route_domain=CHATGPT_ROUTE_DOMAIN,
-            preset_name=body.preset_name,
+            preset_name=effective_body.preset_name,
         )
         request_manager.start_request(ctx)
         disconnect_task = asyncio.create_task(
@@ -281,18 +351,18 @@ async def execute_chatgpt_nonstream(
         browser = get_browser(auto_connect=False)
 
         if has_tool_calling_request(
-            messages=body.messages,
-            tools=body.tools,
-            functions=body.functions,
+            messages=effective_body.messages,
+            tools=effective_body.tools,
+            functions=effective_body.functions,
         ):
-            payload = await _run_tool_calling(browser, body, ctx, worker_state)
+            payload = await _run_tool_calling(browser, effective_body, ctx, worker_state)
         else:
             worker_fn = lambda: _execute_browser_non_stream_messages(
                 browser,
-                body.messages,
+                effective_body.messages,
                 ctx.request_id,
                 stop_checker=ctx.should_stop,
-                requested_model=body.model,
+                requested_model=effective_body.model,
             )
             payload = await _run_tracked_round(
                 worker_fn,
@@ -300,7 +370,7 @@ async def execute_chatgpt_nonstream(
                 worker_state=worker_state,
                 label=f"{ctx.request_id[:8]}-final",
             )
-            payload = _apply_stop_to_final_payload(payload, body.stop)
+            payload = _apply_stop_to_final_payload(payload, effective_body.stop)
 
         if ctx.should_stop():
             reason = str(ctx.cancel_reason or "request_cancelled")
@@ -364,6 +434,7 @@ async def execute_chatgpt_nonstream(
 __all__ = [
     "CHATGPT_ROUTE_DOMAIN",
     "CodexChatGPTExecutionError",
+    "_apply_response_format",
     "_execute_browser_non_stream_messages",
     "_run_tool_calling",
     "execute_chatgpt_nonstream",
