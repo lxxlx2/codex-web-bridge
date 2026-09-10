@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Deterministic static/runtime dependency audit for the standalone bridge.
 
-The audit is intentionally conservative.  It computes a local Python import
+The audit is intentionally conservative. It computes a local Python import
 closure from the standalone application/runtime entrypoints, records modules
-loaded by importing ``main`` in a clean process, and reports modules outside the
-static closure as pruning candidates.  It never deletes files.
+loaded by importing ``main`` in a clean process, and reports modules outside
+both sets as pruning candidates. It never deletes files.
 """
 
 from __future__ import annotations
@@ -49,10 +49,16 @@ EXPECTED_STARTUP = (
     "app.api.codex_runtime",
     "app.services.codex_chatgpt_executor",
 )
+ALLOWED_STARTUP_PARSERS = {
+    "app.core.parsers",
+    "app.core.parsers.base",
+    "app.core.parsers.chatgpt_parser",
+    "app.core.parsers.registry",
+}
 
 
 def _runtime_python_paths() -> list[Path]:
-    paths = [ROOT / "main.py", ROOT / "start.py", ROOT / "security_guard.py"]
+    paths = sorted(ROOT.glob("*.py"))
     paths.extend(sorted((ROOT / "app").rglob("*.py")))
     return [path for path in paths if path.is_file()]
 
@@ -198,13 +204,20 @@ def build_report() -> dict[str, object]:
     index = _module_index()
     closure, external_roots, edges = _static_closure(index)
     startup = _startup_modules(index)
-    unreachable = sorted(set(index) - closure)
+    static_unreachable = set(index) - closure
+    prune_candidates = static_unreachable - startup
+    startup_only = startup - closure
     forbidden_loaded = sorted(set(STARTUP_FORBIDDEN) & startup)
     expected_missing = sorted(set(EXPECTED_STARTUP) - startup)
+    startup_non_chatgpt_parsers = sorted(
+        module
+        for module in startup
+        if module.startswith("app.core.parsers") and module not in ALLOWED_STARTUP_PARSERS
+    )
 
     obvious_generic_candidates = sorted(
         module
-        for module in unreachable
+        for module in prune_candidates
         if module.startswith(
             (
                 "app.api.anthropic_",
@@ -224,30 +237,29 @@ def build_report() -> dict[str, object]:
     )
     non_chatgpt_parser_candidates = sorted(
         module
-        for module in unreachable
+        for module in prune_candidates
         if module.startswith("app.core.parsers.")
-        and module not in {
-            "app.core.parsers.base",
-            "app.core.parsers.chatgpt_parser",
-            "app.core.parsers.registry",
-        }
+        and module not in ALLOWED_STARTUP_PARSERS
     )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "seed_modules": list(SEED_MODULES),
         "runtime_python_module_count": len(index),
         "static_closure_count": len(closure),
         "startup_loaded_local_count": len(startup),
-        "unreachable_candidate_count": len(unreachable),
+        "static_unreachable_count": len(static_unreachable),
+        "prune_candidate_count": len(prune_candidates),
         "static_closure": sorted(closure),
         "startup_loaded_local": sorted(startup),
+        "startup_only_modules": sorted(startup_only),
         "external_import_roots_nonstdlib": _stdlib_filtered(external_roots),
         "startup_forbidden_loaded": forbidden_loaded,
         "expected_startup_missing": expected_missing,
+        "startup_non_chatgpt_parsers": startup_non_chatgpt_parsers,
         "obvious_generic_candidates": obvious_generic_candidates,
         "non_chatgpt_parser_candidates": non_chatgpt_parser_candidates,
-        "unreachable_candidates": unreachable,
+        "prune_candidates": sorted(prune_candidates),
         "static_edges": edges,
     }
 
@@ -256,7 +268,8 @@ def _print_summary(report: dict[str, object]) -> None:
     print(f"RUNTIME_PYTHON_MODULE_COUNT={report['runtime_python_module_count']}")
     print(f"STATIC_CLOSURE_COUNT={report['static_closure_count']}")
     print(f"STARTUP_LOADED_LOCAL_COUNT={report['startup_loaded_local_count']}")
-    print(f"UNREACHABLE_CANDIDATE_COUNT={report['unreachable_candidate_count']}")
+    print(f"STATIC_UNREACHABLE_COUNT={report['static_unreachable_count']}")
+    print(f"PRUNE_CANDIDATE_COUNT={report['prune_candidate_count']}")
     print(
         "STARTUP_FORBIDDEN_LOADED="
         + (",".join(report["startup_forbidden_loaded"]) or "NONE")
@@ -266,17 +279,15 @@ def _print_summary(report: dict[str, object]) -> None:
         + (",".join(report["expected_startup_missing"]) or "NONE")
     )
     print(
+        "STARTUP_NON_CHATGPT_PARSERS="
+        + (",".join(report["startup_non_chatgpt_parsers"]) or "NONE")
+    )
+    print(
         "EXTERNAL_IMPORT_ROOTS_NONSTDLIB="
         + (",".join(report["external_import_roots_nonstdlib"]) or "NONE")
     )
-    print(
-        "OBVIOUS_GENERIC_CANDIDATE_COUNT="
-        + str(len(report["obvious_generic_candidates"]))
-    )
-    print(
-        "NON_CHATGPT_PARSER_CANDIDATE_COUNT="
-        + str(len(report["non_chatgpt_parser_candidates"]))
-    )
+    print("OBVIOUS_GENERIC_CANDIDATE_COUNT=" + str(len(report["obvious_generic_candidates"])))
+    print("NON_CHATGPT_PARSER_CANDIDATE_COUNT=" + str(len(report["non_chatgpt_parser_candidates"])))
 
 
 def main() -> int:
@@ -299,6 +310,8 @@ def main() -> int:
             print(f"GENERIC_CANDIDATE={module}")
         for module in report["non_chatgpt_parser_candidates"]:
             print(f"PARSER_CANDIDATE={module}")
+        for module in report["startup_only_modules"]:
+            print(f"STARTUP_ONLY_MODULE={module}")
 
     if args.json_out is not None:
         output = args.json_out
@@ -309,7 +322,11 @@ def main() -> int:
         print(f"AUDIT_JSON_WRITTEN={output.relative_to(ROOT) if output.is_relative_to(ROOT) else output.name}")
 
     if args.check:
-        if report["startup_forbidden_loaded"] or report["expected_startup_missing"]:
+        if (
+            report["startup_forbidden_loaded"]
+            or report["expected_startup_missing"]
+            or report["startup_non_chatgpt_parsers"]
+        ):
             print("STANDALONE_DEPENDENCY_AUDIT=FAIL")
             return 1
 
