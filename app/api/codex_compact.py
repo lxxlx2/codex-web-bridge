@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.chat import (
+from app.api.codex_runtime import (
     ResponsesRequest,
     _build_responses_object,
     _responses_request_to_chat_request,
