@@ -104,5 +104,6 @@ jobs:
             tests/test_codex_compat.py \
             tests/test_codex_runtime_extraction.py \
             tests/test_codex_chatgpt_executor.py \
+            tests/test_codex_chatgpt_executor_parity.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py
