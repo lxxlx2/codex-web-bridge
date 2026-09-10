@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api import codex_runtime as codex_runtime_api
 from app.api.codex_compat import router as codex_compat_router
-from app.api.codex_compact import router as codex_compact_router
-from app.api.codex_responses_v2 import router as codex_responses_v2_router
+from app.services.codex_chatgpt_executor import execute_chatgpt_nonstream
 from app.services.codex_required_tool_language_patch import (
     install_codex_required_tool_language_patch,
 )
@@ -22,6 +22,16 @@ from app.services.codex_workspace_refusal_language_patch import (
 from app.services.codex_remote_compaction_v2 import install_codex_remote_compaction_v2
 from app.services.codex_v2_runtime_hardening import install_codex_v2_runtime_hardening
 from app.services.codex_stream_compat import install_codex_stream_compat
+
+
+# Bind the execution seam before the compact/V2 modules import it by value.
+# This keeps startup and real standalone Responses execution out of the
+# preserved generic UWA chat runtime while retaining that file as a parity
+# reference during S2.
+codex_runtime_api._run_chat_completion_final = execute_chatgpt_nonstream
+
+from app.api.codex_compact import router as codex_compact_router
+from app.api.codex_responses_v2 import router as codex_responses_v2_router
 
 
 install_codex_required_tool_language_patch()
