@@ -1,57 +1,76 @@
 from __future__ import annotations
 
+import json
 import unittest
-from unittest.mock import patch
 
-from app.api import legacy_chat_runtime as baseline
 from app.services import codex_chatgpt_executor as executor
 
 
 class CodexChatGPTExecutorParityTests(unittest.TestCase):
-    def _baseline_apply(self, messages, response_format):
-        with patch.object(
-            baseline,
-            "_get_response_format_hint",
-            side_effect=lambda format_type: baseline.DEFAULT_RESPONSE_FORMAT_HINTS.get(format_type, ""),
-        ):
-            return baseline._apply_response_format(messages, response_format)
+    """Frozen formatting/error contracts from the validated integrated baseline."""
 
-    def test_json_object_prompt_matches_integrated_baseline(self) -> None:
+    def test_json_object_prompt_matches_frozen_contract(self) -> None:
         messages = [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "return data"},
         ]
         response_format = {"type": "json_object"}
-        expected = self._baseline_apply(messages, response_format)
+        expected_hint = (
+            "\n\n[系统指令：请以 JSON 格式输出你的回复。确保输出是有效的 JSON 对象，"
+            "不要包含 ```json 代码块标记或任何其他非 JSON 文字。]"
+        )
+
         actual = executor._apply_response_format(messages, response_format)
-        self.assertEqual(actual, expected)
+
+        self.assertEqual(
+            actual,
+            [
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "return data" + expected_hint},
+            ],
+        )
         self.assertEqual(messages[-1]["content"], "return data")
 
-    def test_json_schema_prompt_matches_integrated_baseline(self) -> None:
+    def test_json_schema_prompt_matches_frozen_contract(self) -> None:
         messages = [
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "return object"},
-                    {"type": "image_url", "image_url": {"url": "https://example.invalid/a.png"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.invalid/a.png"},
+                    },
                 ],
             }
         ]
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+        }
         response_format = {
             "type": "json_schema",
             "json_schema": {
                 "name": "result",
-                "schema": {
-                    "type": "object",
-                    "properties": {"ok": {"type": "boolean"}},
-                    "required": ["ok"],
-                },
+                "schema": schema,
                 "strict": True,
             },
         }
-        expected = self._baseline_apply(messages, response_format)
+        expected_hint = (
+            "\n\n[系统指令：请严格按照以下 JSON Schema 格式输出你的回复，确保输出是有效的 JSON，"
+            "不要包含代码块标记：\n"
+            + json.dumps(schema, ensure_ascii=False, indent=2)
+            + "]"
+        )
+
         actual = executor._apply_response_format(messages, response_format)
-        self.assertEqual(actual, expected)
+
+        self.assertEqual(actual[0]["content"][0]["text"], "return object" + expected_hint)
+        self.assertEqual(
+            actual[0]["content"][1],
+            {"type": "image_url", "image_url": {"url": "https://example.invalid/a.png"}},
+        )
         self.assertEqual(messages[0]["content"][0]["text"], "return object")
 
     def test_text_format_is_identity(self) -> None:
