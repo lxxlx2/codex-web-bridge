@@ -299,3 +299,37 @@ def test_roundtrip_fails_closed_after_repeated_false_refusals(monkeypatch):
             parallel_tool_calls=False,
             round_executor=executor,
         )
+
+
+def test_detects_no_callable_exec_command_claim_before_first_tool_call(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "第一步必须通过客户端 exec_command 在当前工作区执行 pwd。"
+                "随后创建 context/result.txt 并读取确认。"
+            ),
+        }
+    ]
+
+    refusal = (
+        "当前环境没有可调用的 exec_command 客户端函数，"
+        "因此我无法真实完成创建和回读 context/result.txt 这两步，"
+        "也不能据此回复 CONTEXT_PASS。"
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True

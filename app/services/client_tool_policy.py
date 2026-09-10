@@ -64,6 +64,18 @@ _REFUSAL_PATTERNS = (
     re.compile(r"(?:需要|必须).{0,50}(?:能够|可以).{0,25}访问.{0,35}(?:本机|本地|工作区).{0,35}(?:执行工具|工具)"),
     re.compile(r"(?:无法|不能).{0,30}(?:真实|真正|实际).{0,20}(?:读取|修改|测试|访问|运行)"),
     re.compile(r"(?:因此|所以).{0,35}(?:无法|不能).{0,50}(?:读取|修改|测试|运行|访问)"),
+
+    # current_environment_no_callable_workspace_tool:
+    # Real ChatGPT Web wording observed by the standalone S3 live gate before
+    # the first client tool call has occurred.
+    re.compile(
+        r"(?:当前环境|当前这个会话|当前会话环境).{0,60}"
+        r"(?:没有|未).{0,35}(?:可调用的?\s*)?"
+        r"(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)"
+        r".{0,50}(?:客户端函数|客户端工具|本地执行工具|执行工具|函数|工具)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+
 )
 
 # Strong contradiction patterns that remain invalid even after a prior tool result.
