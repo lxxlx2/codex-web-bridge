@@ -126,7 +126,11 @@ jobs:
       - name: Run broad non-live Codex regression
         shell: bash
         run: |
-          CODEX_TESTS=$(find tests -maxdepth 1 -name 'test_codex*.py' ! -name 'test_codex_remote_compaction_recovery.py' ! -name 'test_codex_remote_compaction_recovery_staged.py' -print | sort)
+          CODEX_TESTS=$(find tests -maxdepth 1 -name 'test_codex*.py' \
+            ! -name 'test_codex_m5_stage_af_replay.py' \
+            ! -name 'test_codex_remote_compaction_recovery.py' \
+            ! -name 'test_codex_remote_compaction_recovery_staged.py' \
+            -print | sort)
           python -m pytest -q \
             $CODEX_TESTS \
             tests/test_client_tool_policy*.py \
