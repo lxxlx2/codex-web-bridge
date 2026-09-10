@@ -28,6 +28,9 @@ jobs:
           python -m py_compile tools/install_codex_uwa_commands.py
           python -m py_compile tools/codex_provider_switch.py
           python -m py_compile tools/codex_uwa_lifecycle.py
+          python -m py_compile tools/codex_hybrid_ledger.py
+          python -m py_compile tools/codex_remote_compaction_compat.py
+          python -m py_compile security_guard.py
           python -m py_compile start.py
           python -m py_compile main.py
           python -m py_compile app/api/standalone_routes.py
@@ -120,10 +123,12 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
           python -m pip install --disable-pip-version-check pytest
-      - name: Run broad Codex regression
+      - name: Run broad non-live Codex regression
+        shell: bash
         run: |
+          CODEX_TESTS=$(find tests -maxdepth 1 -name 'test_codex*.py' ! -name 'test_codex_remote_compaction_recovery.py' ! -name 'test_codex_remote_compaction_recovery_staged.py' -print | sort)
           python -m pytest -q \
-            tests/test_codex*.py \
+            $CODEX_TESTS \
             tests/test_client_tool_policy*.py \
             tests/test_chatgpt_web_*.py \
             tests/test_install_codex_uwa_commands.py \
