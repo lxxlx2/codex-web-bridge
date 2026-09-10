@@ -22,12 +22,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Compile standalone control tools
+      - name: Compile standalone control and service entrypoints
         run: |
           python -m py_compile tools/bootstrap_from_uwa.py
           python -m py_compile tools/install_codex_uwa_commands.py
           python -m py_compile tools/codex_provider_switch.py
           python -m py_compile tools/codex_uwa_lifecycle.py
+          python -m py_compile start.py
+          python -m py_compile main.py
+          python -m py_compile app/api/standalone_routes.py
       - name: Validate release metadata
         run: |
           test -f README.md
@@ -36,8 +39,11 @@ jobs:
           test -f NOTICE.md
           test -f SECURITY.md
           test -f .env.example
+          test -f VERSION
       - name: Validate standalone import boundary
         run: python -m unittest tests.test_standalone_api_import_boundary
+      - name: Validate standalone entrypoint boundary
+        run: python -m unittest tests.test_standalone_entrypoint
       - name: Validate extracted tree when present
         shell: bash
         run: |
