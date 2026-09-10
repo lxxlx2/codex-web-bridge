@@ -32,6 +32,7 @@ jobs:
           python -m py_compile main.py
           python -m py_compile app/api/standalone_routes.py
           python -m py_compile app/api/codex_runtime.py
+          python -m py_compile app/api/chat.py
       - name: Validate release metadata
         run: |
           test -f README.md
@@ -77,6 +78,7 @@ jobs:
       - name: Import standalone application
         run: |
           python - <<'PY'
+          import sys
           import main
           paths = {getattr(route, 'path', '') for route in main.app.routes}
           required = {'/', '/health', '/v1/models', '/v1/responses', '/v1/responses/compact'}
@@ -85,7 +87,9 @@ jobs:
           forbidden_prefixes = ('/api/config', '/api/system', '/api/browser', '/api/provider', '/v1/messages')
           leaked = sorted(path for path in paths if path.startswith(forbidden_prefixes))
           assert not leaked, f'generic UWA routes leaked into standalone app: {leaked}'
+          assert 'app.api.legacy_chat_runtime' not in sys.modules, 'legacy generic chat runtime loaded during standalone startup'
           print('STANDALONE_RUNTIME_IMPORT=PASS')
+          print('LEGACY_CHAT_STARTUP_IMPORT=NO')
           PY
       - name: Run focused standalone regression
         run: |
