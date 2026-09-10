@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 SEED_MODULES = (
+    "start",
     "main",
     "app.api.standalone_routes",
     "app.api.codex_runtime",
@@ -200,6 +201,28 @@ def _stdlib_filtered(values: Iterable[str]) -> list[str]:
     return sorted(value for value in set(values) if value and value not in stdlib)
 
 
+def _shortest_static_path(edges: dict[str, list[str]], target: str) -> list[str] | None:
+    if target in SEED_MODULES:
+        return [target]
+    queue: deque[str] = deque(SEED_MODULES)
+    previous: dict[str, str | None] = {seed: None for seed in SEED_MODULES}
+    while queue:
+        module = queue.popleft()
+        for child in edges.get(module, []):
+            if child in previous:
+                continue
+            previous[child] = module
+            if child == target:
+                path = [child]
+                current = module
+                while current is not None:
+                    path.append(current)
+                    current = previous.get(current)
+                return list(reversed(path))
+            queue.append(child)
+    return None
+
+
 def build_report() -> dict[str, object]:
     index = _module_index()
     closure, external_roots, edges = _static_closure(index)
@@ -243,7 +266,7 @@ def build_report() -> dict[str, object]:
     )
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "seed_modules": list(SEED_MODULES),
         "runtime_python_module_count": len(index),
         "static_closure_count": len(closure),
@@ -270,22 +293,10 @@ def _print_summary(report: dict[str, object]) -> None:
     print(f"STARTUP_LOADED_LOCAL_COUNT={report['startup_loaded_local_count']}")
     print(f"STATIC_UNREACHABLE_COUNT={report['static_unreachable_count']}")
     print(f"PRUNE_CANDIDATE_COUNT={report['prune_candidate_count']}")
-    print(
-        "STARTUP_FORBIDDEN_LOADED="
-        + (",".join(report["startup_forbidden_loaded"]) or "NONE")
-    )
-    print(
-        "EXPECTED_STARTUP_MISSING="
-        + (",".join(report["expected_startup_missing"]) or "NONE")
-    )
-    print(
-        "STARTUP_NON_CHATGPT_PARSERS="
-        + (",".join(report["startup_non_chatgpt_parsers"]) or "NONE")
-    )
-    print(
-        "EXTERNAL_IMPORT_ROOTS_NONSTDLIB="
-        + (",".join(report["external_import_roots_nonstdlib"]) or "NONE")
-    )
+    print("STARTUP_FORBIDDEN_LOADED=" + (",".join(report["startup_forbidden_loaded"]) or "NONE"))
+    print("EXPECTED_STARTUP_MISSING=" + (",".join(report["expected_startup_missing"]) or "NONE"))
+    print("STARTUP_NON_CHATGPT_PARSERS=" + (",".join(report["startup_non_chatgpt_parsers"]) or "NONE"))
+    print("EXTERNAL_IMPORT_ROOTS_NONSTDLIB=" + (",".join(report["external_import_roots_nonstdlib"]) or "NONE"))
     print("OBVIOUS_GENERIC_CANDIDATE_COUNT=" + str(len(report["obvious_generic_candidates"])))
     print("NON_CHATGPT_PARSER_CANDIDATE_COUNT=" + str(len(report["non_chatgpt_parser_candidates"])))
 
@@ -295,6 +306,7 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--print-candidates", action="store_true")
+    parser.add_argument("--why", action="append", default=[])
     args = parser.parse_args()
 
     try:
@@ -306,12 +318,23 @@ def main() -> int:
 
     _print_summary(report)
     if args.print_candidates:
+        for module in report["prune_candidates"]:
+            print(f"PRUNE_CANDIDATE={module}")
         for module in report["obvious_generic_candidates"]:
             print(f"GENERIC_CANDIDATE={module}")
         for module in report["non_chatgpt_parser_candidates"]:
             print(f"PARSER_CANDIDATE={module}")
         for module in report["startup_only_modules"]:
             print(f"STARTUP_ONLY_MODULE={module}")
+
+    edges = report["static_edges"]
+    for target in args.why:
+        path = _shortest_static_path(edges, target)
+        if path is None:
+            state = "STARTUP_ONLY" if target in report["startup_loaded_local"] else "UNREACHABLE"
+            print(f"WHY_{target}={state}")
+        else:
+            print(f"WHY_{target}=" + " -> ".join(path))
 
     if args.json_out is not None:
         output = args.json_out
@@ -322,11 +345,7 @@ def main() -> int:
         print(f"AUDIT_JSON_WRITTEN={output.relative_to(ROOT) if output.is_relative_to(ROOT) else output.name}")
 
     if args.check:
-        if (
-            report["startup_forbidden_loaded"]
-            or report["expected_startup_missing"]
-            or report["startup_non_chatgpt_parsers"]
-        ):
+        if report["startup_forbidden_loaded"] or report["expected_startup_missing"] or report["startup_non_chatgpt_parsers"]:
             print("STANDALONE_DEPENDENCY_AUDIT=FAIL")
             return 1
 
