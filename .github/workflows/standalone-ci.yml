@@ -30,6 +30,7 @@ jobs:
           python -m py_compile tools/codex_uwa_lifecycle.py
           python -m py_compile tools/codex_hybrid_ledger.py
           python -m py_compile tools/codex_remote_compaction_compat.py
+          python -m py_compile tools/standalone_dependency_audit.py
           python -m py_compile security_guard.py
           python -m py_compile start.py
           python -m py_compile main.py
@@ -110,6 +111,9 @@ jobs:
             tests/test_codex_chatgpt_executor_parity.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py
+      - name: Audit standalone static and startup dependency closure
+        run: |
+          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-s2-runtime-audit.json
 
   codex-regression:
     runs-on: ubuntu-latest
