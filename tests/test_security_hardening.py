@@ -142,11 +142,14 @@ def test_auto_update_needs_second_opt_in():
         )
 
 
-def test_hardened_start_delegates_upstream_helper_api():
+def test_standalone_start_enforces_loopback_launcher_boundary():
     import start
 
-    assert callable(start._build_service_env)
-    assert (
-        start._normalize_python_proxy_url("socks5://127.0.0.1:1080")
-        == "socks5h://127.0.0.1:1080"
-    )
+    assert callable(start._ensure_venv)
+    assert start._loopback_host("127.0.0.1") is True
+    assert start._loopback_host("localhost") is True
+    assert start._loopback_host("::1") is True
+    assert start._loopback_host("0.0.0.0") is False
+    assert start._loopback_host("192.168.1.8") is False
+    assert not hasattr(start, "_build_service_env")
+    assert not hasattr(start, "_normalize_python_proxy_url")
