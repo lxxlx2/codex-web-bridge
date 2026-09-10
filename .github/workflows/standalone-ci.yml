@@ -1,0 +1,47 @@
+name: Standalone CI
+
+on:
+  push:
+    branches:
+      - standalone-dev
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m py_compile tools/bootstrap_from_uwa.py
+      - name: Validate release metadata
+        run: |
+          test -f README.md
+          test -f README.zh-CN.md
+          test -f NOTICE.md
+          test -f SECURITY.md
+          test -f .env.example
+      - name: Validate extracted tree when present
+        shell: bash
+        run: |
+          if [ -f SOURCE_BASELINE ]; then
+            test -f LICENSE
+            test -f manifests/bootstrap-candidate.json
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('manifests/bootstrap-candidate.json').read_text(encoding='utf-8'))
+          assert data['source_commit'] == 'a140002e65a02a3323abcde3e1fdb8674710c996'
+          assert data['candidate_file_count'] > 0
+          print('EXTRACTED_MANIFEST=PASS')
+          PY
+          fi
