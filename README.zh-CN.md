@@ -1,6 +1,8 @@
 # Codex Web Bridge
 
-[English](README.md)
+> 主中文文档现在维护在 [README.md](README.md)。本文件保留早期 standalone 中文说明，避免历史链接失效。
+
+[English](README.en.md)
 
 Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到 ChatGPT Web，同时继续让本地工具由 Codex 客户端自身执行。
 
