@@ -113,7 +113,7 @@ def _best_local_target(name: str, index: dict[str, Path]) -> str | None:
 
 def _imports_for(module: str, path: Path, index: dict[str, Path]) -> tuple[set[str], set[str]]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     except (OSError, SyntaxError, UnicodeDecodeError) as exc:
         raise RuntimeError(f"cannot parse {path.relative_to(ROOT)}: {exc}") from exc
 
@@ -286,7 +286,7 @@ def main() -> int:
     try:
         report = build_report()
     except Exception as exc:
-        print(f"STANDALONE_DEPENDENCY_AUDIT=FAIL")
+        print("STANDALONE_DEPENDENCY_AUDIT=FAIL")
         print(f"ERROR={exc}")
         return 1
 
