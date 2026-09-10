@@ -1,22 +1,10 @@
+"""Service package for the standalone Codex Web Bridge.
+
+Runtime code imports the required service modules directly. Keep package import
+side effects empty so importing a focused Codex service cannot instantiate the
+legacy generic configuration engine or other integrated UWA services.
 """
-app/services - 业务服务层
 
-职责：
-- 请求管理
-- 配置引擎
-"""
+from __future__ import annotations
 
-from .request_manager import request_manager, RequestManager, RequestContext, RequestStatus
-from .config_engine import config_engine, ConfigEngine
-
-__all__ = [
-    # 请求管理
-    'request_manager',
-    'RequestManager',
-    'RequestContext',
-    'RequestStatus',
-    
-    # 配置引擎
-    'config_engine',
-    'ConfigEngine',
-]
+__all__: list[str] = []
