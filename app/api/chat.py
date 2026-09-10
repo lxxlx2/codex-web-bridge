@@ -1,19 +1,16 @@
 """Compatibility facade for the standalone Codex Web Bridge.
 
-The original Universal Web API chat module carried the validated ChatGPT Web
-browser worker together with a large amount of generic provider/API code. S2
-keeps that implementation in :mod:`app.api.legacy_chat_runtime` while making
-this historically imported module cheap to import.
-
-Codex protocol types and conversion/state helpers come from the standalone
-runtime. The browser worker and any legacy-only attribute are loaded only when
-actually used. This preserves compatibility during extraction without pulling
-the full generic chat graph into ``import main``.
+The standalone tree keeps this historically imported module as a narrow facade
+for Codex protocol helpers. Browser execution and Responses fallback now route
+through extracted standalone modules; the integrated generic chat runtime is no
+longer part of this facade's dependency graph.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from fastapi.responses import JSONResponse
 
 from app.api.codex_runtime import (
     ChatRequest,
@@ -28,38 +25,22 @@ from app.api.codex_runtime import (
     _store_responses_state,
     verify_auth,
 )
+from app.services.codex_chatgpt_executor import execute_chatgpt_nonstream
 
 
 async def chat_completions(*args: Any, **kwargs: Any):
-    """Lazily enter the validated legacy browser execution worker."""
+    """Run the compatibility chat call through the standalone ChatGPT executor."""
 
-    from app.api.legacy_chat_runtime import chat_completions as implementation
-
-    return await implementation(*args, **kwargs)
+    status_code, payload = await execute_chatgpt_nonstream(*args, **kwargs)
+    return JSONResponse(content=payload, status_code=status_code)
 
 
 async def create_response(*args: Any, **kwargs: Any):
-    """Compatibility fallback while the remaining generic Responses path is retired."""
+    """Serve the remaining Responses compatibility path without generic UWA routing."""
 
-    from app.api.legacy_chat_runtime import create_response as implementation
+    from app.api.standalone_responses_backing import create_response as implementation
 
     return await implementation(*args, **kwargs)
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve legacy-only symbols without making import introspection load them."""
-
-    if name.startswith("__"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from app.api import legacy_chat_runtime
-
-    try:
-        value = getattr(legacy_chat_runtime, name)
-    except AttributeError as exc:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
-    globals()[name] = value
-    return value
 
 
 __all__ = [
