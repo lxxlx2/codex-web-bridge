@@ -24,14 +24,16 @@ from app.services.codex_v2_runtime_hardening import install_codex_v2_runtime_har
 from app.services.codex_stream_compat import install_codex_stream_compat
 
 
-# Bind the execution seam before the compact/V2 modules import it by value.
-# This keeps startup and real standalone Responses execution out of the
-# preserved generic UWA chat runtime while retaining that file as a parity
-# reference during S2.
+# Bind the canonical seam first. Some compatibility patch modules imported above
+# may have already loaded compact/V2 while defining their installers, so fence
+# those module-local by-value references explicitly as well.
 codex_runtime_api._run_chat_completion_final = execute_chatgpt_nonstream
 
-from app.api.codex_compact import router as codex_compact_router
-from app.api.codex_responses_v2 import router as codex_responses_v2_router
+from app.api import codex_compact as codex_compact_api
+from app.api import codex_responses_v2 as codex_responses_v2_api
+
+codex_compact_api._run_chat_completion_final = execute_chatgpt_nonstream
+codex_responses_v2_api._run_chat_completion_final = execute_chatgpt_nonstream
 
 
 install_codex_required_tool_language_patch()
@@ -42,7 +44,7 @@ install_codex_stream_compat()
 
 router = APIRouter()
 router.include_router(codex_compat_router)
-router.include_router(codex_compact_router)
-router.include_router(codex_responses_v2_router)
+router.include_router(codex_compact_api.router)
+router.include_router(codex_responses_v2_api.router)
 
 __all__ = ["router"]
