@@ -4,7 +4,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from app.api import chat as legacy
+from app.api import legacy_chat_runtime as legacy
 from app.api import codex_runtime as runtime
 
 
