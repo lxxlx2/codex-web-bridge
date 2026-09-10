@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 import unittest
 
@@ -49,7 +50,7 @@ class StandaloneEntrypointTests(unittest.TestCase):
         self.assertIn('"id": "chatgpt"', source)
         self.assertIn("verify_service_auth", source)
 
-    def test_parser_package_eagerly_registers_only_chatgpt(self) -> None:
+    def test_parser_package_exports_only_chatgpt_runtime(self) -> None:
         source = _source("app/core/parsers/__init__.py")
         tree = ast.parse(source)
         direct_modules = {
@@ -72,7 +73,10 @@ class StandaloneEntrypointTests(unittest.TestCase):
             "grok_parser",
         }:
             self.assertNotIn(forbidden, direct_modules)
-        self.assertIn("_LAZY_EXPORTS", source)
+        self.assertNotIn("_LAZY_EXPORTS", source)
+        self.assertNotIn("importlib", source)
+        parser_config = json.loads(_source("config/parsers.json"))
+        self.assertEqual(parser_config.get("parsers"), {})
 
     def test_main_uses_standalone_routes_and_minimal_health_surface(self) -> None:
         source = _source("main.py")
