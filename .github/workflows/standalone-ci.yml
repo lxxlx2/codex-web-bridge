@@ -31,6 +31,7 @@ jobs:
           python -m py_compile start.py
           python -m py_compile main.py
           python -m py_compile app/api/standalone_routes.py
+          python -m py_compile app/api/codex_runtime.py
       - name: Validate release metadata
         run: |
           test -f README.md
@@ -90,5 +91,6 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_codex_compat.py \
+            tests/test_codex_runtime_extraction.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py
