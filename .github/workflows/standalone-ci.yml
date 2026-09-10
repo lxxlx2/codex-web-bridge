@@ -40,6 +40,7 @@ jobs:
           test -f SECURITY.md
           test -f .env.example
           test -f VERSION
+          test -f docs/RELEASE_PROCESS.md
       - name: Validate standalone import boundary
         run: python -m unittest tests.test_standalone_api_import_boundary
       - name: Validate standalone entrypoint boundary
@@ -59,3 +60,35 @@ jobs:
           print('EXTRACTED_MANIFEST=PASS')
           PY
           fi
+
+  runtime-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Import standalone application
+        run: |
+          python - <<'PY'
+          import main
+          paths = {getattr(route, 'path', '') for route in main.app.routes}
+          required = {'/', '/health', '/v1/models', '/v1/responses', '/v1/responses/compact'}
+          missing = sorted(required - paths)
+          assert not missing, f'missing standalone routes: {missing}'
+          forbidden_prefixes = ('/api/config', '/api/system', '/api/browser', '/api/provider', '/v1/messages')
+          leaked = sorted(path for path in paths if path.startswith(forbidden_prefixes))
+          assert not leaked, f'generic UWA routes leaked into standalone app: {leaked}'
+          print('STANDALONE_RUNTIME_IMPORT=PASS')
+          PY
+      - name: Run focused standalone regression
+        run: |
+          python -m pytest -q \
+            tests/test_codex_compat.py \
+            tests/test_standalone_api_import_boundary.py \
+            tests/test_standalone_entrypoint.py
