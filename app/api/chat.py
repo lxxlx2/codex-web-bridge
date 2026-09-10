@@ -1,13 +1,13 @@
 """Compatibility facade for the standalone Codex Web Bridge.
 
 The original Universal Web API chat module carried the validated ChatGPT Web
-browser worker together with a large amount of generic provider/API code.  S2
+browser worker together with a large amount of generic provider/API code. S2
 keeps that implementation in :mod:`app.api.legacy_chat_runtime` while making
 this historically imported module cheap to import.
 
 Codex protocol types and conversion/state helpers come from the standalone
-runtime.  The browser worker and any legacy-only attribute are loaded only when
-actually used.  This preserves compatibility during extraction without pulling
+runtime. The browser worker and any legacy-only attribute are loaded only when
+actually used. This preserves compatibility during extraction without pulling
 the full generic chat graph into ``import main``.
 """
 
@@ -47,7 +47,10 @@ async def create_response(*args: Any, **kwargs: Any):
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve legacy-only symbols without making them import-time dependencies."""
+    """Resolve legacy-only symbols without making import introspection load them."""
+
+    if name.startswith("__"):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     from app.api import legacy_chat_runtime
 
