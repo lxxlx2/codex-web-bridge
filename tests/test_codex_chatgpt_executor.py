@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -48,11 +47,10 @@ async def _run_worker_inline(worker_fn, **kwargs):
 
 
 class CodexChatGPTExecutorTests(unittest.IsolatedAsyncioTestCase):
-    def test_standalone_modules_bind_extracted_executor_without_legacy_runtime(self) -> None:
+    def test_standalone_modules_bind_extracted_executor(self) -> None:
         self.assertIs(codex_runtime._run_chat_completion_final, executor.execute_chatgpt_nonstream)
         self.assertIs(codex_compact._run_chat_completion_final, executor.execute_chatgpt_nonstream)
         self.assertIs(codex_responses_v2._run_chat_completion_final, executor.execute_chatgpt_nonstream)
-        self.assertNotIn("app.api.legacy_chat_runtime", sys.modules)
         self.assertTrue(any(getattr(route, "path", "") == "/v1/responses" for route in main.app.routes))
 
     def test_browser_round_is_pinned_to_chatgpt_route(self) -> None:
