@@ -559,14 +559,20 @@ def _run_remote_compaction_recovery(
     if not thread_id:
         raise GateFailure("remote_compaction_probe", "private_thread_not_captured")
 
-    recovery = large_context._run_codex_turn(
-        codex=codex,
-        root=root,
-        prompt=large_context.build_final_prompt(),
-        trace_path=private_dir / "post-compaction-recovery.jsonl",
-        thread_id=thread_id,
-        timeout_sec=timeout_sec,
-    )
+    try:
+        recovery = large_context._run_codex_turn(
+            codex=codex,
+            root=root,
+            prompt=large_context.build_final_prompt(),
+            trace_path=private_dir / "post-compaction-recovery.jsonl",
+            thread_id=thread_id,
+            timeout_sec=timeout_sec,
+        )
+    except RuntimeError as exc:
+        raise GateFailure(
+            "post_compaction_recovery",
+            "codex_turn_runtime_error",
+        ) from exc
     if recovery.returncode != 0:
         raise GateFailure("post_compaction_recovery", f"rc={recovery.returncode}")
     if not large_context._verify_thread(recovery, thread_id):
