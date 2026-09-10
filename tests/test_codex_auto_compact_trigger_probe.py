@@ -14,6 +14,11 @@ import codex_large_context_acceptance as base  # noqa: E402
 def test_thresholds_match_codex_01534_model_semantics():
     assert probe.auto_compact_limit(64_000) == 57_600
     assert probe.hard_context_limit(64_000) == 60_800
+    assert probe.trigger_target_limit(64_000, "total") == 57_600
+    assert probe.trigger_target_limit(
+        64_000,
+        "body_after_prefix",
+    ) == 60_800
 
 
 def test_active_response_tokens_are_delta_of_cli_cumulative_usage():
@@ -52,3 +57,22 @@ def test_cumulative_tokens_uses_latest_cli_usage_snapshot():
         output_tokens=[55, 113],
     )
     assert probe.cumulative_tokens(observation) == 21_343
+
+
+def test_configured_scope_reads_body_after_prefix(tmp_path: Path):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'model_auto_compact_token_limit_scope = "body_after_prefix"\n',
+        encoding="utf-8",
+    )
+
+    assert (
+        probe.configured_auto_compact_scope(config)
+        == "body_after_prefix"
+    )
+
+
+def test_configured_scope_defaults_to_total(tmp_path: Path):
+    missing = tmp_path / "missing.toml"
+
+    assert probe.configured_auto_compact_scope(missing) == "total"

@@ -21,6 +21,7 @@ import json
 import os
 import shutil
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,50 @@ def auto_compact_limit(context_window: int) -> int:
 
 def hard_context_limit(context_window: int) -> int:
     return context_window * HARD_CONTEXT_PERCENT // 100
+
+
+
+def configured_auto_compact_scope(
+    config_path: Path | None = None,
+) -> str:
+    """Read the active Codex auto-compaction scope safely."""
+
+    path = (
+        config_path.expanduser()
+        if config_path is not None
+        else Path.home() / ".codex" / "config.toml"
+    )
+
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return "total"
+
+    scope = str(
+        data.get("model_auto_compact_token_limit_scope") or "total"
+    ).strip().lower()
+
+    if scope not in {"total", "body_after_prefix"}:
+        return "total"
+
+    return scope
+
+
+def trigger_target_limit(context_window: int, scope: str) -> int:
+    """Choose a deterministic pre-turn compaction trigger target.
+
+    Total scope can use the normal 90% auto-compaction threshold.
+
+    BodyAfterPrefix subtracts a runtime prefill baseline and may also carry a
+    fallback buffer that is not represented by the CLI cumulative usage
+    snapshot. The full-context limit remains an independent Codex compaction
+    trigger, so use that boundary for deterministic live acceptance.
+    """
+
+    if scope == "body_after_prefix":
+        return hard_context_limit(context_window)
+
+    return auto_compact_limit(context_window)
 
 
 def cumulative_tokens(observation: base.ExecObservation) -> int | None:
@@ -196,6 +241,8 @@ def run(
 
     auto_limit = auto_compact_limit(context_window)
     hard_limit = hard_context_limit(context_window)
+    compact_scope = configured_auto_compact_scope()
+    trigger_limit = trigger_target_limit(context_window, compact_scope)
     if auto_limit >= hard_limit:
         print("RUN_FAIL invalid_threshold_order")
         return 1
@@ -210,6 +257,8 @@ def run(
     print(f"CONTEXT_WINDOW={context_window}")
     print(f"AUTO_COMPACT_LIMIT={auto_limit}")
     print(f"HARD_CONTEXT_LIMIT={hard_limit}")
+    print(f"AUTO_COMPACT_SCOPE={compact_scope}")
+    print(f"TRIGGER_TARGET_LIMIT={trigger_limit}")
     print(f"COARSE_BYTES={coarse_bytes}")
     print(f"FINE_BYTES={fine_bytes}")
     print(f"PRIVATE_TRACE_DIR={trace_dir}")
@@ -241,7 +290,7 @@ def run(
     round_index = 0
 
     for _ in range(max_coarse_rounds):
-        if auto_limit - active_tokens <= coarse_guard_tokens:
+        if trigger_limit - active_tokens <= coarse_guard_tokens:
             break
         round_index += 1
         expected = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
@@ -265,6 +314,7 @@ def run(
             f"ACK_EXACT={'YES' if exact else 'NO'} "
             f"ACTIVE_LAST_TOKENS={active_tokens} "
             f"MARGIN_TO_AUTO={auto_limit - active_tokens} "
+            f"MARGIN_TO_TRIGGER={trigger_limit - active_tokens} "
             f"TOOL_EFFECTS={observation.tool_effect_count}"
         )
         if not exact:
@@ -272,7 +322,7 @@ def run(
             return 1
 
     fine_rounds = 0
-    while active_tokens < auto_limit and fine_rounds < max_fine_rounds:
+    while active_tokens < trigger_limit and fine_rounds < max_fine_rounds:
         fine_rounds += 1
         round_index += 1
         expected = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
@@ -296,21 +346,25 @@ def run(
             f"ACK_EXACT={'YES' if exact else 'NO'} "
             f"ACTIVE_LAST_TOKENS={active_tokens} "
             f"MARGIN_TO_AUTO={auto_limit - active_tokens} "
+            f"MARGIN_TO_TRIGGER={trigger_limit - active_tokens} "
             f"TOOL_EFFECTS={observation.tool_effect_count}"
         )
         if not exact:
             print(f"RUN_FAIL fine_contract round={round_index}")
             return 1
 
-    threshold_crossed = active_tokens >= auto_limit
+    threshold_crossed = active_tokens >= trigger_limit
     print(f"THRESHOLD_CROSSED={'YES' if threshold_crossed else 'NO'}")
     print(f"PRE_TRIGGER_ACTIVE_TOKENS={active_tokens}")
     print(f"PRE_TRIGGER_OVER_HARD_CAP={'YES' if active_tokens >= hard_limit else 'NO'}")
     if not threshold_crossed:
         print("RUN_FAIL threshold_not_reached")
         return 1
-    if active_tokens >= hard_limit:
+    if compact_scope != "body_after_prefix" and active_tokens >= hard_limit:
         print("RUN_FAIL threshold_crossing_overshot_hard_cap")
+        return 1
+    if active_tokens >= context_window:
+        print("RUN_FAIL threshold_crossing_overshot_raw_context")
         return 1
 
     rollout = _wait_for_rollout(thread_id)
