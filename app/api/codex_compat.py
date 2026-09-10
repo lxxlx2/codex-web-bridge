@@ -1,29 +1,24 @@
-"""Codex-specific compatibility helpers.
+"""Codex-specific model-catalog compatibility for the standalone bridge.
 
-Codex 0.153+ requests ``<provider base_url>/models?client_version=...`` and
-expects its own model-catalog schema (``{"models": [...]}``) rather than the
-standard OpenAI ``{"object": "list", "data": [...]}`` shape.
-
-Keep the public OpenAI-compatible models response unchanged for every other
-client. Codex is detected by the query parameter it unconditionally appends
-to model-catalog requests.
+Codex requests ``<provider base_url>/models?client_version=...`` and expects its
+own ``{"models": [...]}`` schema rather than the standard OpenAI model-list
+shape. The standalone bridge exposes only the logical ``chatgpt`` browser route,
+so this module no longer imports the large generic ``app.api.chat`` router just
+to discover unrelated provider models.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Depends, Query
 
-from app.api.chat import list_models as list_openai_models
+from app.api.deps import verify_service_auth
 
 
 router = APIRouter()
 
 
-# The ChatGPT Web preflight now maps Codex medium/high to the corresponding
-# browser reasoning controls.  Low/ultra remain hidden until they are verified
-# end-to-end on the web UI.
 _REASONING_LEVELS = [
     {
         "effort": "medium",
@@ -35,15 +30,27 @@ _REASONING_LEVELS = [
     },
 ]
 
-# Keep the browser-bridge system prompt compact. Codex still sends tool schemas
-# and workspace context separately, so a concise instruction template avoids
-# wasting a large portion of each webpage request on generic agent boilerplate.
 _CODEX_INSTRUCTIONS = """You are the reasoning model for a coding client working in the user's local workspace.
 The browser page itself has no direct filesystem access. Declared client tools such as exec_command run on the user's machine under the client's sandbox and approval policy.
 For local workspace tasks, inspect the real workspace with the declared client tools. Do not ask the user to upload local files or run commands manually when an appropriate client tool is available.
 Use tool results as the source of truth. Never claim a file, command, edit, or test was completed unless a tool result confirms it.
 Make only changes needed for the user's request, run the most relevant checks after code changes, keep progress concise, and finish with the verified result plus any unresolved issue that matters.
 """.strip()
+
+
+def _standalone_openai_models_response() -> Dict[str, Any]:
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "chatgpt",
+                "object": "model",
+                "created": 0,
+                "owned_by": "chatgpt.com",
+                "display_name": "ChatGPT Web",
+            }
+        ],
+    }
 
 
 def _canonical_model_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -82,10 +89,8 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
         )
     else:
         display_name = raw_display_name
-        description = f"Universal Web API browser route ({owner})"
+        description = f"Codex Web Bridge browser route ({owner})"
 
-    # Conservative local-browser limits. Increase only after empirical stability
-    # tests for the specific web model/browser workflow.
     context_window = 64_000
 
     return {
@@ -94,8 +99,6 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
         "description": description,
         "default_reasoning_level": "high",
         "supported_reasoning_levels": _REASONING_LEVELS,
-        # ``shell_command`` is an accepted alias for Codex UnifiedExec. Local
-        # execution still happens inside Codex, never inside this web bridge.
         "shell_type": "shell_command",
         "visibility": "list",
         "supported_in_api": True,
@@ -136,19 +139,10 @@ def build_codex_models_response(openai_payload: Any) -> Dict[str, Any]:
 @router.get("/v1/models")
 async def codex_aware_models(
     client_version: Optional[str] = Query(default=None),
-    authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
-    anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
+    authenticated: bool = Depends(verify_service_auth),
 ):
-    # Delegate first so existing authentication and dynamic model collection
-    # remain the single source of truth.
-    payload = await list_openai_models(
-        authorization=authorization,
-        x_api_key=x_api_key,
-        anthropic_version=anthropic_version,
-    )
-
+    del authenticated
+    payload = _standalone_openai_models_response()
     if not str(client_version or "").strip():
         return payload
-
     return build_codex_models_response(payload)
