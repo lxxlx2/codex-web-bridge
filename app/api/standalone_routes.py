@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import codex_runtime as codex_runtime_api
+import app.api.codex_runtime as codex_runtime_api
 from app.api.codex_compat import router as codex_compat_router
 from app.services.codex_chatgpt_executor import execute_chatgpt_nonstream
 from app.services.codex_required_tool_language_patch import (
