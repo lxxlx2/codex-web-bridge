@@ -4,7 +4,7 @@
 
 Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让文件、Shell、编辑、测试、Git 等本地工具由 Codex 客户端自身执行。
 
-> 当前状态：standalone 版本正在 `standalone-dev` 做抽取、解耦和发布前验收。已验证的集成版本在 `lxxlx2/universal-web-api` 完成了 M1-M7 全部门槛；本仓库尚未发布正式 Release。
+> 当前状态：standalone 的 S1 依赖审计与 S2 抽取解耦已经关闭，`standalone-dev` 进入 S3 独立 CLI/Desktop/live parity 验收。已验证的集成版本在 `lxxlx2/universal-web-api` 完成了 M1-M7 全部门槛；本仓库尚未发布正式 Release。
 
 ## 快速开始
 
@@ -174,15 +174,15 @@ M1-M7 integrated release gates                  PASS / CLOSED
 ## Standalone 开发与发布进度
 
 ```text
-S1 dependency / import / runtime audit           进行中
-S2 standalone extraction 与解耦                  已开始
-S3 CI + Codex CLI / Desktop / live parity        待进行
-S4 首个 standalone Release                       待进行
+S1 dependency / import / runtime audit           PASS / CLOSED
+S2 standalone extraction 与解耦                  PASS / CLOSED
+S3 CI + Codex CLI / Desktop / live parity        CURRENT
+S4 首个 standalone Release                       PENDING
 ```
 
 开发全部在 `standalone-dev` 进行，`main` 保持发布边界。只有 standalone release candidate 完整通过安全检查、依赖审计、单元/回归测试以及真实 Codex CLI/Desktop 验收后，才会进入 `main` 和首个 Release。
 
-当前候选树刻意偏保守。S2 会逐步拆掉通用 Universal Web API 耦合，包括与 Codex 无关的 provider API、parser registry、dashboard、updater 和历史开发工具。每次删除都要求 import/runtime/test 证据证明 Codex 路径仍完整。
+S2 已完成 Codex-only entrypoint、Responses runtime seam、ChatGPT Web executor、standalone Responses fallback、通用 API/parser 启动边界收缩和审计驱动的最终 pruning。最新依赖审计只剩 `security_guard.py` 位于 runtime closure 外，该文件因 public/release safety gate 被有意保留。详细证据见 `docs/STANDALONE_S2_CLOSURE_2026-09-10.md`。
 
 ## 开发与测试流程
 
