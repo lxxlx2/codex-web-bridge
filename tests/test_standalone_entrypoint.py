@@ -49,6 +49,31 @@ class StandaloneEntrypointTests(unittest.TestCase):
         self.assertIn('"id": "chatgpt"', source)
         self.assertIn("verify_service_auth", source)
 
+    def test_parser_package_eagerly_registers_only_chatgpt(self) -> None:
+        source = _source("app/core/parsers/__init__.py")
+        tree = ast.parse(source)
+        direct_modules = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        self.assertIn("chatgpt_parser", direct_modules)
+        for forbidden in {
+            "gemini_parser",
+            "deepseek_parser",
+            "aistudio_parser",
+            "doubao_parser",
+            "claude_parser",
+            "kimi_parser",
+            "glm_parser",
+            "qwen_parser",
+            "mimo_parser",
+            "lmarena_parser",
+            "grok_parser",
+        }:
+            self.assertNotIn(forbidden, direct_modules)
+        self.assertIn("_LAZY_EXPORTS", source)
+
     def test_main_uses_standalone_routes_and_minimal_health_surface(self) -> None:
         source = _source("main.py")
         self.assertIn("from app.api.standalone_routes import router as codex_router", source)
