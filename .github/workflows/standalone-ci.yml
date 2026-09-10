@@ -113,7 +113,14 @@ jobs:
             tests/test_standalone_entrypoint.py
       - name: Audit standalone static and startup dependency closure
         run: |
-          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-s2-runtime-audit.json
+          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-s2-runtime-audit.json \
+            --why app.core.config \
+            --why app.models.schemas \
+            --why app.services.config.engine \
+            --why app.services.config.processors \
+            --why app.services.command_engine \
+            --why app.services.extractor_manager \
+            --why app.services.parser_manager
 
   codex-regression:
     runs-on: ubuntu-latest
