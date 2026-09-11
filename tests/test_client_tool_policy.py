@@ -117,6 +117,35 @@ def test_repairs_false_tool_unavailable_claim_after_successful_client_call(monke
     ) is True
 
 
+def test_repairs_live_missing_exec_command_claim_after_successful_client_call(monkeypatch):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+
+    messages = _successful_read_history()
+
+    refusal = (
+        "当前环境缺少你要求的客户端 `exec_command`，"
+        "因此无法按该验收协议完成，"
+        "也不能声称 `LARGE_CONTEXT_PASS`。"
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
 def test_does_not_override_a_genuine_failure_after_tool_history(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     messages = [
@@ -282,6 +311,48 @@ def test_roundtrip_repairs_post_tool_unavailable_claim_into_next_exec(monkeypatc
 
     assert result["mode"] == "tool_calls"
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+
+
+def test_roundtrip_repairs_live_missing_exec_command_claim_into_second_exec(monkeypatch):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TOOL_CALLING_INTERNAL_RETRY_MAX",
+        "2",
+    )
+
+    replies = iter(
+        [
+            (
+                "当前环境缺少你要求的客户端 `exec_command`，"
+                "因此无法按该验收协议完成，"
+                "也不能声称 `LARGE_CONTEXT_PASS`。"
+            ),
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf test > large_context/result.txt '
+                '&& cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_successful_read_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert (
+        result["tool_calls"][0]["function"]["name"]
+        == "exec_command"
+    )
 
 
 def test_roundtrip_fails_closed_after_repeated_false_refusals(monkeypatch):

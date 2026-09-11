@@ -91,7 +91,7 @@ _POST_TOOL_UNAVAILABLE_PATTERNS = (
     re.compile(r"\b(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)\b.{0,120}\b(?:missing|absent)\b.{0,80}\b(?:tool|tools|toolset|tool list)\b", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:没有|未|并未|未能).{0,30}(?:暴露|提供|启用|开放).{0,40}(?:exec_command|shell_command|本地执行工具|执行工具|客户端工具)"),
     re.compile(r"(?:exec_command|shell_command|本地执行工具|执行工具|客户端工具).{0,40}(?:没有|未|并未).{0,20}(?:暴露|提供|启用|开放|可用)"),
-    re.compile(r"(?:当前(?:这个)?会话|当前环境).{0,80}(?:没有|未).{0,30}(?:exec_command|本地执行工具|执行工具|客户端工具)"),
+    re.compile(r"(?:当前(?:这个)?会话|当前环境).{0,80}(?:没有|未|缺少).{0,40}(?:exec_command|shell_command|local_shell|apply_patch|write_stdin|本地执行工具|执行工具|客户端工具)"),
     re.compile(r"(?:当前|这轮|现在)?.{0,30}(?:实际)?(?:可调用|可用|提供|暴露)(?:的)?.{0,30}(?:客户端)?工具.{0,50}(?:没有|不存在|不包含|不含|找不到).{0,35}(?:名为\s*)?(?:exec_command|shell_command|本地执行工具|执行工具|客户端工具)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:当前|这轮|现在)?.{0,30}(?:实际)?(?:可调用|可用)(?:工具|工具列表|tool list).{0,60}(?:没有|不存在|不包含|不含).{0,35}(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:无法|不能).{0,40}(?:真实|实际).{0,30}(?:写入|修改|运行|测试).{0,100}(?:因为|由于).{0,80}(?:工具|exec_command).{0,50}(?:没有|未|不可用|未暴露)"),
