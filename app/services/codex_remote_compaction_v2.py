@@ -52,12 +52,60 @@ _LINEAGE_HEX_LEN = 32
 
 _COMPACTION_INSTRUCTIONS = """[Codex Remote Compaction V2]
 Create a compact replacement-history summary for a long-running coding thread.
+
+This summary is private internal continuation state for the next model turn.
+It is not a user-facing answer.
+
 Preserve facts needed to continue work correctly: user goals, explicit constraints,
 important decisions, repository/file paths, edits already made, tests and their
 results, failures and diagnoses, unresolved work, and the next intended actions.
+
+DURABLE EXACT-VALUE RULE:
+If the user explicitly asked the conversation to remember an exact value for later
+use, and an unresolved or future step may still depend on that value,
+copy the literal value verbatim into the summary. This includes opaque tokens, nonces,
+identifiers, hashes, versions, branch names, commit ids, filenames, paths, exact
+expected strings, and other values where paraphrasing would destroy correctness.
+Do not replace such a value with phrases like "the token", "the previous value",
+"the remembered identifier", or similar placeholders.
+
+A prior instruction such as "do not repeat", "do not print", "do not expose", or
+"do not ask for" an exact value governs user-facing responses. It does not authorize
+forgetting that value from this private continuation summary when later work still
+depends on it.
+
+RECURSIVE COMPACTION RULE:
+When the input already contains a "[Compacted prior context]" summary, treat durable
+exact values and unresolved active work in that summary as continuity state. Preserve
+them across another compaction until the conversation clearly completes, supersedes,
+or explicitly cancels the dependent task. Never silently discard an exact value
+merely because it originated before an earlier compaction.
+
+TOOL-CAPABILITY RULE:
+This compaction request intentionally runs with client tools hidden and tool_choice
+set to none. That is a safety property of the compaction operation itself.
+Never infer from this request that the actual Codex conversation lacks exec_command,
+shell_command, apply_patch, write_stdin, or other client tools. If the active task
+requires a named client tool after compaction, preserve that pending requirement by
+name. Preserve already completed tool actions as completed history and preserve
+remaining tool actions as unresolved next steps.
+
+TOOL-RESULT RULE:
+A successful tool call and its successful result remain facts after compaction.
+Do not later claim the tool was unavailable merely because the compaction backing
+request itself exposed no tools.
+
 Explicitly distinguish completed historical requests from the current active goal.
 Never present a completed old user request as a current actionable instruction; only
 unresolved work and the current next actions may remain actionable.
+
+Before returning the summary, verify internally that:
+1. every exact value needed by unresolved work is still present verbatim;
+2. the active goal and next unfinished step are present;
+3. completed tool actions are not turned back into pending actions;
+4. hidden tools on this compaction request have not been interpreted as unavailable
+   tools in the underlying Codex conversation.
+
 Do not invent facts. Do not call tools. Do not output function calls. Do not add
 ceremonial prose. Return only the concise continuation summary for the next model
 turn. Prefer durable facts over transient chatter or verbose command output.

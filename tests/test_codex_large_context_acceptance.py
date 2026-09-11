@@ -67,6 +67,9 @@ def test_prompts_keep_token_conversation_only_until_final_tool_write():
     assert RESULT_RELATIVE.as_posix() in final
     assert WORKSPACE_VALIDATION_COMMAND in final
     assert "不能只执行 pwd" in final
+    assert "自动 compaction" in final
+    assert "不得随后声称当前会话没有 exec_command" in final
+    assert "精确合成令牌仍是当前未完成任务所必需的连续性状态" in final
     assert "LARGE_CONTEXT_PASS" in final
 
 

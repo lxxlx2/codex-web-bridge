@@ -189,6 +189,53 @@ def test_build_backing_body_strips_trigger_tools_and_previous_state():
     )
     assert "Do not call tools" in backing.instructions
     assert "Preserve the active project constraints." in backing.instructions
+    assert "DURABLE EXACT-VALUE RULE" in backing.instructions
+    assert "RECURSIVE COMPACTION RULE" in backing.instructions
+    assert "TOOL-CAPABILITY RULE" in backing.instructions
+
+
+def test_compaction_instructions_preserve_durable_exact_values_and_tool_capability():
+    instructions = remote._COMPACTION_INSTRUCTIONS
+
+    assert (
+        "DURABLE EXACT-VALUE RULE"
+        in instructions
+    )
+
+    assert (
+        "copy the literal value verbatim"
+        in instructions
+    )
+
+    assert (
+        "RECURSIVE COMPACTION RULE"
+        in instructions
+    )
+
+    assert (
+        "TOOL-CAPABILITY RULE"
+        in instructions
+    )
+
+    assert (
+        "intentionally runs with client tools hidden"
+        in instructions
+    )
+
+    assert (
+        "Never infer from this request that the actual Codex conversation lacks exec_command"
+        in instructions
+    )
+
+    assert (
+        "TOOL-RESULT RULE"
+        in instructions
+    )
+
+    assert (
+        "successful tool call"
+        in instructions
+    )
 
 
 def test_extract_backing_summary_rejects_tool_call():
