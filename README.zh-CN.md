@@ -1,88 +1,126 @@
 # Codex Web Bridge
 
-> 主中文文档现在维护在 [README.md](README.md)。本文件保留早期 standalone 中文说明，避免历史链接失效。
+[中文](README.md) · [English](README.en.md) · [ไทย](README.th.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-[English](README.en.md)
+> 主中文文档维护在 [README.md](README.md)。本文件保留简体中文入口，并同步当前 standalone 状态。
 
-Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到 ChatGPT Web，同时继续让本地工具由 Codex 客户端自身执行。
+Codex Web Bridge 是一个非官方本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让工作区访问、Shell、编辑、测试、Git、sandbox 和审批由 Codex 客户端自身负责。
 
-> 当前状态：`standalone-dev` 正在进行独立仓库抽取和发布前收口。集成版本已经在 `lxxlx2/universal-web-api` 完成 M1-M7 全部发布门槛；这个仓库用于形成更干净的 standalone 版本，目前还没有打正式 Release 标签。
+## 当前状态
+
+```text
+S1 依赖 / import / runtime 审计              PASS / CLOSED
+S2 standalone 抽取与解耦                    PASS / CLOSED
+S3 CI + Codex CLI / Desktop / live parity    CURRENT
+S4 首个 standalone Release                  PENDING
+```
+
+S3 已经在真实链路中证明：
+
+```text
+本地 safety / dependency gates               PASS
+UWA route = uwa / chatgpt / high             PASS
+真实 exec_command 往返                       PASS
+UWA restart 后 same-thread continuity        PASS
+native auto-compaction                       PASS
+Remote V2 compaction                         PASS
+compaction lineage 下 required-tool 连续性   PASS
+request-manager cleanup / healthy listener   PASS
+```
+
+当前尚未关闭的是 post-compaction full recovery。最新一次恢复轮中，Codex 确实发出了真实客户端 `exec_command`，但只执行了：
+
+```text
+/bin/zsh -lc pwd
+```
+
+工作目录正确位于 `~/uwa-codex-acceptance`，而且验收 marker 与 `large_context` 目录都真实存在。模型没有继续执行同一条 required-tool 指令中要求的完整 marker / 目录检查，因此返回 `ACCEPTANCE_WORKSPACE_MISMATCH`。S3 仍按 fail-closed 原则保持未关闭状态。
+
+## 快速开始
+
+```bash
+git clone https://github.com/lxxlx2/codex-web-bridge.git
+cd codex-web-bridge
+git switch standalone-dev
+python3 tools/install_codex_uwa_commands.py
+export PATH="$HOME/bin:$PATH"
+```
+
+常用命令：
+
+```bash
+codex-uwa
+codex-uwa-status
+codex-uwa-stop
+codex-official
+```
+
+默认本地接口：
+
+```text
+http://127.0.0.1:8199
+```
 
 ## 架构
 
 ```text
 Codex Desktop / CLI
-  负责本地工作区、Shell、编辑、测试、Git、sandbox 和审批
+  工作区、Shell、编辑、测试、Git、sandbox、审批
         |
         v
 Codex Web Bridge
-  负责 Responses 兼容、路由、连续性、compaction 和浏览器传输
+  Responses 兼容、路由、连续性、compaction、浏览器传输
         |
         v
 已登录的 ChatGPT Web 会话
 ```
 
-浏览器页面不会直接获得本地文件系统权限。本地 `exec_command` 等工具仍由 Codex 客户端按照自己的 sandbox 和 approval policy 执行。
+浏览器不会直接获得本地文件系统权限。真实本地工具仍以 Responses `function_call` 形式返回给 Codex 客户端执行，再由客户端把 `function_call_output` 送回当前 turn。
 
-## 已验证的集成基线
-
-第一版 standalone 抽取固定基于：
+当前受控路由：
 
 ```text
-lxxlx2/universal-web-api@a140002e65a02a3323abcde3e1fdb8674710c996
+provider = uwa
+model = chatgpt
+reasoning effort = high
 ```
 
-该集成基线已经完成协议和 CLI 验收、真实本地工具往返、同线程和重启连续性、native/remote compaction、Desktop 验收、流取消清理、最终回归、公开仓库安全检查以及 merge-to-main 门槛。
+## 连续性与 compaction
 
-## Standalone 发布路线
+项目覆盖 `previous_response_id`、call-id continuity、Web conversation affinity、private continuity state、native auto-compaction 和 Remote V2 compaction。
+
+Remote V2 compaction envelope 带有内部 lineage。required-tool completion 只有在能够证明属于同一个 compaction lineage 和同一用户轮次时才会复用，从而避免压缩历史后重复执行已经完成的本地工具，也避免不同 thread 之间相互污染。
+
+## 发布边界
+
+开发在 `standalone-dev` 进行，`main` 保持发布边界。计划中的第一个候选版本是：
 
 ```text
-S1 依赖/import/runtime 审计          进行中
-S2 独立抽取和解耦                    下一阶段
-S3 CI + CLI/Desktop/live 等价验收     待进行
-S4 首个 standalone Release           待进行
+v0.1.0-rc.1
 ```
 
-开发全部在 `standalone-dev` 进行。默认 `main` 继续作为发布边界，只有 standalone release candidate 通过完整验收后才会合并。
+只有当 S3 完整输出 `STANDALONE_S3=PASS_LIVE_CLOSED`，并继续通过 release artifact、安全、依赖和 provenance 检查后，才会进入正式 `v0.1.0`。
 
-## 生成保守的 S2 候选树
-
-仓库提供了一个受保护的抽取脚本。它从已经验证的源基线计算 Codex bridge 入口的本地 Python import closure，同时加入已知 import-time side effect、发布验收测试和必要配置候选，然后记录源 commit 和复制文件 manifest。
-
-```bash
-python3 tools/bootstrap_from_uwa.py --commit --push
-```
-
-首次生成的树会刻意偏大。S2 会继续把通用 Universal Web API 耦合拆掉，只有在测试能证明更小的树仍保持功能正确时才删除代码。
-
-## 计划保留的能力
-
-最终 standalone release candidate 预计保留 Codex Responses bridge、ChatGPT Web 传输、Web 模型/推理强度校验、本地工具协议、continuation persistence、Web conversation affinity、remote compaction、stream compatibility、provider switching/lifecycle helper、发布验收，以及这些能力真正需要的最小 browser/config runtime。
-
-通用 provider API、dashboard、无关 parser/provider registry、updater surface 和历史 milestone 工具会在 standalone parity 证明无依赖后逐步移除。
-
-## 安全默认值
-
-发布目标继续保持保守默认值：
+## 安全与隐私
 
 ```text
 API bind       127.0.0.1
 远程访问        默认关闭
 CORS           默认关闭
 unsafe Python  关闭
-私有状态        ~/.uwa
+private state  ~/.uwa
 ```
 
-禁止提交账号凭据、cookies、浏览器 profile、私人 prompt、command/tool body、private Responses persistence、原始 browser/session identifier 或完整 wire trace。
+不要提交凭据、cookies、浏览器 profile、私人 prompt、command/tool body、private Responses persistence、原始 browser/session identifier 或完整 wire trace。
 
 安全策略见 [SECURITY.md](SECURITY.md)。
 
-## License 和来源说明
+## License 与来源
 
-这个 standalone 项目经由已验证的 `lxxlx2/universal-web-api` 集成版本，派生自 `lumingya/universal-web-api`。继承的 upstream 代码继续遵守 GNU Affero General Public License v3.0 及适用的版权声明。
+本项目经由已验证的 `lxxlx2/universal-web-api` 集成版本，派生自 [lumingya/universal-web-api](https://github.com/lumingya/universal-web-api)。继承的 upstream 代码继续遵守 GNU Affero General Public License v3.0 以及适用的版权声明。
 
-详细 provenance 见 [NOTICE.md](NOTICE.md)。完整 AGPL-3.0 文本会在 bootstrap 时从验证基线复制进仓库，并且必须保留在 release candidate 中。
+详细来源见 [NOTICE.md](NOTICE.md)，完整许可证见 [LICENSE](LICENSE)。
 
 ## 非官方项目声明
 
-这是一个独立的互操作性和工程验证项目，不是 OpenAI、ChatGPT 或 Codex 官方产品，也不代表合作、授权或背书。项目不会修改第三方账号权益、订阅限制、配额或模型可用性。使用者需要自行遵守相关软件、网站、服务条款和适用法律。
+Codex Web Bridge 是独立的互操作性、学习和工程验证项目，不是 OpenAI、ChatGPT 或 Codex 官方产品，也不代表存在合作、授权、认可或背书关系。项目不会修改或绕过第三方账号权益、订阅限制、配额、模型权限或平台安全控制。
