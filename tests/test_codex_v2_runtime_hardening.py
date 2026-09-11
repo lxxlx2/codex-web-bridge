@@ -7,9 +7,12 @@ from app.services.codex_v2_runtime_hardening import (
     _completed_function_call_names,
     _degraded_reuse_state_body,
     _failure_events,
+    _function_call_names_by_id_from_sse,
     _function_call_output_ids,
     _remember_call_response,
+    _remember_call_tools,
     _resolve_call_response,
+    _resolve_call_tool,
     _response_and_call_ids_from_sse,
     _tool_result_delta_body,
 )
@@ -153,6 +156,33 @@ def test_call_id_to_response_mapping_is_process_local_and_recoverable():
     _remember_call_response(["call_pwd_123"], "resp_tool_call")
     assert _resolve_call_response(["call_pwd_123"]) == "resp_tool_call"
     assert _resolve_call_response(["missing_call"]) == ""
+
+
+def test_call_id_to_tool_name_mapping_is_process_local_and_recoverable():
+    with hardening._CALL_RESPONSE_LOCK:
+        hardening._CALL_TOOL_NAMES.clear()
+
+    _remember_call_tools(
+        {
+            "call_exec_real": "exec_command",
+            "call_other_real": "write_stdin",
+        }
+    )
+
+    assert _resolve_call_tool("call_exec_real") == "exec_command"
+    assert _resolve_call_tool("call_other_real") == "write_stdin"
+    assert _resolve_call_tool("missing_call") == ""
+
+
+def test_sse_parser_recovers_function_tool_names_by_call_id():
+    chunks = [
+        "event: response.output_item.done\n"
+        'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_pwd_name","name":"exec_command","arguments":"{}"}}\n\n',
+    ]
+
+    assert _function_call_names_by_id_from_sse(chunks) == {
+        "call_pwd_name": "exec_command"
+    }
 
 
 def test_sse_parser_recovers_response_and_function_call_ids():

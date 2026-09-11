@@ -36,6 +36,7 @@ logger = get_logger("CODEX_V2_RUNTIME")
 _INSTALLED = False
 _CALL_RESPONSE_LOCK = threading.RLock()
 _CALL_RESPONSE_IDS: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
+_CALL_TOOL_NAMES: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
 _CALL_RESPONSE_TTL_SEC = 7200.0
 _CALL_RESPONSE_MAX = 4096
 
@@ -196,6 +197,93 @@ def _remember_call_response(call_ids: List[str], response_id: str) -> None:
         _prune_call_response_ids_locked(now)
 
 
+def _remember_call_tools(call_names: Dict[str, str]) -> None:
+    """Remember only tool identities that UWA actually emitted to Codex."""
+
+    safe = {
+        str(call_id or "").strip(): str(name or "").strip()
+        for call_id, name in (call_names or {}).items()
+        if str(call_id or "").strip() and str(name or "").strip()
+    }
+    if not safe:
+        return
+
+    now = time.time()
+
+    with _CALL_RESPONSE_LOCK:
+        cutoff = now - _CALL_RESPONSE_TTL_SEC
+
+        expired = [
+            key
+            for key, value in _CALL_TOOL_NAMES.items()
+            if value[0] < cutoff
+        ]
+        for key in expired:
+            _CALL_TOOL_NAMES.pop(key, None)
+
+        for call_id, name in safe.items():
+            existing = _CALL_TOOL_NAMES.get(call_id)
+
+            if existing is None:
+                _CALL_TOOL_NAMES[call_id] = (now, name)
+            else:
+                existing_name = str(existing[1] or "").strip()
+
+                if not existing_name:
+                    _CALL_TOOL_NAMES[call_id] = (now, "")
+                elif existing_name == name:
+                    _CALL_TOOL_NAMES[call_id] = (now, name)
+                else:
+                    _CALL_TOOL_NAMES[call_id] = (now, "")
+                    logger.warning(
+                        "[CODEX_V2_RUNTIME] fenced conflicting call_id tool identity; "
+                        "required-tool completion proof disabled for this call id"
+                    )
+
+            _CALL_TOOL_NAMES.move_to_end(call_id)
+
+        while len(_CALL_TOOL_NAMES) > _CALL_RESPONSE_MAX:
+            _CALL_TOOL_NAMES.popitem(last=False)
+
+
+def _resolve_call_tool(call_id: str) -> str:
+    key = str(call_id or "").strip()
+    if not key:
+        return ""
+
+    with _CALL_RESPONSE_LOCK:
+        now = time.time()
+        cutoff = now - _CALL_RESPONSE_TTL_SEC
+
+        value = _CALL_TOOL_NAMES.get(key)
+        if value is None:
+            return ""
+
+        if value[0] < cutoff:
+            _CALL_TOOL_NAMES.pop(key, None)
+            return ""
+
+        _CALL_TOOL_NAMES.move_to_end(key)
+        return str(value[1] or "").strip()
+
+
+def _remembered_completed_function_call_names(source: Any) -> Set[str]:
+    """Recover completed tool names when replay omits the original call item.
+
+    A function_call_output is trusted here only when its call_id was previously
+    observed in an actual function_call emitted by this UWA process.
+    """
+
+    names: Set[str] = set()
+
+    for call_id in _function_call_output_ids(source):
+        name = _resolve_call_tool(call_id)
+        if name:
+            names.add(name)
+
+    return names
+
+
 def _resolve_call_response(call_ids: List[str]) -> str:
     keys = [str(call_id or "").strip() for call_id in call_ids if str(call_id or "").strip()]
     with _CALL_RESPONSE_LOCK:
@@ -235,6 +323,52 @@ def _response_and_call_ids_from_sse(chunks: List[str]) -> Tuple[str, List[str]]:
             if call_id and call_id not in call_ids:
                 call_ids.append(call_id)
     return response_id, call_ids
+
+
+def _function_call_names_by_id_from_sse(
+    chunks: List[str],
+) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+
+    for block in "".join(chunks).replace("\r\n", "\n").split("\n\n"):
+        data_lines = [
+            line[5:].lstrip()
+            for line in block.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+
+        try:
+            payload = json.loads("\n".join(data_lines))
+        except Exception:
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            continue
+
+        if _item_type(item) != "function_call":
+            continue
+
+        call_id = _item_call_id(item)
+        name = _item_function_name(item)
+
+        if call_id and name:
+            previous = result.get(call_id)
+            if previous is None:
+                result[call_id] = name
+            elif previous != name:
+                result[call_id] = ""
+
+    return {
+        call_id: name
+        for call_id, name in result.items()
+        if name
+    }
 
 
 def _failure_events(
@@ -336,12 +470,27 @@ def install_codex_v2_runtime_hardening() -> None:
             if explicit_choice and explicit_choice in declared:
                 return required
 
-            if required in _completed_function_call_names(body.input):
+            completed_names = _completed_function_call_names(body.input)
+
+            if required in completed_names:
                 logger.info(
                     "[CODEX_V2_RUNTIME] required client tool already has a matching "
                     "function_call_output in the latest user turn; suppressing duplicate enforcement"
                 )
                 return ""
+
+            remembered_names = _remembered_completed_function_call_names(
+                body.input
+            )
+
+            if required in remembered_names:
+                logger.info(
+                    "[CODEX_V2_RUNTIME] required client tool output matched a "
+                    "previously emitted real function_call by call_id; "
+                    "suppressing duplicate enforcement"
+                )
+                return ""
+
             return required
 
         setattr(_required_tool_once, "_uwa_codex_v2_guarded", True)
@@ -444,11 +593,20 @@ def install_codex_v2_runtime_hardening() -> None:
                 return
 
             response_id, call_ids = _response_and_call_ids_from_sse(buffered)
+            call_names = _function_call_names_by_id_from_sse(buffered)
+
             if response_id and call_ids:
                 _remember_call_response(call_ids, response_id)
                 logger.info(
                     "[CODEX_V2_RUNTIME] remembered function call ids for same-web-conversation "
                     "tool-result continuation"
+                )
+
+            if call_names:
+                _remember_call_tools(call_names)
+                logger.info(
+                    "[CODEX_V2_RUNTIME] remembered emitted function tool identities "
+                    "for required-tool continuation proof"
                 )
 
             for text in buffered:

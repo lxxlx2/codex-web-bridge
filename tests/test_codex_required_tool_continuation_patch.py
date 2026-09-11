@@ -4,7 +4,11 @@ from app.services.codex_required_tool_language_patch import (
     install_codex_required_tool_language_patch,
 )
 from app.services.codex_v2_runtime_hardening import (
+    _CALL_RESPONSE_LOCK,
+    _CALL_RESPONSE_IDS,
+    _CALL_TOOL_NAMES,
     _completed_function_call_names,
+    _remember_call_tools,
     install_codex_v2_runtime_hardening,
 )
 
@@ -125,6 +129,54 @@ def test_mismatched_call_id_does_not_satisfy_requirement():
         _user(_recovery_text()),
         _call("exec_command", "call_a"),
         _output("call_b"),
+    ])
+
+    assert _completed_function_call_names(body.input) == set()
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def _clear_runtime_call_memory():
+    with _CALL_RESPONSE_LOCK:
+        _CALL_RESPONSE_IDS.clear()
+        _CALL_TOOL_NAMES.clear()
+
+
+def test_remembered_real_exec_call_satisfies_output_only_continuation():
+    _clear_runtime_call_memory()
+    _remember_call_tools(
+        {"call_remembered_exec": "exec_command"}
+    )
+
+    body = _body([
+        _user(_recovery_text()),
+        _output("call_remembered_exec"),
+    ])
+
+    assert _completed_function_call_names(body.input) == set()
+    assert v2.required_declared_tool(body) == ""
+
+
+def test_unremembered_output_only_continuation_keeps_requirement():
+    _clear_runtime_call_memory()
+
+    body = _body([
+        _user(_recovery_text()),
+        _output("call_unknown_exec"),
+    ])
+
+    assert _completed_function_call_names(body.input) == set()
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def test_remembered_different_tool_cannot_satisfy_exec_requirement():
+    _clear_runtime_call_memory()
+    _remember_call_tools(
+        {"call_remembered_other": "write_stdin"}
+    )
+
+    body = _body([
+        _user(_recovery_text()),
+        _output("call_remembered_other"),
     ])
 
     assert _completed_function_call_names(body.input) == set()
