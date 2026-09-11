@@ -87,6 +87,42 @@ def test_retry_forces_declared_tool_as_incremental_chained_turn_without_mutating
     assert "omit `workdir`" in repair_text
 
 
+def test_retry_preserves_compound_user_command_semantics():
+    command = (
+        "pwd && test -f .uwa_codex_acceptance "
+        "&& test -d large_context"
+    )
+
+    body = _body(
+        "必须通过客户端 exec_command 在当前工作区执行 "
+        + command
+        + "。不得拆分。"
+    )
+
+    retry = _clone_for_required_tool_retry(
+        body,
+        "exec_command",
+        attempt=2,
+        previous_response_id="resp_compound",
+    )
+
+    repair_text = retry.input[0]["content"]
+
+    assert command in repair_text
+    assert (
+        "Do not weaken, shorten, split, substitute"
+        in repair_text
+    )
+    assert (
+        "partial probe such as `pwd` alone"
+        in repair_text
+    )
+    assert (
+        "<original_user_request>"
+        in repair_text
+    )
+
+
 def test_required_tool_exhaustion_returns_structured_responses_failure():
     body = _body("必须使用 exec_command 执行 pwd。")
     frames = _required_tool_failed_events(body, "exec_command")

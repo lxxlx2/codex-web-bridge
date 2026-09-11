@@ -44,6 +44,9 @@ DEFAULT_FILLER_BYTES = 20_000
 DEFAULT_MAX_ROUNDS = 24
 DEFAULT_POST_COMPACT_ROUNDS = 1
 DEFAULT_TIMEOUT_SEC = 900
+WORKSPACE_VALIDATION_COMMAND = (
+    f"pwd && test -f {MARKER} && test -d {SCENARIO}"
+)
 
 
 @dataclass
@@ -171,15 +174,25 @@ def build_filler_prompt(round_index: int, target_bytes: int) -> str:
 def build_final_prompt() -> str:
     prompt = (
         "这是同一个 P1.2 Codex 对话的最终恢复轮。不要向我询问第一轮的合成令牌，"
-        "也不要从本机 Codex session/history、~/.codex、~/.uwa、日志、SQLite、PROMPTS.md 或其他文件中搜索令牌。"
-        f"第一步必须通过客户端 exec_command 在当前工作区执行 pwd && test -f {MARKER} && test -d {SCENARIO}。"
-        "如果工作区校验失败，只回复 ACCEPTANCE_WORKSPACE_MISMATCH。"
-        f"校验成功后，只使用你从第一轮对话上下文保留的合成令牌，创建 {RESULT_RELATIVE.as_posix()}，"
-        "文件必须精确包含该令牌和一个换行。然后实际读取该文件确认内容。"
-        "不要读取任何其他可能保存会话或提示历史的路径。完成后只回复 LARGE_CONTEXT_PASS。"
+        "也不要从本机 Codex session/history、~/.codex、~/.uwa、日志、SQLite、"
+        "PROMPTS.md 或其他文件中搜索令牌。"
+        "第一步必须单独调用一次客户端 exec_command。"
+        f"这个调用的 cmd 参数必须完整执行 `{WORKSPACE_VALIDATION_COMMAND}`。"
+        "不得把这条命令拆开、缩短、替换，也不能只执行 pwd。"
+        "只有这条完整命令退出码非 0 时，才只回复 ACCEPTANCE_WORKSPACE_MISMATCH。"
+        "如果完整命令退出码为 0，就表示工作区校验成功，必须继续后续恢复流程。"
+        f"校验成功后，只使用你从第一轮对话上下文保留的合成令牌，创建 "
+        f"{RESULT_RELATIVE.as_posix()}，文件必须精确包含该令牌和一个换行。"
+        "随后必须再次通过客户端 exec_command 实际读取该文件并确认内容。"
+        "不要读取任何其他可能保存会话或提示历史的路径。"
+        "完成全部步骤后只回复 LARGE_CONTEXT_PASS。"
     )
+
     if TOKEN in prompt:
-        raise AssertionError("final prompt must not repeat the token")
+        raise AssertionError(
+            "final prompt must not repeat the token"
+        )
+
     return prompt
 
 
@@ -342,6 +355,29 @@ def _final_commands_safe(commands: Iterable[str]) -> bool:
         "rg ",
     )
     return all(not any(term in command for term in forbidden) for command in commands)
+
+
+def _workspace_validation_observed(
+    commands: Iterable[str],
+) -> bool:
+    required_fragments = (
+        "pwd",
+        f"test -f {MARKER}",
+        f"test -d {SCENARIO}",
+    )
+
+    for command in commands:
+        value = str(
+            command or ""
+        )
+
+        if all(
+            fragment in value
+            for fragment in required_fragments
+        ):
+            return True
+
+    return False
 
 
 def _new_trace_dir() -> Path:

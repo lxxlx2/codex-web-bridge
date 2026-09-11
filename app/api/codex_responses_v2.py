@@ -209,21 +209,65 @@ def _clone_for_required_tool_retry(
     *,
     previous_response_id: str,
 ) -> ResponsesRequest:
-    """Build an incremental repair turn that stays in the same web conversation."""
+    """Build an incremental repair turn that preserves the exact user action."""
 
     cloned = _model_copy(body)
+
+    original_request = _latest_user_text(
+        body.input
+    ).strip()
+
+    max_context_chars = 12000
+    if len(original_request) > max_context_chars:
+        half = max_context_chars // 2
+        original_request = (
+            original_request[:half]
+            + "\n...[middle omitted for bounded repair context]...\n"
+            + original_request[-half:]
+        )
+
     repair = (
         "[Codex V2 Required Tool Contract]\n"
-        f"The previous answer did not emit the required real client function `{required_tool}`. "
+        f"The previous answer did not emit the required real client function "
+        f"`{required_tool}`. "
         "Do not simulate command output and do not claim the declared tool is unavailable. "
-        f"Emit an actual `{required_tool}` function call using the declared schema, then wait for "
-        "the client tool result. For exec-like tools omit `workdir` unless the user explicitly "
-        f"requested another working directory. Repair attempt: {attempt}."
+        "The exact action requested by the user remains authoritative. "
+        "Do not weaken, shorten, split, substitute, or partially probe that action. "
+        "For exec-like tools, when the user specified a compound shell command, "
+        "send the complete compound command in one real function call. "
+        "A partial probe such as `pwd` alone does not satisfy a compound validation request. "
+        f"Emit an actual `{required_tool}` function call using the declared schema, then wait "
+        "for the client tool result. For exec-like tools omit `workdir` unless the user "
+        f"explicitly requested another working directory. Repair attempt: {attempt}."
     )
+
+    if original_request:
+        repair += (
+            "\n\nThe original user request for this repair is reproduced below. "
+            "Follow its tool action exactly; this is not a new independent task.\n"
+            "<original_user_request>\n"
+            + original_request
+            + "\n</original_user_request>"
+        )
+
     cloned.instructions = None
-    cloned.previous_response_id = str(previous_response_id or "").strip() or None
-    cloned.input = [{"role": "user", "content": repair}]
-    cloned.tool_choice = {"type": "function", "name": required_tool}
+    cloned.previous_response_id = (
+        str(
+            previous_response_id or ""
+        ).strip()
+        or None
+    )
+    cloned.input = [
+        {
+            "role": "user",
+            "content": repair,
+        }
+    ]
+    cloned.tool_choice = {
+        "type": "function",
+        "name": required_tool,
+    }
+
     return cloned
 
 

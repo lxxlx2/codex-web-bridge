@@ -7,8 +7,10 @@ from tools.codex_large_context_acceptance import (
     EVIDENCE_RELATIVE,
     RESULT_RELATIVE,
     TOKEN,
+    WORKSPACE_VALIDATION_COMMAND,
     _final_commands_safe,
     _workspace_contains_token,
+    _workspace_validation_observed,
     build_filler_prompt,
     build_final_prompt,
     build_seed_prompt,
@@ -63,6 +65,8 @@ def test_prompts_keep_token_conversation_only_until_final_tool_write():
     assert "~/.codex" in final
     assert "~/.uwa" in final
     assert RESULT_RELATIVE.as_posix() in final
+    assert WORKSPACE_VALIDATION_COMMAND in final
+    assert "不能只执行 pwd" in final
     assert "LARGE_CONTEXT_PASS" in final
 
 
@@ -178,6 +182,30 @@ def test_final_command_safety_rejects_session_history_searches():
     )
     assert not _final_commands_safe(["rg ORBIT ~/.codex/sessions"])
     assert not _final_commands_safe(["grep -R token ~/.uwa/"])
+
+
+def test_workspace_validation_requires_all_checks_in_one_command():
+    assert _workspace_validation_observed(
+        [
+            "/bin/zsh -lc 'pwd && "
+            "test -f .uwa_codex_acceptance && "
+            "test -d large_context'"
+        ]
+    )
+
+    assert not _workspace_validation_observed(
+        ["/bin/zsh -lc pwd"]
+    )
+
+    assert not _workspace_validation_observed(
+        [
+            "/bin/zsh -lc pwd",
+            "/bin/zsh -lc "
+            "'test -f .uwa_codex_acceptance'",
+            "/bin/zsh -lc "
+            "'test -d large_context'",
+        ]
+    )
 
 
 def test_checker_requires_real_compaction_success_evidence(tmp_path: Path, capsys):

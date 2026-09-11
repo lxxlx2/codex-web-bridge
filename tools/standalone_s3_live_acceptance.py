@@ -576,9 +576,22 @@ def _run_remote_compaction_recovery(
     if recovery.returncode != 0:
         raise GateFailure("post_compaction_recovery", f"rc={recovery.returncode}")
     if not large_context._verify_thread(recovery, thread_id):
-        raise GateFailure("post_compaction_recovery", "thread_identity_mismatch")
+        raise GateFailure(
+            "post_compaction_recovery",
+            "thread_identity_mismatch",
+        )
+    if not large_context._workspace_validation_observed(
+        recovery.commands
+    ):
+        raise GateFailure(
+            "post_compaction_recovery",
+            "workspace_validation_command_missing",
+        )
     if recovery.final_message != "LARGE_CONTEXT_PASS":
-        raise GateFailure("post_compaction_recovery", "final_reply_mismatch")
+        raise GateFailure(
+            "post_compaction_recovery",
+            "final_reply_mismatch",
+        )
     if recovery.tool_effect_count < 1 or not recovery.commands:
         raise GateFailure("post_compaction_recovery", "real_client_tool_missing")
     if not large_context._final_commands_safe(recovery.commands):
