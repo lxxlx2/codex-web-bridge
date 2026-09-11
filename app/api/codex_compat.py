@@ -92,9 +92,11 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
         description = f"Codex Web Bridge browser route ({owner})"
 
     # Codex 0.153.4 Remote Compaction V2 can retain up to 64k tokens of
-    # eligible history after compaction. Keep enough catalog headroom so the
-    # installed compacted history falls below the next auto-compaction gate.
-    context_window = 96_000
+    # eligible history after compaction. Use a moderate advertised window so
+    # retained history stays below the next auto-compaction gate while
+    # full-history browser replay remains inside the validated long-context
+    # operating range.
+    context_window = 78_000
 
     return {
         "slug": model_id,
@@ -115,7 +117,7 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
         "support_verbosity": False,
         "default_verbosity": None,
         "apply_patch_tool_type": None,
-        "truncation_policy": {"mode": "tokens", "limit": 86_400},
+        "truncation_policy": {"mode": "tokens", "limit": 70_200},
         "supports_image_detail_original": False,
         "context_window": context_window,
         "max_context_window": context_window,

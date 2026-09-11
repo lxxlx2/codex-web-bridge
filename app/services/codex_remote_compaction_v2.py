@@ -45,6 +45,7 @@ _ENVELOPE_KIND = "uwa_codex_compaction"
 _ENVELOPE_VERSION = 1
 _MAX_SUMMARY_BYTES = 64 * 1024
 _MAX_ENVELOPE_BYTES = 96 * 1024
+_MAX_COMPACTION_OUTPUT_TOKENS = 1024
 _BYTES_PER_TOKEN = 3
 
 _COMPACTION_INSTRUCTIONS = """[Codex Remote Compaction V2]
@@ -247,7 +248,7 @@ def build_compaction_backing_body(body: ResponsesRequest) -> ResponsesRequest:
     cloned.parallel_tool_calls = False
     cloned.stream = False
     cloned.store = False
-    cloned.max_output_tokens = 12000
+    cloned.max_output_tokens = _MAX_COMPACTION_OUTPUT_TOKENS
     return cloned
 
 

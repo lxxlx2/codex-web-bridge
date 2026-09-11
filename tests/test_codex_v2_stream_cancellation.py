@@ -37,7 +37,11 @@ class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
                 mod,
                 "_build_responses_object",
                 lambda *args, **kwargs: {
-                    "output": [],
+                    "output": (
+                        [{"type": "message"}]
+                        if kwargs.get("status") == "completed"
+                        else []
+                    ),
                     "status": kwargs.get("status"),
                 },
             )
@@ -141,7 +145,22 @@ class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
         async def worker(**kwargs):
             try:
                 completed.set()
-                return 200, {"choices": [], "usage": {}}
+                return 200, {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "STREAM_COMPLETED",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
             except asyncio.CancelledError:
                 cancelled.set()
                 raise

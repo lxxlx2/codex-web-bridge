@@ -150,6 +150,11 @@ def test_build_backing_body_strips_trigger_tools_and_previous_state():
     assert backing.parallel_tool_calls is False
     assert backing.stream is False
     assert backing.store is False
+    assert (
+        backing.max_output_tokens
+        == remote._MAX_COMPACTION_OUTPUT_TOKENS
+        == 1024
+    )
     assert all(item.get("type") != "compaction_trigger" for item in backing.input)
     assert all(item.get("type") != "compaction" for item in backing.input)
     assert any(

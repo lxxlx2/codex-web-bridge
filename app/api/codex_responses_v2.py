@@ -246,6 +246,21 @@ def _stream_headers() -> Dict[str, str]:
     }
 
 
+
+def _completed_response_has_no_output(
+    response_status: str,
+    response_obj: Dict[str, Any],
+) -> bool:
+    if str(response_status or "").strip().lower() != "completed":
+        return False
+
+    output = response_obj.get("output")
+    return not isinstance(output, list) or not any(
+        isinstance(item, dict)
+        for item in output
+    )
+
+
 def _pack_event(event: str, payload: Dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -684,6 +699,33 @@ async def _stream_codex_v2_attempt(
     )
 
     output = completed.get("output") if isinstance(completed.get("output"), list) else []
+
+    if _completed_response_has_no_output(response_status, completed):
+        failed = _build_responses_object(
+            state_body,
+            payload,
+            response_id=response_id,
+            created_at=created_at,
+            status="failed",
+            error={
+                "message": (
+                    "ChatGPT Web completed without an assistant message "
+                    "or client function call."
+                ),
+                "type": "execution_error",
+                "code": "empty_completed_output",
+            },
+        )
+        logger.warning(
+            "[CODEX_RESPONSES_V2] rejected completed turn with empty output"
+        )
+        yield _codex_event(
+            "response.failed",
+            sequence_number=sequence,
+            response=failed,
+        )
+        return
+
     tool_names: List[str] = []
     for output_index, item in enumerate(output):
         if not isinstance(item, dict):

@@ -3,6 +3,7 @@ import json
 from app.api.chat import ResponsesRequest
 from app.api.codex_responses_v2 import (
     _clone_for_required_tool_retry,
+    _completed_response_has_no_output,
     _required_tool_failed_events,
     required_declared_tool,
 )
@@ -100,3 +101,22 @@ def test_required_tool_exhaustion_returns_structured_responses_failure():
     payload = json.loads(failed_data)
     assert payload["type"] == "response.failed"
     assert payload["response"]["status"] == "failed"
+
+
+def test_completed_empty_output_is_rejected():
+    assert _completed_response_has_no_output(
+        "completed",
+        {"output": []},
+    )
+    assert _completed_response_has_no_output(
+        "completed",
+        {"output": None},
+    )
+    assert not _completed_response_has_no_output(
+        "completed",
+        {"output": [{"type": "message"}]},
+    )
+    assert not _completed_response_has_no_output(
+        "incomplete",
+        {"output": []},
+    )
