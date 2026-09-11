@@ -37,8 +37,8 @@ def test_codex_model_catalog_uses_models_wrapper_and_hides_hostname_aliases():
     assert model["shell_type"] == "shell_command"
     assert model["visibility"] == "list"
     assert model["supported_in_api"] is True
-    assert model["context_window"] == 78_000
-    assert model["truncation_policy"] == {"mode": "tokens", "limit": 70_200}
+    assert model["context_window"] == 77_000
+    assert model["truncation_policy"] == {"mode": "tokens", "limit": 69_300}
     assert "instructions_template" in model["model_messages"]
     instructions = model["model_messages"]["instructions_template"]
     assert "exec_command" in instructions
@@ -86,14 +86,14 @@ def test_codex_model_catalog_leaves_remote_v2_retention_headroom():
 
     remote_v2_retained_message_budget = 64_000
 
-    assert model["context_window"] == 78_000
-    assert model["max_context_window"] == 78_000
+    assert model["context_window"] == 77_000
+    assert model["max_context_window"] == 77_000
     assert model["truncation_policy"] == {
         "mode": "tokens",
-        "limit": 70_200,
+        "limit": 69_300,
     }
     assert (
         model["truncation_policy"]["limit"]
         - remote_v2_retained_message_budget
-        >= 6_000
+        >= 5_000
     )

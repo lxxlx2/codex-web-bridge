@@ -96,7 +96,7 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
     # retained history stays below the next auto-compaction gate while
     # full-history browser replay remains inside the validated long-context
     # operating range.
-    context_window = 78_000
+    context_window = 77_000
 
     return {
         "slug": model_id,
@@ -117,7 +117,7 @@ def _to_codex_model(entry: Dict[str, Any], priority: int) -> Dict[str, Any]:
         "support_verbosity": False,
         "default_verbosity": None,
         "apply_patch_tool_type": None,
-        "truncation_policy": {"mode": "tokens", "limit": 70_200},
+        "truncation_policy": {"mode": "tokens", "limit": 69_300},
         "supports_image_detail_original": False,
         "context_window": context_window,
         "max_context_window": context_window,
