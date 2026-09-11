@@ -5,7 +5,12 @@ from fastapi.responses import StreamingResponse
 
 from app.api.chat import ResponsesRequest
 from app.api import codex_responses_v2 as v2
-from app.services.codex_v2_runtime_hardening import install_codex_v2_runtime_hardening
+from app.services import codex_remote_compaction_v2 as remote
+from app.services.codex_v2_runtime_hardening import (
+    _CALL_RESPONSE_LOCK,
+    _REQUIRED_TOOL_SATISFIED_KEYS,
+    install_codex_v2_runtime_hardening,
+)
 
 
 def _tool():
@@ -208,3 +213,79 @@ def test_no_tool_attempt_may_retry_before_any_client_effect_is_delivered(monkeyp
     assert "resp_buffered_no_tool" not in joined
     assert "resp_repair_tool" in joined
     assert "call_repair" in joined
+
+def _compacted_required_body(
+    lineage: str,
+    summary: str,
+):
+    return ResponsesRequest(
+        model="chatgpt",
+        stream=True,
+        input=[
+            {
+                "type": "compaction",
+                "encrypted_content": (
+                    remote.encode_compaction_envelope(
+                        summary,
+                        lineage=lineage,
+                    )
+                ),
+            },
+            {
+                "role": "user",
+                "content": "must use exec_command",
+            },
+        ],
+        tools=[_tool()],
+    )
+
+
+def test_successful_strict_tool_records_compaction_lineage_satisfaction(
+    monkeypatch,
+):
+    _install_and_patch_common(monkeypatch)
+
+    with _CALL_RESPONSE_LOCK:
+        _REQUIRED_TOOL_SATISFIED_KEYS.clear()
+
+    lineage = "5" * 32
+    attempts = []
+
+    async def fake_attempt(**kwargs):
+        attempts.append(kwargs["body"])
+        return _response([
+            _created("resp_lineage_tool"),
+            _call("call_lineage_tool"),
+            _completed("resp_lineage_tool"),
+        ])
+
+    monkeypatch.setattr(
+        v2,
+        "_codex_web_attempt_response",
+        fake_attempt,
+    )
+
+    body = _compacted_required_body(
+        lineage,
+        "checkpoint one",
+    )
+
+    output = _collect(
+        v2._strict_required_tool_stream(
+            request=object(),
+            body=body,
+            authenticated=True,
+            required_tool="exec_command",
+            trace_id="trace-lineage",
+        )
+    )
+
+    assert len(attempts) == 1
+    assert "call_lineage_tool" in "".join(output)
+
+    replay = _compacted_required_body(
+        lineage,
+        "checkpoint two",
+    )
+
+    assert v2.required_declared_tool(replay) == ""

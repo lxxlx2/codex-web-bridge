@@ -19,6 +19,7 @@ result, cookie or browser credential.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -37,6 +38,7 @@ _INSTALLED = False
 _CALL_RESPONSE_LOCK = threading.RLock()
 _CALL_RESPONSE_IDS: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
 _CALL_TOOL_NAMES: "OrderedDict[str, Tuple[float, str]]" = OrderedDict()
+_REQUIRED_TOOL_SATISFIED_KEYS: "OrderedDict[str, float]" = OrderedDict()
 _CALL_RESPONSE_TTL_SEC = 7200.0
 _CALL_RESPONSE_MAX = 4096
 
@@ -284,6 +286,183 @@ def _remembered_completed_function_call_names(source: Any) -> Set[str]:
     return names
 
 
+def _required_tool_requirement_key(
+    body: ResponsesRequest,
+    required_tool: str,
+) -> str:
+    """Identify one required-tool user turn inside one compaction lineage."""
+
+    required = str(
+        required_tool or ""
+    ).strip()
+
+    if not required:
+        return ""
+
+    try:
+        from app.services.codex_remote_compaction_v2 import (
+            compaction_lineage,
+        )
+
+        lineage = compaction_lineage(
+            body.input
+        )
+    except Exception:
+        return ""
+
+    if not lineage:
+        # Ordinary, non-compacted turns continue to use
+        # the existing exact call/output validation only.
+        return ""
+
+    if not isinstance(body.input, list):
+        return ""
+
+    users = [
+        item
+        for item in body.input
+        if isinstance(item, dict)
+        and str(
+            item.get("role") or ""
+        ).strip().lower()
+        == "user"
+    ]
+
+    if not users:
+        return ""
+
+    latest = users[-1]
+
+    try:
+        latest_serialized = json.dumps(
+            latest.get("content"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:
+        return ""
+
+    latest_digest = hashlib.sha256(
+        latest_serialized.encode(
+            "utf-8",
+            "replace",
+        )
+    ).hexdigest()
+
+    identity = json.dumps(
+        {
+            "lineage": lineage,
+            "required_tool": required,
+            "user_count": len(users),
+            "latest_user_sha256": latest_digest,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+    return hashlib.sha256(
+        identity.encode("utf-8")
+    ).hexdigest()
+
+
+def _prune_required_tool_satisfaction_locked(
+    now: Optional[float] = None,
+) -> None:
+    current = float(
+        now if now is not None
+        else time.time()
+    )
+    cutoff = (
+        current
+        - _CALL_RESPONSE_TTL_SEC
+    )
+
+    expired = [
+        key
+        for key, captured_at
+        in _REQUIRED_TOOL_SATISFIED_KEYS.items()
+        if captured_at < cutoff
+    ]
+
+    for key in expired:
+        _REQUIRED_TOOL_SATISFIED_KEYS.pop(
+            key,
+            None,
+        )
+
+    while (
+        len(_REQUIRED_TOOL_SATISFIED_KEYS)
+        > _CALL_RESPONSE_MAX
+    ):
+        _REQUIRED_TOOL_SATISFIED_KEYS.popitem(
+            last=False
+        )
+
+
+def _remember_required_tool_satisfaction(
+    body: ResponsesRequest,
+    required_tool: str,
+) -> bool:
+    key = _required_tool_requirement_key(
+        body,
+        required_tool,
+    )
+
+    if not key:
+        return False
+
+    now = time.time()
+
+    with _CALL_RESPONSE_LOCK:
+        _prune_required_tool_satisfaction_locked(
+            now
+        )
+
+        _REQUIRED_TOOL_SATISFIED_KEYS[
+            key
+        ] = now
+
+        _REQUIRED_TOOL_SATISFIED_KEYS.move_to_end(
+            key
+        )
+
+        _prune_required_tool_satisfaction_locked(
+            now
+        )
+
+    return True
+
+
+def _required_tool_satisfaction_seen(
+    body: ResponsesRequest,
+    required_tool: str,
+) -> bool:
+    key = _required_tool_requirement_key(
+        body,
+        required_tool,
+    )
+
+    if not key:
+        return False
+
+    with _CALL_RESPONSE_LOCK:
+        _prune_required_tool_satisfaction_locked()
+
+        if (
+            key
+            not in _REQUIRED_TOOL_SATISFIED_KEYS
+        ):
+            return False
+
+        _REQUIRED_TOOL_SATISFIED_KEYS.move_to_end(
+            key
+        )
+
+        return True
+
+
 def _resolve_call_response(call_ids: List[str]) -> str:
     keys = [str(call_id or "").strip() for call_id in call_ids if str(call_id or "").strip()]
     with _CALL_RESPONSE_LOCK:
@@ -470,9 +649,23 @@ def install_codex_v2_runtime_hardening() -> None:
             if explicit_choice and explicit_choice in declared:
                 return required
 
+            if _required_tool_satisfaction_seen(
+                body,
+                required,
+            ):
+                logger.info(
+                    "[CODEX_V2_RUNTIME] required client tool contract was already "
+                    "satisfied in this compaction lineage; suppressing duplicate enforcement"
+                )
+                return ""
+
             completed_names = _completed_function_call_names(body.input)
 
             if required in completed_names:
+                _remember_required_tool_satisfaction(
+                    body,
+                    required,
+                )
                 logger.info(
                     "[CODEX_V2_RUNTIME] required client tool already has a matching "
                     "function_call_output in the latest user turn; suppressing duplicate enforcement"
@@ -484,6 +677,10 @@ def install_codex_v2_runtime_hardening() -> None:
             )
 
             if required in remembered_names:
+                _remember_required_tool_satisfaction(
+                    body,
+                    required,
+                )
                 logger.info(
                     "[CODEX_V2_RUNTIME] required client tool output matched a "
                     "previously emitted real function_call by call_id; "
@@ -730,6 +927,15 @@ def install_codex_v2_runtime_hardening() -> None:
                 )
 
                 if satisfied:
+                    if _remember_required_tool_satisfaction(
+                        body,
+                        required_tool,
+                    ):
+                        logger.info(
+                            "[CODEX_V2_RUNTIME] remembered satisfied "
+                            "required-tool contract inside compaction lineage"
+                        )
+
                     for text in buffered:
                         yield text
                     return

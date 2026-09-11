@@ -51,6 +51,32 @@ def test_envelope_round_trip_preserves_unicode():
     assert remote.decode_compaction_envelope(envelope) == summary
 
 
+def test_envelope_carries_stable_compaction_lineage():
+    lineage = "a" * 32
+    envelope = remote.encode_compaction_envelope(
+        "state",
+        lineage=lineage,
+    )
+
+    source = [
+        {
+            "type": "compaction",
+            "encrypted_content": envelope,
+        }
+    ]
+
+    assert (
+        remote.compaction_lineage(source)
+        == lineage
+    )
+    assert (
+        remote.decode_compaction_envelope(
+            envelope
+        )
+        == "state"
+    )
+
+
 def test_envelope_rejects_foreign_and_corrupt_payloads():
     with pytest.raises(remote.RemoteCompactionV2ProtocolError, match="foreign"):
         remote.decode_compaction_envelope("not-uwa-data")

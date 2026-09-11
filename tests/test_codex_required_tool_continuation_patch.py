@@ -1,5 +1,6 @@
 from app.api.chat import ResponsesRequest
 from app.api import codex_responses_v2 as v2
+from app.services import codex_remote_compaction_v2 as remote
 from app.services.codex_required_tool_language_patch import (
     install_codex_required_tool_language_patch,
 )
@@ -7,8 +8,11 @@ from app.services.codex_v2_runtime_hardening import (
     _CALL_RESPONSE_LOCK,
     _CALL_RESPONSE_IDS,
     _CALL_TOOL_NAMES,
+    _REQUIRED_TOOL_SATISFIED_KEYS,
     _completed_function_call_names,
     _remember_call_tools,
+    _remember_required_tool_satisfaction,
+    _required_tool_satisfaction_seen,
     install_codex_v2_runtime_hardening,
 )
 
@@ -139,6 +143,7 @@ def _clear_runtime_call_memory():
     with _CALL_RESPONSE_LOCK:
         _CALL_RESPONSE_IDS.clear()
         _CALL_TOOL_NAMES.clear()
+        _REQUIRED_TOOL_SATISFIED_KEYS.clear()
 
 
 def test_remembered_real_exec_call_satisfies_output_only_continuation():
@@ -181,6 +186,131 @@ def test_remembered_different_tool_cannot_satisfy_exec_requirement():
 
     assert _completed_function_call_names(body.input) == set()
     assert v2.required_declared_tool(body) == "exec_command"
+
+
+def _compaction(lineage: str, summary: str):
+    return {
+        "type": "compaction",
+        "encrypted_content": remote.encode_compaction_envelope(
+            summary,
+            lineage=lineage,
+        ),
+    }
+
+
+def test_satisfaction_survives_recompaction_in_same_lineage():
+    _clear_runtime_call_memory()
+
+    lineage = "1" * 32
+
+    original = _body([
+        _compaction(
+            lineage,
+            "checkpoint one",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert (
+        v2.required_declared_tool(original)
+        == "exec_command"
+    )
+
+    assert _remember_required_tool_satisfaction(
+        original,
+        "exec_command",
+    )
+
+    replay = _body([
+        _compaction(
+            lineage,
+            "checkpoint two",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert _required_tool_satisfaction_seen(
+        replay,
+        "exec_command",
+    )
+
+    assert (
+        v2.required_declared_tool(replay)
+        == ""
+    )
+
+
+def test_same_prompt_in_different_compaction_lineage_is_not_satisfied():
+    _clear_runtime_call_memory()
+
+    first = _body([
+        _compaction(
+            "2" * 32,
+            "thread one",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert _remember_required_tool_satisfaction(
+        first,
+        "exec_command",
+    )
+
+    second = _body([
+        _compaction(
+            "3" * 32,
+            "thread two",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert not _required_tool_satisfaction_seen(
+        second,
+        "exec_command",
+    )
+
+    assert (
+        v2.required_declared_tool(second)
+        == "exec_command"
+    )
+
+
+def test_new_user_turn_in_same_lineage_is_not_pre_satisfied():
+    _clear_runtime_call_memory()
+
+    lineage = "4" * 32
+
+    first = _body([
+        _compaction(
+            lineage,
+            "checkpoint",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert _remember_required_tool_satisfaction(
+        first,
+        "exec_command",
+    )
+
+    second = _body([
+        _compaction(
+            lineage,
+            "checkpoint next",
+        ),
+        _user(_recovery_text()),
+        _user(_recovery_text()),
+    ])
+
+    assert not _required_tool_satisfaction_seen(
+        second,
+        "exec_command",
+    )
+
+    assert (
+        v2.required_declared_tool(second)
+        == "exec_command"
+    )
 
 
 def test_explicit_tool_choice_remains_authoritative_after_completed_cycle():

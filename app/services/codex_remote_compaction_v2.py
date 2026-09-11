@@ -24,6 +24,7 @@ import copy
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from typing import Any, AsyncIterator, Dict, Tuple
 
@@ -47,6 +48,7 @@ _MAX_SUMMARY_BYTES = 64 * 1024
 _MAX_ENVELOPE_BYTES = 96 * 1024
 _MAX_COMPACTION_OUTPUT_TOKENS = 1024
 _BYTES_PER_TOKEN = 3
+_LINEAGE_HEX_LEN = 32
 
 _COMPACTION_INSTRUCTIONS = """[Codex Remote Compaction V2]
 Create a compact replacement-history summary for a long-running coding thread.
@@ -116,68 +118,270 @@ def _b64url_decode(value: str) -> bytes:
         raise RemoteCompactionV2ProtocolError("invalid UWA compaction envelope encoding") from exc
 
 
-def encode_compaction_envelope(summary: str) -> str:
+def _normalize_compaction_lineage(value: Any) -> str:
+    lineage = str(value or "").strip().lower()
+    if not lineage:
+        return ""
+    if len(lineage) != _LINEAGE_HEX_LEN:
+        return ""
+    if any(ch not in "0123456789abcdef" for ch in lineage):
+        return ""
+    return lineage
+
+
+def encode_compaction_envelope(
+    summary: str,
+    *,
+    lineage: str = "",
+) -> str:
     text = str(summary or "").strip()
     raw_summary = text.encode("utf-8")
     if not raw_summary:
-        raise RemoteCompactionV2ProtocolError("compaction summary is empty")
+        raise RemoteCompactionV2ProtocolError(
+            "compaction summary is empty"
+        )
     if len(raw_summary) > _MAX_SUMMARY_BYTES:
-        raise RemoteCompactionV2ProtocolError("compaction summary exceeds UWA bound")
+        raise RemoteCompactionV2ProtocolError(
+            "compaction summary exceeds UWA bound"
+        )
+
+    lineage_value = (
+        _normalize_compaction_lineage(lineage)
+        or secrets.token_hex(16)
+    )
 
     payload = {
         "kind": _ENVELOPE_KIND,
+        "lineage": lineage_value,
         "summary": text,
         "v": _ENVELOPE_VERSION,
     }
+
     raw = json.dumps(
         payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
     digest = hashlib.sha256(raw).hexdigest()
-    envelope = f"{_ENVELOPE_PREFIX}{_b64url_encode(raw)}.{digest}"
-    if len(envelope.encode("utf-8")) > _MAX_ENVELOPE_BYTES:
-        raise RemoteCompactionV2ProtocolError("compaction envelope exceeds UWA bound")
+    envelope = (
+        f"{_ENVELOPE_PREFIX}"
+        f"{_b64url_encode(raw)}.{digest}"
+    )
+
+    if (
+        len(envelope.encode("utf-8"))
+        > _MAX_ENVELOPE_BYTES
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "compaction envelope exceeds UWA bound"
+        )
+
     return envelope
 
 
-def decode_compaction_envelope(envelope: str) -> str:
+def _decode_compaction_envelope_payload(
+    envelope: str,
+) -> Dict[str, Any]:
     value = str(envelope or "")
-    if not value.startswith(_ENVELOPE_PREFIX):
-        raise RemoteCompactionV2ProtocolError("foreign compaction envelope")
-    if len(value.encode("utf-8")) > _MAX_ENVELOPE_BYTES:
-        raise RemoteCompactionV2ProtocolError("compaction envelope exceeds UWA bound")
 
-    encoded_and_digest = value[len(_ENVELOPE_PREFIX) :]
+    if not value.startswith(_ENVELOPE_PREFIX):
+        raise RemoteCompactionV2ProtocolError(
+            "foreign compaction envelope"
+        )
+
+    if (
+        len(value.encode("utf-8"))
+        > _MAX_ENVELOPE_BYTES
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "compaction envelope exceeds UWA bound"
+        )
+
+    encoded_and_digest = value[
+        len(_ENVELOPE_PREFIX):
+    ]
+
     try:
-        encoded, digest = encoded_and_digest.rsplit(".", 1)
+        encoded, digest = (
+            encoded_and_digest.rsplit(".", 1)
+        )
     except ValueError as exc:
-        raise RemoteCompactionV2ProtocolError("invalid UWA compaction envelope framing") from exc
-    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
-        raise RemoteCompactionV2ProtocolError("invalid UWA compaction envelope digest")
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction envelope framing"
+        ) from exc
+
+    if (
+        len(digest) != 64
+        or any(
+            ch not in "0123456789abcdef"
+            for ch in digest
+        )
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction envelope digest"
+        )
 
     raw = _b64url_decode(encoded)
+
     if len(raw) > _MAX_SUMMARY_BYTES + 4096:
-        raise RemoteCompactionV2ProtocolError("decoded compaction envelope exceeds UWA bound")
+        raise RemoteCompactionV2ProtocolError(
+            "decoded compaction envelope exceeds UWA bound"
+        )
+
     actual = hashlib.sha256(raw).hexdigest()
+
     if not hmac.compare_digest(actual, digest):
-        raise RemoteCompactionV2ProtocolError("UWA compaction envelope integrity check failed")
+        raise RemoteCompactionV2ProtocolError(
+            "UWA compaction envelope integrity check failed"
+        )
 
     try:
         payload = json.loads(raw.decode("utf-8"))
     except Exception as exc:
-        raise RemoteCompactionV2ProtocolError("invalid UWA compaction envelope payload") from exc
-    if not isinstance(payload, dict) or set(payload) != {"kind", "summary", "v"}:
-        raise RemoteCompactionV2ProtocolError("invalid UWA compaction envelope schema")
-    if payload.get("kind") != _ENVELOPE_KIND or payload.get("v") != _ENVELOPE_VERSION:
-        raise RemoteCompactionV2ProtocolError("unsupported UWA compaction envelope version")
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction envelope payload"
+        ) from exc
 
-    summary = str(payload.get("summary") or "").strip()
+    if not isinstance(payload, dict):
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction envelope schema"
+        )
+
+    keys = set(payload)
+
+    legacy_keys = {
+        "kind",
+        "summary",
+        "v",
+    }
+    lineage_keys = {
+        "kind",
+        "lineage",
+        "summary",
+        "v",
+    }
+
+    if keys not in {
+        frozenset(legacy_keys),
+        frozenset(lineage_keys),
+    }:
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction envelope schema"
+        )
+
+    if (
+        payload.get("kind") != _ENVELOPE_KIND
+        or payload.get("v")
+        != _ENVELOPE_VERSION
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "unsupported UWA compaction envelope version"
+        )
+
+    summary = str(
+        payload.get("summary") or ""
+    ).strip()
+
     encoded_summary = summary.encode("utf-8")
-    if not encoded_summary or len(encoded_summary) > _MAX_SUMMARY_BYTES:
-        raise RemoteCompactionV2ProtocolError("invalid UWA compaction summary bound")
-    return summary
+
+    if (
+        not encoded_summary
+        or len(encoded_summary)
+        > _MAX_SUMMARY_BYTES
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "invalid UWA compaction summary bound"
+        )
+
+    lineage = ""
+
+    if "lineage" in payload:
+        lineage = _normalize_compaction_lineage(
+            payload.get("lineage")
+        )
+        if not lineage:
+            raise RemoteCompactionV2ProtocolError(
+                "invalid UWA compaction lineage"
+            )
+
+    return {
+        "kind": _ENVELOPE_KIND,
+        "lineage": lineage,
+        "summary": summary,
+        "v": _ENVELOPE_VERSION,
+    }
+
+
+def decode_compaction_envelope(
+    envelope: str,
+) -> str:
+    return str(
+        _decode_compaction_envelope_payload(
+            envelope
+        )["summary"]
+    )
+
+
+def compaction_lineage(source: Any) -> str:
+    """Return the stable UWA lineage carried by one compaction chain."""
+
+    if not isinstance(source, list):
+        return ""
+
+    envelopes: list[str] = []
+
+    for item in source:
+        item_type = _item_type(item)
+
+        if item_type not in _COMPACTION_TYPES:
+            continue
+
+        if not isinstance(item, dict):
+            raise RemoteCompactionV2ProtocolError(
+                "invalid compaction item"
+            )
+
+        envelopes.append(
+            str(
+                item.get(
+                    "encrypted_content"
+                )
+                or ""
+            )
+        )
+
+    if not envelopes:
+        return ""
+
+    if len(envelopes) != 1:
+        raise RemoteCompactionV2ProtocolError(
+            "multiple compaction items are not supported"
+        )
+
+    envelope = envelopes[0]
+
+    payload = _decode_compaction_envelope_payload(
+        envelope
+    )
+
+    lineage = str(
+        payload.get("lineage") or ""
+    )
+
+    if lineage:
+        return lineage
+
+    # Backward compatibility for an envelope created before
+    # lineage support. The next compaction generation will
+    # carry this derived identity explicitly.
+    return hashlib.sha256(
+        envelope.encode(
+            "utf-8",
+            "replace",
+        )
+    ).hexdigest()[:_LINEAGE_HEX_LEN]
 
 
 def _compaction_message(summary: str) -> Dict[str, Any]:
@@ -320,6 +524,10 @@ async def _stream_remote_compaction_v2(
     body: ResponsesRequest,
     authenticated: bool,
 ) -> AsyncIterator[str]:
+    lineage = (
+        compaction_lineage(body.input)
+        or secrets.token_hex(16)
+    )
     backing_body = build_compaction_backing_body(body)
     response_id = v2._new_response_id()
     created_at = int(time.time())
@@ -377,7 +585,10 @@ async def _stream_remote_compaction_v2(
             raise RemoteCompactionV2ProtocolError("compaction backing request failed")
 
         summary = extract_backing_summary(payload)
-        envelope = encode_compaction_envelope(summary)
+        envelope = encode_compaction_envelope(
+            summary,
+            lineage=lineage,
+        )
         item = {
             "type": "compaction",
             "encrypted_content": envelope,
