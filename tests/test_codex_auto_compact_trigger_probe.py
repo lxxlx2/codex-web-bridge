@@ -139,3 +139,43 @@ def test_switches_from_fixed_fine_fill_to_tiny_arm_near_boundary():
         0,
         858,
     )
+
+def test_trigger_reply_can_defer_only_after_proven_remote_compaction():
+    good = dict(
+        trigger_exact=False,
+        thread_matches=True,
+        tool_effect_count=0,
+        compact_delta=1,
+        remote_route_delta=1,
+        remote_success_delta=1,
+        token_leak=False,
+    )
+
+    assert probe.can_defer_trigger_reply(**good)
+
+    for key, bad_value in (
+        ("thread_matches", False),
+        ("tool_effect_count", 1),
+        ("compact_delta", 0),
+        ("remote_route_delta", 0),
+        ("remote_success_delta", 0),
+        ("token_leak", True),
+    ):
+        case = dict(good)
+        case[key] = bad_value
+
+        assert not probe.can_defer_trigger_reply(
+            **case
+        )
+
+
+def test_exact_trigger_reply_does_not_need_deferred_mode():
+    assert not probe.can_defer_trigger_reply(
+        trigger_exact=True,
+        thread_matches=True,
+        tool_effect_count=0,
+        compact_delta=1,
+        remote_route_delta=1,
+        remote_success_delta=1,
+        token_leak=False,
+    )

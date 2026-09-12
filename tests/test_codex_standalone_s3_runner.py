@@ -56,6 +56,34 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         self.assertFalse(hasattr(observation, "commands"))
         self.assertFalse(hasattr(observation, "usage"))
 
+    def test_probe_trigger_reply_accepts_exact_or_deferred(self) -> None:
+        self.assertTrue(
+            s3._probe_trigger_reply_acceptable(
+                {
+                    "TRIGGER_REPLY_EXACT": "YES",
+                    "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY": "NO",
+                }
+            )
+        )
+
+        self.assertTrue(
+            s3._probe_trigger_reply_acceptable(
+                {
+                    "TRIGGER_REPLY_EXACT": "NO",
+                    "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY": "YES",
+                }
+            )
+        )
+
+        self.assertFalse(
+            s3._probe_trigger_reply_acceptable(
+                {
+                    "TRIGGER_REPLY_EXACT": "NO",
+                    "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY": "NO",
+                }
+            )
+        )
+
     def test_remote_normalization_recognizes_integrated_origin(self) -> None:
         self.assertEqual(
             s3._normalize_remote("git@github.com:lxxlx2/universal-web-api.git"),

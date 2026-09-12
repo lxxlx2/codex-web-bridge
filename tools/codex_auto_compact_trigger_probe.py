@@ -315,6 +315,37 @@ def _turn_ok(
     )
 
 
+def can_defer_trigger_reply(
+    *,
+    trigger_exact: bool,
+    thread_matches: bool,
+    tool_effect_count: int,
+    compact_delta: int,
+    remote_route_delta: int,
+    remote_success_delta: int,
+    token_leak: bool,
+) -> bool:
+    """Allow the trigger ACK to be proven by the following recovery turn.
+
+    The trigger turn exists only to cross Codex's pre-turn compaction boundary.
+    If native compaction and Remote V2 completion are both positively observed,
+    the trigger produced no client-tool effects, thread identity is intact, and
+    no synthetic token leaked to the workspace, the user-visible ACK may be
+    absent. S3 must then prove usability with its strict same-thread
+    post-compaction recovery gate.
+    """
+
+    return (
+        not trigger_exact
+        and thread_matches
+        and tool_effect_count == 0
+        and compact_delta > 0
+        and remote_route_delta > 0
+        and remote_success_delta > 0
+        and not token_leak
+    )
+
+
 def _resolve_codex(codex: str) -> str | None:
     if os.sep in codex:
         path = Path(codex).expanduser()
@@ -600,18 +631,48 @@ def run(
     compact_after = count_rollout_compact_markers(rollout)
     compact_delta = compact_after - compact_before
 
+    trigger_thread_match = base._verify_thread(
+        trigger,
+        thread_id,
+    )
+
+    token_hits_after = base._workspace_contains_token(
+        root
+    )
+
+    trigger_deferred = can_defer_trigger_reply(
+        trigger_exact=trigger_exact,
+        thread_matches=trigger_thread_match,
+        tool_effect_count=trigger.tool_effect_count,
+        compact_delta=compact_delta,
+        remote_route_delta=log_evidence.route_markers,
+        remote_success_delta=log_evidence.success_markers,
+        token_leak=bool(token_hits_after),
+    )
+
     print(f"TRIGGER_REPLY_EXACT={'YES' if trigger_exact else 'NO'}")
+    print(
+        "TRIGGER_THREAD_MATCH="
+        + ("YES" if trigger_thread_match else "NO")
+    )
     print(f"TRIGGER_TOOL_EFFECTS={trigger.tool_effect_count}")
     print(f"ROLLOUT_COMPACT_MARKER_DELTA={compact_delta}")
     print(f"REMOTE_COMPACT_ROUTE_DELTA={log_evidence.route_markers}")
     print(f"REMOTE_COMPACT_SUCCESS_DELTA={log_evidence.success_markers}")
-
-    token_hits_after = base._workspace_contains_token(root)
     print(f"TOKEN_LEAK_WORKSPACE={'YES' if token_hits_after else 'NO'}")
+    print(
+        "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY="
+        + ("YES" if trigger_deferred else "NO")
+    )
 
-    if not trigger_exact or token_hits_after:
+    if token_hits_after:
+        print("RUN_FAIL trigger_token_leak")
+        return 1
+
+    if not trigger_exact and not trigger_deferred:
         print("RUN_FAIL trigger_contract")
         return 1
+
     if compact_delta <= 0:
         print("RUN_FAIL auto_compact_lifecycle_not_observed")
         return 1

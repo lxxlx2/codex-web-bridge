@@ -490,6 +490,17 @@ def _parse_key_values(text: str) -> dict[str, str]:
     return values
 
 
+def _probe_trigger_reply_acceptable(
+    values: dict[str, str],
+) -> bool:
+    return (
+        values.get("TRIGGER_REPLY_EXACT") == "YES"
+        or values.get(
+            "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY"
+        ) == "YES"
+    )
+
+
 def _run_remote_compaction_recovery(
     *,
     codex: str,
@@ -540,6 +551,13 @@ def _run_remote_compaction_recovery(
         raise GateFailure("remote_compaction_probe", f"rc={rc}")
     if "AUTO_COMPACT_TRIGGER_PROBE_PASS" not in probe_output:
         raise GateFailure("native_auto_compaction", "trigger_marker_missing")
+
+    if not _probe_trigger_reply_acceptable(values):
+        raise GateFailure(
+            "native_auto_compaction",
+            "trigger_reply_contract_unproven",
+        )
+
     try:
         rollout_delta = int(values.get("ROLLOUT_COMPACT_MARKER_DELTA", "0") or 0)
         remote_route_delta = int(values.get("REMOTE_COMPACT_ROUTE_DELTA", "0") or 0)
