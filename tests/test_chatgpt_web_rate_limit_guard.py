@@ -77,7 +77,10 @@ def test_persistent_pre_submit_rate_limit_propagates_terminal_429(tmp_path, monk
         guard.guard_before_initial_send(executor)
 
     text = str(exc_info.value)
-    assert text == "429 Too Many Requests: chatgpt_web_rate_limited"
+    assert text == (
+        "stream_terminal_error:429 Too Many Requests: "
+        "chatgpt_web_rate_limited"
+    )
     metadata = resolve_error_metadata(exc_info.value)
     assert metadata is not None
     assert metadata.code == "rate_limit_exceeded"
@@ -123,7 +126,10 @@ def test_ambiguous_chatgpt_retry_is_terminal_422_and_never_resends(tmp_path, mon
         guard.guard_before_retry(executor)
 
     text = str(exc_info.value)
-    assert text == "422 Unprocessable Entity: chatgpt_send_submission_unknown"
+    assert text == (
+        "stream_terminal_error:422 Unprocessable Entity: "
+        "chatgpt_send_submission_unknown"
+    )
     metadata = resolve_error_metadata(exc_info.value)
     assert metadata is not None
     assert metadata.code == "unprocessable_entity"
@@ -140,7 +146,10 @@ def test_rate_limited_retry_propagates_terminal_429_and_never_resends(tmp_path, 
         guard.guard_before_retry(executor)
 
     text = str(exc_info.value)
-    assert text == "429 Too Many Requests: chatgpt_web_rate_limited"
+    assert text == (
+        "stream_terminal_error:429 Too Many Requests: "
+        "chatgpt_web_rate_limited"
+    )
     metadata = resolve_error_metadata(exc_info.value)
     assert metadata is not None
     assert metadata.code == "rate_limit_exceeded"
