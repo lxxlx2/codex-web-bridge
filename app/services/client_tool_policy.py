@@ -97,6 +97,22 @@ _POST_TOOL_UNAVAILABLE_PATTERNS = (
     re.compile(r"(?:无法|不能).{0,40}(?:真实|实际).{0,30}(?:写入|修改|运行|测试).{0,100}(?:因为|由于).{0,80}(?:工具|exec_command).{0,50}(?:没有|未|不可用|未暴露)"),
     re.compile(r"(?:当前(?:这轮|这个)?(?:实际)?可调用的执行环境|当前(?:这个)?会话(?:实际)?可用的(?:执行环境|文件系统)|当前环境).{0,120}(?:没有|未).{0,30}(?:挂载|映射).{0,100}(?:本机|本地|工作区|目录|路径|/Users/|/home/)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:没有|未).{0,30}(?:挂载|映射).{0,100}(?:本机|本地|工作区|/Users/|/home/).{0,120}(?:无法|不能).{0,50}(?:真实|实际).{0,30}(?:写入|修改|运行|测试)", re.IGNORECASE | re.DOTALL),
+    # post_tool_readback_refusal:
+    # A real workspace tool has already executed successfully, but the model
+    # subsequently claims it cannot use the same declared tool to perform the
+    # required readback / verification step.
+    re.compile(
+        r"(?:exec_command|shell_command|local_shell|客户端工具|执行工具|本地执行工具)"
+        r".{0,140}(?:无法|不能|不可|不能够|cannot|can't|unable)"
+        r".{0,100}(?:读取|回读|确认|验证|检查|read|read back|verify|confirm|check)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:无法|不能|不可|不能够|cannot|can't|unable)"
+        r".{0,100}(?:读取|回读|确认|验证|检查|read|read back|verify|confirm|check)"
+        r".{0,140}(?:exec_command|shell_command|local_shell|客户端工具|执行工具|本地执行工具)",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 _ROOT_WORKDIR_EXPLICIT_PATTERNS = (
