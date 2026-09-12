@@ -15,9 +15,10 @@ Design goals:
 - never auto-resend a ChatGPT prompt after an already-dispatched send becomes
   ambiguous. An ambiguous submit must fail closed instead of risking a duplicate
   message;
-- emit standard HTTP-like terminal errors so the existing workflow/error stack
-  unwinds immediately instead of leaving the browser session busy until the
-  generic stuck watchdog fires.
+- emit standard HTTP-like terminal errors through the browser workflow's
+  ``stream_terminal_error`` path so the request unwinds immediately instead of
+  falling through into post-processing or waiting for the generic stuck
+  watchdog.
 
 The implementation is intentionally a narrow runtime compatibility patch over
 ``WorkflowExecutorSendMixin``. Other sites keep their existing retry behavior.
@@ -212,7 +213,9 @@ def _raise_rate_limited(*, state: Optional[Dict[str, Any]] = None) -> None:
         f"(backoff={float(current.get('backoff_seconds', 0.0) or 0.0):.0f}s, "
         f"hits={int(current.get('hits', 0) or 0)})"
     )
-    raise WorkflowError("429 Too Many Requests: chatgpt_web_rate_limited")
+    raise WorkflowError(
+        "stream_terminal_error:429 Too Many Requests: chatgpt_web_rate_limited"
+    )
 
 
 def _wait_existing_cooldown(executor: Any) -> bool:
@@ -278,7 +281,9 @@ def guard_before_retry(executor: Any) -> None:
         "[CHATGPT_WEB_GUARD] prior ChatGPT send was dispatched but submission is ambiguous; "
         "suppressing automatic resend to avoid duplicate messages"
     )
-    raise WorkflowError("422 Unprocessable Entity: chatgpt_send_submission_unknown")
+    raise WorkflowError(
+        "stream_terminal_error:422 Unprocessable Entity: chatgpt_send_submission_unknown"
+    )
 
 
 def install_chatgpt_web_rate_limit_guard() -> None:
