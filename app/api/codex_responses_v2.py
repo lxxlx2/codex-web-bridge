@@ -182,6 +182,18 @@ def _latest_user_text(source: Any) -> str:
     return ""
 
 
+def _input_has_compaction_checkpoint(source: Any) -> bool:
+    if not isinstance(source, list):
+        return False
+
+    return any(
+        isinstance(item, dict)
+        and str(item.get("type") or "").strip().lower()
+        in {"compaction", "compaction_summary"}
+        for item in source
+    )
+
+
 def required_declared_tool(body: ResponsesRequest) -> str:
     declared = set(_declared_tool_names(body.tools))
     if not declared:
@@ -208,6 +220,7 @@ def _clone_for_required_tool_retry(
     attempt: int,
     *,
     previous_response_id: str,
+    fresh_replay: bool = False,
 ) -> ResponsesRequest:
     """Build an incremental repair turn that preserves the exact user action."""
 
@@ -251,18 +264,36 @@ def _clone_for_required_tool_retry(
         )
 
     cloned.instructions = None
-    cloned.previous_response_id = (
-        str(
-            previous_response_id or ""
-        ).strip()
-        or None
-    )
-    cloned.input = [
-        {
-            "role": "user",
-            "content": repair,
-        }
-    ]
+
+    repair_item = {
+        "role": "user",
+        "content": repair,
+    }
+
+    if fresh_replay:
+        cloned.previous_response_id = None
+
+        if isinstance(cloned.input, list):
+            cloned.input = [
+                *cloned.input,
+                repair_item,
+            ]
+        elif cloned.input in (None, ""):
+            cloned.input = [repair_item]
+        else:
+            cloned.input = [
+                cloned.input,
+                repair_item,
+            ]
+    else:
+        cloned.previous_response_id = (
+            str(
+                previous_response_id or ""
+            ).strip()
+            or None
+        )
+        cloned.input = [repair_item]
+
     cloned.tool_choice = {
         "type": "function",
         "name": required_tool,
@@ -929,12 +960,24 @@ async def _strict_required_tool_stream(
 
         attempt_response_id = _response_id_from_sse(buffered)
         if attempt < attempts and attempt_response_id:
+            fresh_replay = _input_has_compaction_checkpoint(
+                body.input
+            )
+
             current_body = _clone_for_required_tool_retry(
                 body,
                 required_tool,
                 attempt=attempt + 1,
                 previous_response_id=attempt_response_id,
+                fresh_replay=fresh_replay,
             )
+
+            if fresh_replay:
+                logger.info(
+                    "[CODEX_RESPONSES_V2] required-tool retry "
+                    "uses fresh replay from compaction checkpoint"
+                )
+
             yield f": codex-v2-required-tool-retry attempt={attempt + 1}\n\n"
             continue
 

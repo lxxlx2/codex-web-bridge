@@ -325,3 +325,79 @@ def test_explicit_tool_choice_remains_authoritative_after_completed_cycle():
 
     assert _completed_function_call_names(body.input) == {"exec_command"}
     assert v2.required_declared_tool(body) == "exec_command"
+
+def test_compaction_required_tool_retry_uses_fresh_full_replay():
+    body = _body([
+        _compaction(
+            "5" * 32,
+            "durable checkpoint",
+        ),
+        _user(_recovery_text()),
+    ])
+
+    assert v2._input_has_compaction_checkpoint(
+        body.input
+    )
+
+    retry = v2._clone_for_required_tool_retry(
+        body,
+        "exec_command",
+        attempt=2,
+        previous_response_id="resp_failed_attempt",
+        fresh_replay=True,
+    )
+
+    assert retry.previous_response_id is None
+
+    assert retry.tool_choice == {
+        "type": "function",
+        "name": "exec_command",
+    }
+
+    assert retry.input[:-1] == body.input
+
+    repair = retry.input[-1]
+
+    assert repair["role"] == "user"
+
+    assert (
+        "[Codex V2 Required Tool Contract]"
+        in repair["content"]
+    )
+
+    assert (
+        _recovery_text()
+        in repair["content"]
+    )
+
+
+def test_non_compaction_required_tool_retry_remains_incremental():
+    body = _body([
+        _user(_recovery_text()),
+    ])
+
+    assert not v2._input_has_compaction_checkpoint(
+        body.input
+    )
+
+    retry = v2._clone_for_required_tool_retry(
+        body,
+        "exec_command",
+        attempt=2,
+        previous_response_id="resp_failed_attempt",
+        fresh_replay=False,
+    )
+
+    assert (
+        retry.previous_response_id
+        == "resp_failed_attempt"
+    )
+
+    assert len(retry.input) == 1
+
+    assert retry.input[0]["role"] == "user"
+
+    assert (
+        "[Codex V2 Required Tool Contract]"
+        in retry.input[0]["content"]
+    )
