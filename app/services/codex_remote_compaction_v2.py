@@ -58,6 +58,17 @@ Create a compact replacement-history summary for a long-running coding thread.
 This summary is private internal continuation state for the next model turn.
 It is not a user-facing answer.
 
+OUTPUT FORMAT:
+Always return exactly these two sections:
+
+[DURABLE EXACT STATE]
+List only unresolved exact literal values whose later use still requires exact
+identity. Keep each literal verbatim. If there are none, write NONE.
+
+[ACTIVE CONTINUATION STATE]
+Summarize current completed work, unresolved work, and the next unfinished step.
+Completed steps must be described as completed and must not become actionable again.
+
 Preserve facts needed to continue work correctly: user goals, explicit constraints,
 important decisions, repository/file paths, edits already made, tests and their
 results, failures and diagnoses, unresolved work, and the next intended actions.
@@ -434,6 +445,155 @@ def compaction_lineage(source: Any) -> str:
     ).hexdigest()[:_LINEAGE_HEX_LEN]
 
 
+_DURABLE_SECTION_HEADER = "[DURABLE EXACT STATE]"
+_ACTIVE_SECTION_HEADER = "[ACTIVE CONTINUATION STATE]"
+
+
+def _split_compaction_summary(
+    summary: str,
+) -> Tuple[str, str, bool]:
+    value = str(summary or "").strip()
+
+    durable_index = value.find(
+        _DURABLE_SECTION_HEADER
+    )
+    active_index = value.find(
+        _ACTIVE_SECTION_HEADER
+    )
+
+    if (
+        durable_index >= 0
+        and active_index > durable_index
+    ):
+        durable = value[
+            durable_index
+            + len(_DURABLE_SECTION_HEADER):
+            active_index
+        ].strip()
+
+        active = value[
+            active_index
+            + len(_ACTIVE_SECTION_HEADER):
+        ].strip()
+
+        normalized = durable.strip().upper()
+
+        if normalized in {
+            "",
+            "NONE",
+            "- NONE",
+            "(NONE)",
+        }:
+            durable = ""
+
+        if active:
+            return durable, active, True
+
+    return "", value, False
+
+
+def _merge_durable_state(
+    prior: str,
+    fresh: str,
+) -> str:
+    prior_value = str(prior or "").strip()
+    fresh_value = str(fresh or "").strip()
+
+    if not prior_value:
+        return fresh_value
+
+    if not fresh_value:
+        return prior_value
+
+    if fresh_value in prior_value:
+        return prior_value
+
+    if prior_value in fresh_value:
+        return fresh_value
+
+    return (
+        prior_value
+        + "\n"
+        + fresh_value
+    )
+
+
+def _canonical_compaction_summary(
+    durable: str,
+    active: str,
+) -> str:
+    durable_value = (
+        str(durable or "").strip()
+        or "NONE"
+    )
+
+    active_value = str(active or "").strip()
+
+    if not active_value:
+        raise RemoteCompactionV2ProtocolError(
+            "compaction active continuation state is empty"
+        )
+
+    value = (
+        _DURABLE_SECTION_HEADER
+        + "\n"
+        + durable_value
+        + "\n\n"
+        + _ACTIVE_SECTION_HEADER
+        + "\n"
+        + active_value
+    )
+
+    if (
+        len(value.encode("utf-8"))
+        > _MAX_SUMMARY_BYTES
+    ):
+        raise RemoteCompactionV2ProtocolError(
+            "canonical compaction summary exceeds UWA bound"
+        )
+
+    return value
+
+
+def _prior_compaction_summary(
+    source: Any,
+) -> str:
+    if not isinstance(source, list):
+        return ""
+
+    found: list[str] = []
+
+    for item in source:
+        if _item_type(item) not in _COMPACTION_TYPES:
+            continue
+
+        if not isinstance(item, dict):
+            raise RemoteCompactionV2ProtocolError(
+                "invalid compaction item"
+            )
+
+        found.append(
+            decode_compaction_envelope(
+                str(
+                    item.get(
+                        "encrypted_content"
+                    )
+                    or ""
+                )
+            )
+        )
+
+    if not found:
+        return ""
+
+    if len(found) != 1:
+        raise RemoteCompactionV2ProtocolError(
+            "multiple compaction items are not supported"
+        )
+
+    return found[0]
+
+
 def _compaction_message(summary: str) -> Dict[str, Any]:
     return {
         "type": "message",
@@ -468,29 +628,28 @@ def _text_char_count(value: Any) -> int:
 def _retained_prefix_for_web(
     source: list[Any],
 ) -> Tuple[list[Any], int, int, int]:
-    """Bound Codex-retained pre-compaction history for ChatGPT Web.
+    """Keep only authoritative pre-checkpoint constraints for ChatGPT Web.
 
-    Remote Compaction V2 deliberately retains selected messages before the
-    compaction item. The native Responses backend can accept that retained
-    window, while ChatGPT Web has a smaller composer/replay envelope.
-
-    Preserve system/developer constraints unconditionally. For all remaining
-    retained items, keep the newest contiguous suffix that fits the Web text
-    budget. The compaction summary remains the authoritative durable history.
+    The compaction summary is the replacement history checkpoint. Replaying
+    ordinary pre-checkpoint user messages can reactivate already completed
+    instructions after recursive compaction. Preserve only system/developer
+    constraints before the checkpoint; post-checkpoint tail items are retained
+    separately by rewrite_uwa_compaction_history().
     """
 
-    mandatory: set[int] = set()
+    retained: list[Any] = []
     original_chars = 0
+    retained_chars = 0
 
-    for index, item in enumerate(source):
+    for item in source:
         content = (
             item.get("content")
             if isinstance(item, dict)
             else item
         )
-        original_chars += _text_char_count(
-            content
-        )
+
+        size = _text_char_count(content)
+        original_chars += size
 
         if not isinstance(item, dict):
             continue
@@ -502,52 +661,13 @@ def _retained_prefix_for_web(
             item.get("role") or ""
         ).strip().lower()
 
-        if role in _WEB_ALWAYS_RETAINED_ROLES:
-            mandatory.add(index)
-
-    kept = set(mandatory)
-    remaining = (
-        _WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET
-    )
-
-    for index in range(
-        len(source) - 1,
-        -1,
-        -1,
-    ):
-        if index in mandatory:
+        if role not in _WEB_ALWAYS_RETAINED_ROLES:
             continue
 
-        item = source[index]
-
-        content = (
-            item.get("content")
-            if isinstance(item, dict)
-            else item
+        retained.append(
+            copy.deepcopy(item)
         )
-
-        size = _text_char_count(content)
-
-        if size > remaining:
-            break
-
-        kept.add(index)
-        remaining -= size
-
-    retained = [
-        copy.deepcopy(item)
-        for index, item in enumerate(source)
-        if index in kept
-    ]
-
-    retained_chars = sum(
-        _text_char_count(
-            item.get("content")
-            if isinstance(item, dict)
-            else item
-        )
-        for item in retained
-    )
+        retained_chars += size
 
     dropped = len(source) - len(retained)
 
@@ -748,6 +868,9 @@ async def _stream_remote_compaction_v2(
         compaction_lineage(body.input)
         or secrets.token_hex(16)
     )
+    prior_summary = _prior_compaction_summary(
+        body.input
+    )
     backing_body = build_compaction_backing_body(body)
     response_id = v2._new_response_id()
     created_at = int(time.time())
@@ -804,7 +927,54 @@ async def _stream_remote_compaction_v2(
         if status_code >= 400 or not isinstance(payload, dict) or "error" in payload:
             raise RemoteCompactionV2ProtocolError("compaction backing request failed")
 
-        summary = extract_backing_summary(payload)
+        fresh_summary = extract_backing_summary(
+            payload
+        )
+
+        (
+            prior_durable,
+            _prior_active,
+            prior_structured,
+        ) = _split_compaction_summary(
+            prior_summary
+        )
+
+        # Legacy envelopes predate structured durable state. Preserve the
+        # complete prior summary once as a deterministic continuity fallback.
+        if (
+            prior_summary
+            and not prior_structured
+        ):
+            prior_durable = prior_summary
+
+        (
+            fresh_durable,
+            fresh_active,
+            fresh_structured,
+        ) = _split_compaction_summary(
+            fresh_summary
+        )
+
+        # If the first model-generated summary does not follow the structured
+        # format, retain it verbatim as durable fallback. Future compactions
+        # then keep that state deterministically instead of trusting another
+        # lossy summarization pass.
+        if (
+            not prior_summary
+            and not fresh_structured
+        ):
+            fresh_durable = fresh_summary
+
+        durable = _merge_durable_state(
+            prior_durable,
+            fresh_durable,
+        )
+
+        summary = _canonical_compaction_summary(
+            durable,
+            fresh_active,
+        )
+
         envelope = encode_compaction_envelope(
             summary,
             lineage=lineage,

@@ -360,8 +360,24 @@ def test_remote_stream_emits_exactly_one_compaction_and_completed():
 
     assert len(output_items) == 1
     assert output_items[0]["type"] == "compaction"
-    assert remote.decode_compaction_envelope(output_items[0]["encrypted_content"]) == (
+    decoded = remote.decode_compaction_envelope(
+        output_items[0]["encrypted_content"]
+    )
+
+    durable, active, structured = (
+        remote._split_compaction_summary(
+            decoded
+        )
+    )
+
+    assert structured
+    assert (
         "Preserve ALPHA and continue the pending repair."
+        in durable
+    )
+    assert (
+        "Preserve ALPHA and continue the pending repair."
+        in active
     )
     assert len(completed) == 1
     response = completed[0]["response"]
@@ -459,31 +475,9 @@ def test_rewrite_compaction_history_bounds_large_codex_retained_prefix():
         )
     ]
 
-    # The newest retained suffix fits: one large item,
-    # four ~1K items and two tiny items.
-    assert len(retained_users) == 7
-
-    assert (
-        retained_users[0]
-        == retained[4]
-    )
-
-    assert (
-        retained_users[-1]
-        == retained[-1]
-    )
-
-    retained_user_chars = sum(
-        len(
-            item["content"][0]["text"]
-        )
-        for item in retained_users
-    )
-
-    assert (
-        retained_user_chars
-        <= remote._WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET
-    )
+    # Ordinary user instructions before the compaction checkpoint are
+    # represented by the compacted summary and must not be replayed into Web.
+    assert retained_users == []
 
     serialized = json.dumps(
         rewritten,
@@ -555,7 +549,8 @@ def test_normalize_history_body_preserves_post_compaction_tail():
 
     assert len(assistant_summaries) == 1
 
-    # Only the newest large retained user item can fit.
+    # Ordinary user instructions before the compaction checkpoint are
+    # represented by the summary and must not be replayed into ChatGPT Web.
     retained_old = [
         item
         for item in normalized.input
@@ -567,4 +562,159 @@ def test_normalize_history_body_preserves_post_compaction_tail():
         )
     ]
 
-    assert len(retained_old) == 1
+    assert retained_old == []
+
+def test_recursive_compaction_carries_prior_durable_state_without_old_active_step():
+    prior = remote._canonical_compaction_summary(
+        "opaque-value-7319",
+        "The workspace guard is still pending.",
+    )
+
+    fresh = remote._canonical_compaction_summary(
+        "",
+        "The workspace guard completed successfully. "
+        "Next write the result file and read it back.",
+    )
+
+    (
+        prior_durable,
+        _,
+        prior_structured,
+    ) = remote._split_compaction_summary(
+        prior
+    )
+
+    (
+        fresh_durable,
+        fresh_active,
+        fresh_structured,
+    ) = remote._split_compaction_summary(
+        fresh
+    )
+
+    assert prior_structured
+    assert fresh_structured
+
+    merged = remote._canonical_compaction_summary(
+        remote._merge_durable_state(
+            prior_durable,
+            fresh_durable,
+        ),
+        fresh_active,
+    )
+
+    assert "opaque-value-7319" in merged
+    assert "guard completed successfully" in merged
+    assert "guard is still pending" not in merged
+
+
+def test_legacy_compaction_summary_becomes_durable_fallback():
+    legacy = "Remember opaque-value-legacy exactly for unfinished work."
+
+    envelope = remote.encode_compaction_envelope(
+        legacy,
+        lineage="6" * 32,
+    )
+
+    source = [
+        {
+            "type": "compaction",
+            "encrypted_content": envelope,
+        }
+    ]
+
+    prior = remote._prior_compaction_summary(
+        source
+    )
+
+    durable, active, structured = (
+        remote._split_compaction_summary(
+            prior
+        )
+    )
+
+    assert not structured
+    assert durable == ""
+    assert active == legacy
+
+    fallback = (
+        prior
+        if prior and not structured
+        else durable
+    )
+
+    assert fallback == legacy
+
+
+def test_web_rewrite_drops_stale_precheckpoint_user_but_keeps_constraints_and_tail():
+    summary = remote._canonical_compaction_summary(
+        "opaque-value-keep",
+        "Workspace validation completed. "
+        "The next unfinished step is writing the result.",
+    )
+
+    envelope = remote.encode_compaction_envelope(
+        summary,
+        lineage="7" * 32,
+    )
+
+    developer = _message(
+        "developer",
+        "Keep the active safety constraints.",
+    )
+
+    stale_user = _message(
+        "user",
+        "First run the workspace validation command.",
+    )
+
+    current_user = _message(
+        "user",
+        "Continue the unfinished recovery.",
+    )
+
+    rewritten = remote.rewrite_uwa_compaction_history(
+        [
+            developer,
+            stale_user,
+            {
+                "type": "compaction",
+                "encrypted_content": envelope,
+            },
+            current_user,
+        ]
+    )
+
+    serialized = json.dumps(
+        rewritten,
+        ensure_ascii=False,
+    )
+
+    assert developer in rewritten
+    assert current_user == rewritten[-1]
+    assert "opaque-value-keep" in serialized
+    assert (
+        "First run the workspace validation command."
+        not in serialized
+    )
+    assert (
+        "Workspace validation completed."
+        in serialized
+    )
+
+
+def test_structured_summary_sections_round_trip():
+    value = remote._canonical_compaction_summary(
+        "exact-A\nexact-B",
+        "Completed A. Continue B.",
+    )
+
+    durable, active, structured = (
+        remote._split_compaction_summary(
+            value
+        )
+    )
+
+    assert structured
+    assert durable == "exact-A\nexact-B"
+    assert active == "Completed A. Continue B."
