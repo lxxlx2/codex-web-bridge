@@ -31,7 +31,7 @@ def test_trigger_prompt_is_tiny_and_does_not_leak_memory_token():
     assert base.TOKEN not in prompt
     assert probe.TRIGGER_ACK in prompt
     assert "Do not call tools" in prompt
-    assert len(prompt.encode("utf-8")) < 1_000
+    assert len(prompt.encode("utf-8")) < 256
 
 
 def test_rollout_compact_marker_counter_uses_types_only(tmp_path):
@@ -100,4 +100,42 @@ def test_dense_filler_changes_between_rounds():
     assert (
         probe._dense_deterministic_payload(1, 20_000)
         != probe._dense_deterministic_payload(2, 20_000)
+    )
+
+def test_live_validated_defaults_reduce_web_turn_pressure():
+    assert probe.DEFAULT_COARSE_BYTES == 46_000
+    assert probe.DEFAULT_FINE_BYTES == 2_048
+    assert probe.DEFAULT_ARM_GUARD_TOKENS == 512
+
+
+def test_arm_prompt_is_tiny_token_safe_and_exact():
+    prompt = probe.build_arm_prompt(9)
+    expected = probe.arm_expected_reply(9)
+
+    assert base.TOKEN not in prompt
+    assert expected in prompt
+    assert "Do not call tools" in prompt
+    assert len(prompt.encode("utf-8")) < 256
+
+
+def test_switches_from_fixed_fine_fill_to_tiny_arm_near_boundary():
+    assert probe.should_arm_before_next_fine(
+        51,
+        858,
+    )
+    assert probe.should_arm_before_next_fine(
+        400,
+        858,
+    )
+    assert not probe.should_arm_before_next_fine(
+        909,
+        858,
+    )
+    assert probe.should_arm_before_next_fine(
+        400,
+        None,
+    )
+    assert not probe.should_arm_before_next_fine(
+        0,
+        858,
     )

@@ -29,14 +29,17 @@ import codex_large_context_acceptance as base
 import codex_large_context_live as live
 
 
-DEFAULT_COARSE_BYTES = 20_000
+DEFAULT_COARSE_BYTES = 46_000
 DEFAULT_FINE_BYTES = 2_048
 DEFAULT_COARSE_GUARD_TOKENS = 8_000
+DEFAULT_ARM_GUARD_TOKENS = 512
 DEFAULT_MAX_COARSE_ROUNDS = 14
 DEFAULT_MAX_FINE_ROUNDS = 12
+DEFAULT_MAX_ARM_ROUNDS = 8
 DEFAULT_TIMEOUT_SEC = 900
 AUTO_COMPACT_PERCENT = 90
 HARD_CONTEXT_PERCENT = 95
+ARM_ACK_PREFIX = "AUTO_COMPACT_ARM_ACK"
 TRIGGER_ACK = "AUTO_COMPACT_TRIGGER_OK"
 
 
@@ -113,6 +116,38 @@ def build_trigger_prompt() -> str:
     if base.TOKEN in prompt:
         raise AssertionError("trigger prompt leaked the conversation-only token")
     return prompt
+
+
+def arm_expected_reply(round_index: int) -> str:
+    return f"{ARM_ACK_PREFIX}_{round_index:02d}"
+
+
+def build_arm_prompt(round_index: int) -> str:
+    expected = arm_expected_reply(round_index)
+    prompt = (
+        "Do not call tools. "
+        f"Reply exactly {expected}."
+    )
+    if base.TOKEN in prompt:
+        raise AssertionError("arm prompt leaked the conversation-only token")
+    return prompt
+
+
+def should_arm_before_next_fine(
+    margin_to_trigger: int,
+    previous_fine_step: int | None,
+) -> bool:
+    if margin_to_trigger <= 0:
+        return False
+
+    if margin_to_trigger <= DEFAULT_ARM_GUARD_TOKENS:
+        return True
+
+    return bool(
+        previous_fine_step is not None
+        and previous_fine_step > 0
+        and margin_to_trigger <= previous_fine_step
+    )
 
 
 
@@ -298,6 +333,7 @@ def run(
     max_coarse_rounds: int,
     max_fine_rounds: int,
     timeout_sec: int,
+    max_arm_rounds: int = DEFAULT_MAX_ARM_ROUNDS,
 ) -> int:
     root = base.prepare(root)
     codex_path = _resolve_codex(codex)
@@ -401,10 +437,27 @@ def run(
             return 1
 
     fine_rounds = 0
+    previous_fine_step: int | None = None
+
     while active_tokens < trigger_limit and fine_rounds < max_fine_rounds:
+        margin_to_trigger = trigger_limit - active_tokens
+
+        if should_arm_before_next_fine(
+            margin_to_trigger,
+            previous_fine_step,
+        ):
+            print(
+                "PHASE=FINE ARM_SWITCH=YES "
+                f"MARGIN_TO_TRIGGER={margin_to_trigger} "
+                f"PREVIOUS_FINE_STEP={previous_fine_step or 0}"
+            )
+            break
+
         fine_rounds += 1
         round_index += 1
         expected = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
+        previous_active_tokens = active_tokens
+
         observation = _run_turn_preserving_failure(
             codex=codex_path,
             root=root,
@@ -413,23 +466,98 @@ def run(
             thread_id=thread_id,
             timeout_sec=timeout_sec,
         )
+
         current_cumulative = cumulative_tokens(observation)
+
         if current_cumulative is None:
             print(f"RUN_FAIL fine_usage_missing round={round_index}")
             return 1
-        active_tokens = active_response_tokens(previous_cumulative, current_cumulative)
+
+        active_tokens = active_response_tokens(
+            previous_cumulative,
+            current_cumulative,
+        )
         previous_cumulative = current_cumulative
-        exact = _turn_ok(observation, thread_id=thread_id, expected_reply=expected)
+
+        fine_step_tokens = max(
+            0,
+            active_tokens - previous_active_tokens,
+        )
+
+        if fine_step_tokens > 0:
+            previous_fine_step = fine_step_tokens
+
+        exact = _turn_ok(
+            observation,
+            thread_id=thread_id,
+            expected_reply=expected,
+        )
+
         print(
             f"PHASE=FINE ROUND={round_index:02d} "
             f"ACK_EXACT={'YES' if exact else 'NO'} "
             f"ACTIVE_LAST_TOKENS={active_tokens} "
+            f"STEP_TOKENS={fine_step_tokens} "
             f"MARGIN_TO_AUTO={auto_limit - active_tokens} "
             f"MARGIN_TO_TRIGGER={trigger_limit - active_tokens} "
             f"TOOL_EFFECTS={observation.tool_effect_count}"
         )
+
         if not exact:
             print(f"RUN_FAIL fine_contract round={round_index}")
+            return 1
+
+    arm_rounds = 0
+
+    while active_tokens < trigger_limit and arm_rounds < max_arm_rounds:
+        arm_rounds += 1
+        round_index += 1
+        expected = arm_expected_reply(round_index)
+        previous_active_tokens = active_tokens
+
+        observation = _run_turn_preserving_failure(
+            codex=codex_path,
+            root=root,
+            prompt=build_arm_prompt(round_index),
+            trace_path=trace_dir / f"trigger-probe-{round_index:02d}-arm.jsonl",
+            thread_id=thread_id,
+            timeout_sec=timeout_sec,
+        )
+
+        current_cumulative = cumulative_tokens(observation)
+
+        if current_cumulative is None:
+            print(f"RUN_FAIL arm_usage_missing round={round_index}")
+            return 1
+
+        active_tokens = active_response_tokens(
+            previous_cumulative,
+            current_cumulative,
+        )
+        previous_cumulative = current_cumulative
+
+        arm_step_tokens = max(
+            0,
+            active_tokens - previous_active_tokens,
+        )
+
+        exact = _turn_ok(
+            observation,
+            thread_id=thread_id,
+            expected_reply=expected,
+        )
+
+        print(
+            f"PHASE=ARM ROUND={round_index:02d} "
+            f"ACK_EXACT={'YES' if exact else 'NO'} "
+            f"ACTIVE_LAST_TOKENS={active_tokens} "
+            f"STEP_TOKENS={arm_step_tokens} "
+            f"MARGIN_TO_TRIGGER={trigger_limit - active_tokens} "
+            f"TOOL_EFFECTS={observation.tool_effect_count}"
+        )
+
+        if not exact:
+            print(f"RUN_FAIL arm_contract round={round_index}")
             return 1
 
     threshold_crossed = active_tokens >= trigger_limit
@@ -511,6 +639,7 @@ def main() -> int:
     parser.add_argument("--coarse-guard-tokens", type=int, default=DEFAULT_COARSE_GUARD_TOKENS)
     parser.add_argument("--max-coarse-rounds", type=int, default=DEFAULT_MAX_COARSE_ROUNDS)
     parser.add_argument("--max-fine-rounds", type=int, default=DEFAULT_MAX_FINE_ROUNDS)
+    parser.add_argument("--max-arm-rounds", type=int, default=DEFAULT_MAX_ARM_ROUNDS)
     parser.add_argument("--timeout-sec", type=int, default=DEFAULT_TIMEOUT_SEC)
     args = parser.parse_args()
 
@@ -518,7 +647,11 @@ def main() -> int:
         raise SystemExit("filler bytes must be >= 1024")
     if args.coarse_guard_tokens < 1:
         raise SystemExit("--coarse-guard-tokens must be positive")
-    if args.max_coarse_rounds < 1 or args.max_fine_rounds < 1:
+    if (
+        args.max_coarse_rounds < 1
+        or args.max_fine_rounds < 1
+        or args.max_arm_rounds < 1
+    ):
         raise SystemExit("round limits must be positive")
 
     return run(
@@ -531,6 +664,7 @@ def main() -> int:
         max_coarse_rounds=args.max_coarse_rounds,
         max_fine_rounds=args.max_fine_rounds,
         timeout_sec=args.timeout_sec,
+        max_arm_rounds=args.max_arm_rounds,
     )
 
 
