@@ -1,8 +1,8 @@
 """Fail-closed ChatGPT Web rate-limit and ambiguous-submit guard.
 
 The ChatGPT web surface can temporarily throttle conversation access while the
-browser still exposes an enabled composer/send button.  Treat that UI state as
-a first-class transport condition so the send-confirmation fallback does not
+browser still exposes an enabled composer/send button. Treat that UI state as a
+first-class transport condition so the send-confirmation fallback does not
 hammer the same prompt repeatedly.
 
 Design goals:
@@ -10,12 +10,17 @@ Design goals:
 - dismiss only the modal acknowledgement control when present;
 - persist a small account/channel cooldown under ``~/.uwa`` so listener restarts
   do not immediately resume sending;
+- wait out a throttle discovered before the initial submit, because no message
+  has been dispatched yet;
 - never auto-resend a ChatGPT prompt after an already-dispatched send becomes
-  ambiguous.  An ambiguous submit must fail closed instead of risking a
-  duplicate message.
+  ambiguous. An ambiguous submit must fail closed instead of risking a duplicate
+  message;
+- emit standard HTTP-like terminal errors so the existing workflow/error stack
+  unwinds immediately instead of leaving the browser session busy until the
+  generic stuck watchdog fires.
 
 The implementation is intentionally a narrow runtime compatibility patch over
-``WorkflowExecutorSendMixin``.  Other sites keep their existing retry behavior.
+``WorkflowExecutorSendMixin``. Other sites keep their existing retry behavior.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.core.config import WorkflowError, logger
 
@@ -134,7 +139,6 @@ def _record_rate_limit(now: float | None = None) -> Dict[str, Any]:
         except (TypeError, ValueError):
             previous_hits = 0
 
-        # A long quiet interval starts a new backoff sequence.
         if last_seen <= 0 or current - last_seen > 600.0:
             previous_hits = 0
         hits = max(1, previous_hits + 1)
@@ -195,21 +199,27 @@ def _probe_rate_limit(executor: Any) -> Dict[str, Any]:
     return dict(result) if isinstance(result, dict) else {"detected": False, "dismissed": False}
 
 
-def _raise_rate_limited(executor: Any) -> None:
-    state = _record_rate_limit()
+def _cancelled(executor: Any) -> bool:
+    checker = getattr(executor, "_check_cancelled", None)
+    return bool(callable(checker) and checker())
+
+
+def _raise_rate_limited(*, state: Optional[Dict[str, Any]] = None) -> None:
+    current = dict(state or _record_rate_limit())
     logger.warning(
-        "[CHATGPT_WEB_GUARD] ChatGPT Web rate-limit modal detected; "
-        "automatic resend disabled and channel cooldown armed "
-        f"(backoff={state['backoff_seconds']:.0f}s, hits={state['hits']})"
+        "[CHATGPT_WEB_GUARD] ChatGPT Web rate-limit remains active; "
+        "automatic resend disabled and terminal 429 propagated "
+        f"(backoff={float(current.get('backoff_seconds', 0.0) or 0.0):.0f}s, "
+        f"hits={int(current.get('hits', 0) or 0)})"
     )
-    raise WorkflowError("chatgpt_web_rate_limited")
+    raise WorkflowError("429 Too Many Requests: chatgpt_web_rate_limited")
 
 
-def _wait_existing_cooldown(executor: Any) -> None:
+def _wait_existing_cooldown(executor: Any) -> bool:
     status = rate_limit_status()
     remaining = float(status.get("cooldown_remaining_seconds", 0.0) or 0.0)
     if remaining <= 0:
-        return
+        return not _cancelled(executor)
 
     logger.warning(
         "[CHATGPT_WEB_GUARD] ChatGPT Web channel is cooling down; "
@@ -217,19 +227,42 @@ def _wait_existing_cooldown(executor: Any) -> None:
     )
     deadline = time.time() + remaining
     while time.time() < deadline:
-        checker = getattr(executor, "_check_cancelled", None)
-        if callable(checker) and checker():
-            return
+        if _cancelled(executor):
+            return False
         time.sleep(min(0.25, max(0.0, deadline - time.time())))
+    return not _cancelled(executor)
 
 
 def guard_before_initial_send(executor: Any) -> None:
     if not _is_chatgpt_executor(executor):
         return
-    _wait_existing_cooldown(executor)
+    if not _wait_existing_cooldown(executor):
+        raise WorkflowError("request_cancelled")
+
     state = _probe_rate_limit(executor)
-    if state.get("detected"):
-        _raise_rate_limited(executor)
+    if not state.get("detected"):
+        return
+
+    cooldown = _record_rate_limit()
+    logger.warning(
+        "[CHATGPT_WEB_GUARD] ChatGPT Web rate-limit modal detected before submit; "
+        "no message has been dispatched, so the initial send will wait for the "
+        "channel cooldown instead of failing immediately "
+        f"(backoff={cooldown['backoff_seconds']:.0f}s, hits={cooldown['hits']}, "
+        f"dismissed={bool(state.get('dismissed'))})"
+    )
+
+    if not _wait_existing_cooldown(executor):
+        raise WorkflowError("request_cancelled")
+
+    after_cooldown = _probe_rate_limit(executor)
+    if after_cooldown.get("detected"):
+        _raise_rate_limited(state=cooldown)
+
+    logger.info(
+        "[CHATGPT_WEB_GUARD] pre-submit cooldown completed and the visible "
+        "rate-limit modal is clear; allowing one initial send"
+    )
 
 
 def guard_before_retry(executor: Any) -> None:
@@ -238,13 +271,14 @@ def guard_before_retry(executor: Any) -> None:
 
     state = _probe_rate_limit(executor)
     if state.get("detected"):
-        _raise_rate_limited(executor)
+        cooldown = _record_rate_limit()
+        _raise_rate_limited(state=cooldown)
 
     logger.warning(
         "[CHATGPT_WEB_GUARD] prior ChatGPT send was dispatched but submission is ambiguous; "
         "suppressing automatic resend to avoid duplicate messages"
     )
-    raise WorkflowError("chatgpt_send_submission_unknown")
+    raise WorkflowError("422 Unprocessable Entity: chatgpt_send_submission_unknown")
 
 
 def install_chatgpt_web_rate_limit_guard() -> None:
