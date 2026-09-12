@@ -211,6 +211,78 @@ def looks_like_local_workspace_request(messages: List[Dict[str, Any]]) -> bool:
     return any(pattern.search(text) for pattern in _WORKSPACE_REQUEST_PATTERNS)
 
 
+def _message_content_text(message: Dict[str, Any]) -> str:
+    if not isinstance(message, dict):
+        return ""
+
+    content = message.get("content")
+
+    if isinstance(content, str):
+        return content
+
+    try:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+        )
+    except Exception:
+        return str(content or "")
+
+
+def _latest_user_is_function_output_fallback(
+    messages: List[Dict[str, Any]],
+) -> bool:
+    text = _latest_user_text(
+        messages
+    ).lstrip()
+
+    return text.startswith(
+        "[Function Call Output"
+    )
+
+
+def _looks_like_compacted_workspace_continuation(
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Recover workspace intent after compaction removed explicit tool history."""
+
+    if not _latest_user_is_function_output_fallback(
+        messages
+    ):
+        return False
+
+    for message in reversed(
+        messages or []
+    ):
+        if not isinstance(message, dict):
+            continue
+
+        role = str(
+            message.get("role") or ""
+        ).strip().lower()
+
+        if role != "assistant":
+            continue
+
+        text = _message_content_text(
+            message
+        )
+
+        if (
+            "[Compacted prior context]"
+            not in text
+        ):
+            continue
+
+        return any(
+            pattern.search(text)
+            for pattern
+            in _WORKSPACE_REQUEST_PATTERNS
+        )
+
+    return False
+
+
 def looks_like_client_access_refusal(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
@@ -300,9 +372,25 @@ def should_repair_client_workspace_refusal(
             and looks_like_post_tool_unavailable_claim(assistant_text)
         )
 
-    if not looks_like_local_workspace_request(messages):
+    local_workspace_request = (
+        looks_like_local_workspace_request(
+            messages
+        )
+    )
+
+    if not local_workspace_request:
+        local_workspace_request = (
+            _looks_like_compacted_workspace_continuation(
+                messages
+            )
+        )
+
+    if not local_workspace_request:
         return False
-    return looks_like_client_access_refusal(assistant_text)
+
+    return looks_like_client_access_refusal(
+        assistant_text
+    )
 
 
 def build_client_workspace_repair_messages(

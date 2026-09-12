@@ -192,3 +192,112 @@ def test_post_tool_context_path_refusal_roundtrip_calls_exec(
         "workdir"
         not in result["tool_calls"][0]["function"]["arguments"]
     )
+
+def _compacted_workspace_continuation_history():
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "Preserve required exact continuation state.\n\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Continue the local workspace task. "
+                "Use exec_command to create context/result.txt, "
+                "read it back, verify the content, and finish the task."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "[Function Call Output: exec_command (call_guard)]\n"
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "workspace guard passed"
+            ),
+        },
+    ]
+
+
+def test_compacted_function_output_keeps_workspace_intent(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    messages = (
+        _compacted_workspace_continuation_history()
+    )
+
+    assert (
+        policy._looks_like_compacted_workspace_continuation(
+            messages
+        )
+        is True
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_REFUSAL,
+        parsed=parsed,
+    ) is True
+
+
+def test_compacted_function_output_path_refusal_roundtrip_repairs(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TOOL_CALLING_INTERNAL_RETRY_MAX",
+        "2",
+    )
+
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    replies = iter(
+        [
+            LIVE_REFUSAL,
+            (
+                '<adapter_calls>'
+                '<call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"echo ok > context/result.txt && cat context/result.txt"}'
+                ']]></arguments>'
+                '</call>'
+                '</adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_compacted_workspace_continuation_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert (
+        result["tool_calls"][0]["function"]["name"]
+        == "exec_command"
+    )
+    assert (
+        "workdir"
+        not in result["tool_calls"][0]["function"]["arguments"]
+    )
