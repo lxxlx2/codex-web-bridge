@@ -49,6 +49,8 @@ _MAX_ENVELOPE_BYTES = 96 * 1024
 _MAX_COMPACTION_OUTPUT_TOKENS = 1024
 _BYTES_PER_TOKEN = 3
 _LINEAGE_HEX_LEN = 32
+_WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET = 24_000
+_WEB_ALWAYS_RETAINED_ROLES = {"system", "developer"}
 
 _COMPACTION_INSTRUCTIONS = """[Codex Remote Compaction V2]
 Create a compact replacement-history summary for a long-running coding thread.
@@ -445,35 +447,205 @@ def _compaction_message(summary: str) -> Dict[str, Any]:
     }
 
 
-def rewrite_uwa_compaction_history(source: Any) -> Any:
-    """Replace one valid UWA Compaction item with model-visible summary context."""
+def _text_char_count(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, dict):
+        return sum(
+            _text_char_count(item)
+            for item in value.values()
+        )
+    if isinstance(value, (list, tuple)):
+        return sum(
+            _text_char_count(item)
+            for item in value
+        )
+    return 0
+
+
+def _retained_prefix_for_web(
+    source: list[Any],
+) -> Tuple[list[Any], int, int, int]:
+    """Bound Codex-retained pre-compaction history for ChatGPT Web.
+
+    Remote Compaction V2 deliberately retains selected messages before the
+    compaction item. The native Responses backend can accept that retained
+    window, while ChatGPT Web has a smaller composer/replay envelope.
+
+    Preserve system/developer constraints unconditionally. For all remaining
+    retained items, keep the newest contiguous suffix that fits the Web text
+    budget. The compaction summary remains the authoritative durable history.
+    """
+
+    mandatory: set[int] = set()
+    original_chars = 0
+
+    for index, item in enumerate(source):
+        content = (
+            item.get("content")
+            if isinstance(item, dict)
+            else item
+        )
+        original_chars += _text_char_count(
+            content
+        )
+
+        if not isinstance(item, dict):
+            continue
+
+        if _item_type(item) != "message":
+            continue
+
+        role = str(
+            item.get("role") or ""
+        ).strip().lower()
+
+        if role in _WEB_ALWAYS_RETAINED_ROLES:
+            mandatory.add(index)
+
+    kept = set(mandatory)
+    remaining = (
+        _WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET
+    )
+
+    for index in range(
+        len(source) - 1,
+        -1,
+        -1,
+    ):
+        if index in mandatory:
+            continue
+
+        item = source[index]
+
+        content = (
+            item.get("content")
+            if isinstance(item, dict)
+            else item
+        )
+
+        size = _text_char_count(content)
+
+        if size > remaining:
+            break
+
+        kept.add(index)
+        remaining -= size
+
+    retained = [
+        copy.deepcopy(item)
+        for index, item in enumerate(source)
+        if index in kept
+    ]
+
+    retained_chars = sum(
+        _text_char_count(
+            item.get("content")
+            if isinstance(item, dict)
+            else item
+        )
+        for item in retained
+    )
+
+    dropped = len(source) - len(retained)
+
+    return (
+        retained,
+        dropped,
+        original_chars,
+        retained_chars,
+    )
+
+
+def rewrite_uwa_compaction_history(
+    source: Any,
+) -> Any:
+    """Expose UWA compaction state within a bounded ChatGPT Web replay."""
 
     if not isinstance(source, list):
         return source
-    rewritten: list[Any] = []
-    seen = 0
-    for item in source:
+
+    compaction_indexes: list[int] = []
+
+    for index, item in enumerate(source):
         item_type = _item_type(item)
+
         if item_type in _UNSUPPORTED_COMPACTION_TYPES:
             raise RemoteCompactionV2ProtocolError(
                 f"unsupported compaction item type: {item_type}"
             )
-        if item_type not in _COMPACTION_TYPES:
-            rewritten.append(copy.deepcopy(item))
-            continue
-        seen += 1
-        if seen > 1:
-            raise RemoteCompactionV2ProtocolError("multiple compaction items are not supported")
-        if not isinstance(item, dict):
-            raise RemoteCompactionV2ProtocolError("invalid compaction item")
-        summary = decode_compaction_envelope(str(item.get("encrypted_content") or ""))
-        rewritten.append(_compaction_message(summary))
-    return rewritten
+
+        if item_type in _COMPACTION_TYPES:
+            compaction_indexes.append(index)
+
+    if not compaction_indexes:
+        return copy.deepcopy(source)
+
+    if len(compaction_indexes) != 1:
+        raise RemoteCompactionV2ProtocolError(
+            "multiple compaction items are not supported"
+        )
+
+    compact_index = compaction_indexes[0]
+    compact_item = source[compact_index]
+
+    if not isinstance(compact_item, dict):
+        raise RemoteCompactionV2ProtocolError(
+            "invalid compaction item"
+        )
+
+    summary = decode_compaction_envelope(
+        str(
+            compact_item.get(
+                "encrypted_content"
+            )
+            or ""
+        )
+    )
+
+    (
+        retained_prefix,
+        dropped,
+        original_chars,
+        retained_chars,
+    ) = _retained_prefix_for_web(
+        source[:compact_index]
+    )
+
+    if dropped:
+        logger.info(
+            "[CODEX_REMOTE_COMPACTION_V2] "
+            "bounded retained history for ChatGPT Web: "
+            f"dropped_items={dropped} "
+            f"retained_items={len(retained_prefix)} "
+            f"original_text_chars={original_chars} "
+            f"retained_text_chars={retained_chars} "
+            f"budget={_WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET}"
+        )
+
+    suffix = [
+        copy.deepcopy(item)
+        for item in source[
+            compact_index + 1:
+        ]
+    ]
+
+    return (
+        retained_prefix
+        + [_compaction_message(summary)]
+        + suffix
+    )
 
 
-def normalize_history_body(body: ResponsesRequest) -> ResponsesRequest:
+def normalize_history_body(
+    body: ResponsesRequest,
+) -> ResponsesRequest:
     cloned = _model_copy(body)
-    cloned.input = rewrite_uwa_compaction_history(cloned.input)
+    cloned.input = rewrite_uwa_compaction_history(
+        cloned.input
+    )
     return cloned
 
 

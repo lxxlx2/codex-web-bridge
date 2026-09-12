@@ -370,3 +370,201 @@ def test_remote_stream_emits_exactly_one_compaction_and_completed():
     assert response["output"][0]["type"] == "compaction"
     assert response["usage"]["total_tokens"] > 0
     assert capture["body"].tools is None
+
+def test_rewrite_compaction_history_bounds_large_codex_retained_prefix():
+    summary = "durable compact state"
+    envelope = remote.encode_compaction_envelope(
+        summary
+    )
+
+    sizes = [
+        115,
+        15_777,
+        15_777,
+        15_777,
+        15_777,
+        1_126,
+        1_126,
+        1_126,
+        1_126,
+        67,
+        67,
+    ]
+
+    retained = [
+        _message(
+            "user",
+            f"retained-{index}:"
+            + ("x" * size),
+        )
+        for index, size in enumerate(
+            sizes
+        )
+    ]
+
+    developer = _message(
+        "developer",
+        "d" * 7_243,
+    )
+
+    current = _message(
+        "user",
+        "current-after-compaction",
+    )
+
+    source = [
+        developer,
+        *retained,
+        {
+            "type": "compaction",
+            "encrypted_content": envelope,
+        },
+        current,
+    ]
+
+    rewritten = (
+        remote.rewrite_uwa_compaction_history(
+            source
+        )
+    )
+
+    compact_index = next(
+        index
+        for index, item in enumerate(
+            rewritten
+        )
+        if (
+            isinstance(item, dict)
+            and item.get("role")
+            == "assistant"
+            and "Compacted prior context"
+            in json.dumps(
+                item,
+                ensure_ascii=False,
+            )
+        )
+    )
+
+    prefix = rewritten[:compact_index]
+
+    assert developer in prefix
+    assert rewritten[-1] == current
+
+    retained_users = [
+        item
+        for item in prefix
+        if (
+            isinstance(item, dict)
+            and item.get("role") == "user"
+        )
+    ]
+
+    # The newest retained suffix fits: one large item,
+    # four ~1K items and two tiny items.
+    assert len(retained_users) == 7
+
+    assert (
+        retained_users[0]
+        == retained[4]
+    )
+
+    assert (
+        retained_users[-1]
+        == retained[-1]
+    )
+
+    retained_user_chars = sum(
+        len(
+            item["content"][0]["text"]
+        )
+        for item in retained_users
+    )
+
+    assert (
+        retained_user_chars
+        <= remote._WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET
+    )
+
+    serialized = json.dumps(
+        rewritten,
+        ensure_ascii=False,
+    )
+
+    assert summary in serialized
+    assert envelope not in serialized
+
+
+def test_normalize_history_body_preserves_post_compaction_tail():
+    envelope = remote.encode_compaction_envelope(
+        "summary checkpoint"
+    )
+
+    old = [
+        _message(
+            "user",
+            "x" * 16_000,
+        )
+        for _ in range(4)
+    ]
+
+    tail = [
+        _message(
+            "user",
+            "new turn one",
+        ),
+        _message(
+            "user",
+            "new turn two",
+        ),
+    ]
+
+    body = ResponsesRequest(
+        model="chatgpt",
+        stream=True,
+        input=[
+            *old,
+            {
+                "type": "compaction",
+                "encrypted_content": envelope,
+            },
+            *tail,
+        ],
+    )
+
+    normalized = remote.normalize_history_body(
+        body
+    )
+
+    assert normalized.input[-2:] == tail
+
+    assert all(
+        item.get("type") != "compaction"
+        for item in normalized.input
+        if isinstance(item, dict)
+    )
+
+    assistant_summaries = [
+        item
+        for item in normalized.input
+        if (
+            isinstance(item, dict)
+            and item.get("role")
+            == "assistant"
+        )
+    ]
+
+    assert len(assistant_summaries) == 1
+
+    # Only the newest large retained user item can fit.
+    retained_old = [
+        item
+        for item in normalized.input
+        if (
+            isinstance(item, dict)
+            and item.get("role")
+            == "user"
+            and item not in tail
+        )
+    ]
+
+    assert len(retained_old) == 1
