@@ -1,3 +1,5 @@
+from app.services import client_tool_policy as policy
+from app.services import codex_workspace_refusal_language_patch as language_patch
 from app.services.client_tool_policy import should_repair_client_workspace_refusal
 from app.services.tool_calling import complete_tool_calling_roundtrip
 
@@ -74,3 +76,119 @@ def test_context_turn_path_refusal_roundtrip_becomes_exec_command(monkeypatch):
     assert result["mode"] == "tool_calls"
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     assert "workdir" not in result["tool_calls"][0]["function"]["arguments"]
+
+def _successful_workspace_guard_history():
+    return [
+        {
+            "role": "user",
+            "content": CONTEXT_TURN_2,
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_guard",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && '
+                            'test -f marker && '
+                            'test -d large_context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "name": "exec_command",
+            "tool_call_id": "call_guard",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "workspace guard passed"
+            ),
+        },
+    ]
+
+
+def test_post_tool_context_path_refusal_is_repaired(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    assert (
+        policy.looks_like_post_tool_unavailable_claim(
+            LIVE_REFUSAL
+        )
+        is True
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_successful_workspace_guard_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_REFUSAL,
+        parsed=parsed,
+    ) is True
+
+
+def test_post_tool_context_path_refusal_roundtrip_calls_exec(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOOL_CALLING_CLIENT_WORKSPACE_REPAIR",
+        "true",
+    )
+    monkeypatch.setenv(
+        "TOOL_CALLING_INTERNAL_RETRY_MAX",
+        "2",
+    )
+
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    replies = iter(
+        [
+            LIVE_REFUSAL,
+            (
+                '<adapter_calls>'
+                '<call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"echo ok > context/result.txt && cat context/result.txt"}'
+                ']]></arguments>'
+                '</call>'
+                '</adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_successful_workspace_guard_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert (
+        result["tool_calls"][0]["function"]["name"]
+        == "exec_command"
+    )
+    assert (
+        "workdir"
+        not in result["tool_calls"][0]["function"]["arguments"]
+    )

@@ -44,25 +44,88 @@ def looks_like_codex_workspace_path_refusal(text: str) -> bool:
 
 def install_codex_workspace_refusal_language_patch() -> None:
     global _INSTALLED
-    if _INSTALLED:
-        return
 
     from app.services import client_tool_policy as policy
 
-    current = policy.looks_like_client_access_refusal
-    if bool(getattr(current, "_uwa_codex_workspace_path_refusal_guarded", False)):
+    access_marker = (
+        "_uwa_codex_workspace_path_refusal_guarded"
+    )
+    post_tool_marker = (
+        "_uwa_codex_workspace_path_refusal_post_tool_guarded"
+    )
+
+    current_access = (
+        policy.looks_like_client_access_refusal
+    )
+    current_post_tool = (
+        policy.looks_like_post_tool_unavailable_claim
+    )
+
+    access_guarded = bool(
+        getattr(
+            current_access,
+            access_marker,
+            False,
+        )
+    )
+    post_tool_guarded = bool(
+        getattr(
+            current_post_tool,
+            post_tool_marker,
+            False,
+        )
+    )
+
+    if access_guarded and post_tool_guarded:
         _INSTALLED = True
         return
 
-    def _wrapped(text: str) -> bool:
-        if current(text):
-            return True
-        return looks_like_codex_workspace_path_refusal(text)
+    if not access_guarded:
+        def _wrapped_access(text: str) -> bool:
+            if current_access(text):
+                return True
+            return (
+                looks_like_codex_workspace_path_refusal(
+                    text
+                )
+            )
 
-    setattr(_wrapped, "_uwa_codex_workspace_path_refusal_guarded", True)
-    policy.looks_like_client_access_refusal = _wrapped
+        setattr(
+            _wrapped_access,
+            access_marker,
+            True,
+        )
+
+        policy.looks_like_client_access_refusal = (
+            _wrapped_access
+        )
+
+    if not post_tool_guarded:
+        def _wrapped_post_tool(text: str) -> bool:
+            if current_post_tool(text):
+                return True
+            return (
+                looks_like_codex_workspace_path_refusal(
+                    text
+                )
+            )
+
+        setattr(
+            _wrapped_post_tool,
+            post_tool_marker,
+            True,
+        )
+
+        policy.looks_like_post_tool_unavailable_claim = (
+            _wrapped_post_tool
+        )
+
     _INSTALLED = True
-    logger.info("[CODEX_WORKSPACE_REFUSAL] path-oriented refusal compatibility installed")
+
+    logger.info(
+        "[CODEX_WORKSPACE_REFUSAL] "
+        "path-oriented refusal compatibility installed"
+    )
 
 
 __all__ = [
