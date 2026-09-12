@@ -16,6 +16,10 @@ from fastapi import FastAPI
 
 from app.api.standalone_routes import router as codex_router
 from app.core import get_browser
+from app.services.chatgpt_web_rate_limit_guard import (
+    install_chatgpt_web_rate_limit_guard,
+    rate_limit_status,
+)
 from app.services.request_manager import request_manager
 
 
@@ -40,6 +44,7 @@ def _request_status() -> Dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    install_chatgpt_web_rate_limit_guard()
     yield
     try:
         browser = get_browser(auto_connect=False)
@@ -84,4 +89,5 @@ async def health() -> Dict[str, Any]:
         "browser": browser_status,
         "running_count": running_count,
         "request_manager": request_status,
+        "chatgpt_web": rate_limit_status(),
     }
