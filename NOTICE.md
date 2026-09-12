@@ -23,9 +23,16 @@ Files derived from the upstream project remain subject to AGPL-3.0 and applicabl
 
 S1/S2 extraction may move or narrow upstream-derived code. Refactoring or relocation does not remove the original license obligations.
 
-## Reference implementations
+## Reference implementations and acknowledgements
 
 During development, public Codex/Responses bridge projects and public upstream Codex behavior were studied for interoperability and reliability ideas. Compatibility research does not imply sponsorship or endorsement. Any directly reused third-party code must have compatible licensing and explicit file-level attribution before release.
+
+Special thanks to these public projects for documenting failure modes and reliability patterns around ChatGPT Web automation:
+
+- `leeguooooo/chatgpt-use` — https://github.com/leeguooooo/chatgpt-use — studied for request-economy, account/channel serialization, throttle backoff, submission-unknown semantics and conversation-record recovery ideas.
+- `kev489/gpt-tool-use` — https://github.com/kev489/gpt-tool-use — studied for explicit ChatGPT rate-limit dialog detection across send/wait phases and fail-closed handling when the web surface is throttled.
+
+The current Codex Web Bridge guard implementation is independently written for this repository; no source code from those projects is copied into this project by this acknowledgement.
 
 ## Independent project
 
