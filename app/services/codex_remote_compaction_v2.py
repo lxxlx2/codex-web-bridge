@@ -51,6 +51,14 @@ _BYTES_PER_TOKEN = 3
 _LINEAGE_HEX_LEN = 32
 _WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET = 24_000
 _WEB_ALWAYS_RETAINED_ROLES = {"system", "developer"}
+_BACKING_SUMMARY_RETRY_DELAY_SEC = 1.0
+_BACKING_SUMMARY_RETRYABLE_ERRORS = frozenset(
+    {
+        "compaction backing response has invalid choices",
+        "compaction backing response has no assistant message",
+        "compaction backing response has no summary",
+    }
+)
 
 _COMPACTION_INSTRUCTIONS = """[Codex Remote Compaction V2]
 Create a compact replacement-history summary for a long-running coding thread.
@@ -836,6 +844,14 @@ def _estimate_tokens(value: Any) -> int:
     return max(1, (len(raw) + _BYTES_PER_TOKEN - 1) // _BYTES_PER_TOKEN)
 
 
+def _retryable_backing_summary_error(
+    exc: RemoteCompactionV2ProtocolError,
+) -> bool:
+    return str(exc).strip() in (
+        _BACKING_SUMMARY_RETRYABLE_ERRORS
+    )
+
+
 def compaction_usage(backing_body: ResponsesRequest, summary: str) -> Dict[str, Any]:
     input_tokens = _estimate_tokens(
         {
@@ -927,9 +943,101 @@ async def _stream_remote_compaction_v2(
         if status_code >= 400 or not isinstance(payload, dict) or "error" in payload:
             raise RemoteCompactionV2ProtocolError("compaction backing request failed")
 
-        fresh_summary = extract_backing_summary(
-            payload
-        )
+        try:
+            fresh_summary = extract_backing_summary(
+                payload
+            )
+        except RemoteCompactionV2ProtocolError as exc:
+            if not _retryable_backing_summary_error(
+                exc
+            ):
+                raise
+
+            logger.warning(
+                "[CODEX_REMOTE_COMPACTION_V2] "
+                "structurally empty backing response; "
+                "retrying once on a fresh ChatGPT composer"
+            )
+
+            await asyncio.sleep(
+                _BACKING_SUMMARY_RETRY_DELAY_SEC
+            )
+
+            v2.prepare_and_verify_codex_web_mode(
+                backing_body.reasoning
+            )
+            v2.install_codex_chatgpt_network_tuning()
+
+            retry_chat_body = (
+                v2._responses_request_to_chat_request(
+                    backing_body,
+                    stream=False,
+                )
+            )
+
+            retry_task = asyncio.create_task(
+                v2._run_chat_completion_final(
+                    request=request,
+                    body=retry_chat_body,
+                    authenticated=authenticated,
+                )
+            )
+
+            try:
+                while not retry_task.done():
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(
+                                retry_task
+                            ),
+                            timeout=(
+                                v2._CODEX_SSE_KEEPALIVE_SEC
+                            ),
+                        )
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            retry_task.cancel()
+
+                            try:
+                                await retry_task
+                            except asyncio.CancelledError:
+                                pass
+
+                            return
+
+                        yield ": keepalive\n\n"
+
+                (
+                    retry_status_code,
+                    retry_payload,
+                ) = retry_task.result()
+
+            finally:
+                if not retry_task.done():
+                    retry_task.cancel()
+
+                    try:
+                        await retry_task
+                    except asyncio.CancelledError:
+                        pass
+
+            if (
+                retry_status_code >= 400
+                or not isinstance(
+                    retry_payload,
+                    dict,
+                )
+                or "error" in retry_payload
+            ):
+                raise RemoteCompactionV2ProtocolError(
+                    "compaction backing retry failed"
+                )
+
+            fresh_summary = (
+                extract_backing_summary(
+                    retry_payload
+                )
+            )
 
         (
             prior_durable,

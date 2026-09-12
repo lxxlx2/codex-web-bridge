@@ -718,3 +718,150 @@ def test_structured_summary_sections_round_trip():
     assert structured
     assert durable == "exact-A\nexact-B"
     assert active == "Completed A. Continue B."
+
+def test_backing_summary_retry_classifier_is_narrow():
+    for message in (
+        "compaction backing response has invalid choices",
+        "compaction backing response has no assistant message",
+        "compaction backing response has no summary",
+    ):
+        assert remote._retryable_backing_summary_error(
+            remote.RemoteCompactionV2ProtocolError(
+                message
+            )
+        )
+
+    for message in (
+        "compaction backing response attempted a tool call",
+        "compaction backing summary exceeds UWA bound",
+        "foreign compaction envelope",
+        "compaction backing request failed",
+    ):
+        assert not remote._retryable_backing_summary_error(
+            remote.RemoteCompactionV2ProtocolError(
+                message
+            )
+        )
+
+
+def test_remote_stream_retries_one_empty_backing_response(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        remote,
+        "_BACKING_SUMMARY_RETRY_DELAY_SEC",
+        0,
+    )
+
+    capture = {}
+    fake = _fake_v2(capture)
+
+    original = (
+        fake._run_chat_completion_final
+    )
+
+    calls = {
+        "count": 0,
+    }
+
+    async def flaky_backing(**kwargs):
+        calls["count"] += 1
+
+        if calls["count"] == 1:
+            return (
+                200,
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {},
+                },
+            )
+
+        return await original(**kwargs)
+
+    fake._run_chat_completion_final = (
+        flaky_backing
+    )
+
+    async def collect():
+        chunks = []
+
+        async for chunk in (
+            remote._stream_remote_compaction_v2(
+                v2=fake,
+                request=_Request(),
+                body=_trigger_body(),
+                authenticated=False,
+            )
+        ):
+            chunks.append(chunk)
+
+        return chunks
+
+    chunks = asyncio.run(collect())
+    output = "".join(chunks)
+
+    assert calls["count"] == 2
+    assert "response.completed" in output
+    assert "response.failed" not in output
+
+
+def test_remote_stream_does_not_retry_explicit_backing_error(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        remote,
+        "_BACKING_SUMMARY_RETRY_DELAY_SEC",
+        0,
+    )
+
+    capture = {}
+    fake = _fake_v2(capture)
+
+    calls = {
+        "count": 0,
+    }
+
+    async def failed_backing(**kwargs):
+        del kwargs
+        calls["count"] += 1
+
+        return (
+            429,
+            {
+                "error": {
+                    "message": "rate limited",
+                    "type": "execution_error",
+                    "code": "rate_limit",
+                }
+            },
+        )
+
+    fake._run_chat_completion_final = (
+        failed_backing
+    )
+
+    async def collect():
+        chunks = []
+
+        try:
+            async for chunk in (
+                remote._stream_remote_compaction_v2(
+                    v2=fake,
+                    request=_Request(),
+                    body=_trigger_body(),
+                    authenticated=False,
+                )
+            ):
+                chunks.append(chunk)
+        except remote.RemoteCompactionV2ProtocolError:
+            pass
+
+        return chunks
+
+    asyncio.run(collect())
+
+    assert calls["count"] == 1
