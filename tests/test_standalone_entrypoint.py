@@ -93,6 +93,9 @@ class StandaloneEntrypointTests(unittest.TestCase):
         self.assertIn('REQUIREMENTS = ROOT / "requirements.txt"', source)
         self.assertIn('"-m",\n        "uvicorn"', source)
         self.assertIn("_loopback_host", source)
+        self.assertIn('"--bootstrap-only"', source)
+        self.assertIn('"[setup] standalone requirements ready"', source)
+        self.assertIn('"--prefer-binary"', source)
         self.assertNotIn("start_upstream", source)
         self.assertNotIn("AUTO_UPDATE_ENABLED", source)
 
