@@ -2,14 +2,16 @@
 """Clean-checkout install/provider/rollback smoke for Codex Web Bridge rc.1.
 
 This is a local macOS release gate. It creates a detached worktree and a
-temporary HOME, installs the public wrappers from that clean checkout, runs one
-small real Codex request through the checkout-owned listener, verifies the
-official rollback in the isolated HOME, then switches back and stops cleanly.
+temporary HOME, installs the public wrappers from that clean checkout, prepares
+the checkout-local runtime before touching the active listener, runs one small
+real Codex request through the checkout-owned listener, verifies the official
+rollback in the isolated HOME, then switches back and stops cleanly.
 
 It never copies or prints authentication material. Existing user Codex config is
 not modified because all wrapper/provider commands run with an isolated HOME.
 If TCP 8199 is already served by the current checkout, the runner temporarily
-stops it and restores it in ``finally``. Foreign listeners are never touched.
+stops it only after the clean checkout dependency bootstrap succeeds, then
+restores it in ``finally``. Foreign listeners are never touched.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ except ModuleNotFoundError:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PRIVATE_ROOT = Path.home() / ".uwa" / "standalone-s4"
 DEFAULT_RESULT = DEFAULT_PRIVATE_ROOT / "install-smoke-result.txt"
+DEFAULT_BOOTSTRAP_TIMEOUT_SEC = 900
 SMOKE_REPLY = "INSTALL_SMOKE_PASS"
 
 
@@ -150,11 +153,18 @@ def _parse_codex_final(text: str) -> str:
     return messages[-1] if messages else ""
 
 
+def _default_pip_cache() -> Path:
+    if platform.system() == "Darwin":
+        return Path.home() / "Library" / "Caches" / "pip"
+    return Path.home() / ".cache" / "pip"
+
+
 def _isolated_env(home: Path, bin_dir: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["HOME"] = str(home)
     env.pop("CODEX_HOME", None)
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    env.setdefault("PIP_CACHE_DIR", str(_default_pip_cache()))
     return env
 
 
@@ -325,6 +335,36 @@ def _preserve_checkout_uwa_log(
     return True
 
 
+def _run_dependency_bootstrap(
+    *,
+    checkout: Path,
+    env: dict[str, str],
+    private_dir: Path,
+    timeout_sec: int,
+) -> None:
+    try:
+        result = _run(
+            [sys.executable, str(checkout / "start.py"), "--bootstrap-only"],
+            cwd=checkout,
+            env=env,
+            timeout_sec=timeout_sec,
+        )
+    except SmokeFailure as exc:
+        if exc.gate == "subprocess_timeout":
+            raise SmokeFailure(
+                "dependency_bootstrap",
+                f"timeout={timeout_sec}s",
+            ) from exc
+        raise
+    _write_private(private_dir / "dependency-bootstrap.log", result.stdout)
+    if result.returncode != 0:
+        raise SmokeFailure("dependency_bootstrap", f"rc={result.returncode}")
+    python = checkout / ".venv" / "bin" / "python"
+    stamp = checkout / ".venv" / ".requirements.sha256"
+    if not python.is_file() or not stamp.is_file():
+        raise SmokeFailure("dependency_bootstrap", "runtime_not_prepared")
+
+
 def _run_surface_preflight(*, checkout: Path, private_dir: Path) -> None:
     python = checkout / ".venv" / "bin" / "python"
     if not python.is_file():
@@ -385,6 +425,7 @@ def run(
     private_root: Path,
     result_path: Path,
     request_timeout_sec: int = 180,
+    bootstrap_timeout_sec: int = DEFAULT_BOOTSTRAP_TIMEOUT_SEC,
 ) -> int:
     private_dir = _private_dir(private_root)
     candidate = ""
@@ -425,6 +466,16 @@ def run(
             raise SmokeFailure("wrapper_install", f"rc={install.returncode}")
         _validate_wrapper_roots(bin_dir, checkout)
 
+        # Dependency installation is a separate release gate. Run it while the
+        # user's existing listener is still available, then take over TCP 8199
+        # only after the clean checkout runtime is ready.
+        _run_dependency_bootstrap(
+            checkout=checkout,
+            env=env,
+            private_dir=private_dir,
+            timeout_sec=bootstrap_timeout_sec,
+        )
+
         original_listener_running = _stop_original_listener_if_owned()
 
         start = _run_wrapper(
@@ -433,7 +484,7 @@ def run(
             env=env,
             private_dir=private_dir,
             log_name="codex-uwa-first.log",
-            timeout_sec=360,
+            timeout_sec=180,
         )
         _preserve_checkout_uwa_log(home, private_dir, "checkout-uwa-first.log")
         if start.returncode != 0:
@@ -489,7 +540,7 @@ def run(
             env=env,
             private_dir=private_dir,
             log_name="codex-uwa-second.log",
-            timeout_sec=240,
+            timeout_sec=180,
         )
         _preserve_checkout_uwa_log(home, private_dir, "checkout-uwa-second.log")
         if second.returncode != 0:
@@ -513,6 +564,7 @@ def run(
 
         text = (
             "INSTALL_SMOKE=PASS\n"
+            "DEPENDENCY_BOOTSTRAP=PASS\n"
             "OFFICIAL_ROLLBACK=PASS\n"
             "BASIC_CODEX_REQUEST=PASS\n"
             "AUTH=UNCHANGED\n"
@@ -522,6 +574,7 @@ def run(
         )
         _write_private(result_path.expanduser(), text)
         print("INSTALL_SMOKE=PASS", flush=True)
+        print("DEPENDENCY_BOOTSTRAP=PASS", flush=True)
         print("OFFICIAL_ROLLBACK=PASS", flush=True)
         print("BASIC_CODEX_REQUEST=PASS", flush=True)
         print("AUTH=UNCHANGED", flush=True)
@@ -582,13 +635,21 @@ def main() -> int:
         type=int,
         default=180,
     )
+    parser.add_argument(
+        "--bootstrap-timeout-sec",
+        type=int,
+        default=DEFAULT_BOOTSTRAP_TIMEOUT_SEC,
+    )
     args = parser.parse_args()
     if args.request_timeout_sec < 60:
         raise SystemExit("request timeout must be at least 60 seconds")
+    if args.bootstrap_timeout_sec < 300:
+        raise SystemExit("bootstrap timeout must be at least 300 seconds")
     return run(
         private_root=args.private_root,
         result_path=args.result,
         request_timeout_sec=args.request_timeout_sec,
+        bootstrap_timeout_sec=args.bootstrap_timeout_sec,
     )
 
 
