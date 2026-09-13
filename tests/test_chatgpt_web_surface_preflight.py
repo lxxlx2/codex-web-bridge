@@ -40,6 +40,34 @@ def _state(
     )
 
 
+def test_fresh_target_waits_for_prompt_before_classification(monkeypatch, capsys):
+    tab = _Tab()
+    states = iter(
+        [
+            _state(
+                kind="unknown",
+                ready=False,
+                reason="prompt_missing",
+                prompt=False,
+            ),
+            _state(kind="chat", ready=True, reason="none", prompt=True),
+        ]
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 0
+    assert '"ok": true' in capsys.readouterr().out
+
+
 def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
     tab = _Tab()
     states = iter(
