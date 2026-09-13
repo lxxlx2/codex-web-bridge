@@ -307,6 +307,24 @@ def _run_wrapper(
     return result
 
 
+def _preserve_checkout_uwa_log(
+    home: Path | None,
+    private_dir: Path,
+    name: str,
+) -> bool:
+    if home is None:
+        return False
+    source = home / ".uwa" / "uwa.log"
+    if not source.is_file():
+        return False
+    try:
+        text = source.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    _write_private(private_dir / name, text)
+    return True
+
+
 def _run_surface_preflight(*, checkout: Path, private_dir: Path) -> None:
     python = checkout / ".venv" / "bin" / "python"
     if not python.is_file():
@@ -372,6 +390,7 @@ def run(
     candidate = ""
     original_listener_running = False
     checkout: Path | None = None
+    home: Path | None = None
     actual_auth = Path.home() / ".codex" / "auth.json"
     auth_before = _sha256_or_absent(actual_auth)
 
@@ -414,8 +433,9 @@ def run(
             env=env,
             private_dir=private_dir,
             log_name="codex-uwa-first.log",
-            timeout_sec=240,
+            timeout_sec=360,
         )
+        _preserve_checkout_uwa_log(home, private_dir, "checkout-uwa-first.log")
         if start.returncode != 0:
             raise SmokeFailure("uwa_switch", f"rc={start.returncode}")
         _require_uwa_config(config)
@@ -471,6 +491,7 @@ def run(
             log_name="codex-uwa-second.log",
             timeout_sec=240,
         )
+        _preserve_checkout_uwa_log(home, private_dir, "checkout-uwa-second.log")
         if second.returncode != 0:
             raise SmokeFailure("repeat_switch", f"rc={second.returncode}")
         _require_uwa_config(config)
@@ -521,6 +542,10 @@ def run(
         print("PRIVATE_EVIDENCE_RECORDED=YES", flush=True)
         return 1
     finally:
+        try:
+            _preserve_checkout_uwa_log(home, private_dir, "checkout-uwa-final.log")
+        except Exception:
+            pass
         try:
             if checkout is not None:
                 _stop_checkout_listener_if_present(checkout)
