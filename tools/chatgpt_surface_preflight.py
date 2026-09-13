@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Acceptance-only ChatGPT Web surface normalization and readiness probe.
 
-This tool is intentionally narrow: it may switch one controlled Work surface to
-Chat and may navigate an existing Chat conversation to New Chat. It never sends
-messages, clears composer text, changes accounts, or bypasses quota/rate limits.
+This tool is intentionally narrow: it may select one exact Chat control from a
+controlled Work/ambiguous ChatGPT surface and may navigate an existing Chat
+conversation to New Chat. It never sends messages, clears composer text,
+changes accounts, or bypasses quota/rate limits.
 """
 
 from __future__ import annotations
@@ -53,7 +54,19 @@ return {clicked: true, matches: 1};
 
 
 def _emit(payload: dict[str, Any]) -> None:
-    print("SURFACE_PREFLIGHT_JSON=" + json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    print(
+        "SURFACE_PREFLIGHT_JSON="
+        + json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        flush=True,
+    )
+
+
+def _can_safely_select_chat(state: Any) -> bool:
+    return bool(
+        state.blocking_reason in {"work_surface", "unknown_surface"}
+        and state.prompt_present
+        and state.composer_empty
+    )
 
 
 def run(*, timeout_seconds: float = 8.0) -> int:
@@ -63,7 +76,11 @@ def run(*, timeout_seconds: float = 8.0) -> int:
         _emit(
             {
                 "ok": False,
-                "failure_class": "chatgpt_target_missing" if not tabs else "chatgpt_target_ambiguous",
+                "failure_class": (
+                    "chatgpt_target_missing"
+                    if not tabs
+                    else "chatgpt_target_ambiguous"
+                ),
                 "target_count": len(tabs),
                 "actions": actions,
             }
@@ -73,16 +90,21 @@ def run(*, timeout_seconds: float = 8.0) -> int:
     tab = tabs[0]
     state = inspect_chatgpt_surface(tab, target_count=1)
 
-    if state.blocking_reason == "work_surface":
+    # Acceptance owns this disposable target. If Chat/Work controls are visible
+    # but selection semantics are absent, selecting one exact Chat control is a
+    # safe normalization action only while the composer is empty. Normal runtime
+    # remains fail-closed and never performs this switch automatically.
+    if _can_safely_select_chat(state):
+        original_reason = state.blocking_reason
         result = tab.run_js(_SWITCH_CHAT_JS)
         if not isinstance(result, dict) or not result.get("clicked"):
             _emit(
                 {
                     "ok": False,
-                    "failure_class": "chatgpt_work_surface",
+                    "failure_class": _failure_class(original_reason),
                     "target_count": 1,
                     "surface_kind": state.surface_kind,
-                    "blocking_reason": state.blocking_reason,
+                    "blocking_reason": original_reason,
                     "actions": actions,
                 }
             )
@@ -92,7 +114,10 @@ def run(*, timeout_seconds: float = 8.0) -> int:
         while time.monotonic() < deadline:
             time.sleep(0.15)
             state = inspect_chatgpt_surface(tab, target_count=1)
-            if state.surface_kind == "chat":
+            if state.surface_kind == "chat" and state.blocking_reason in {
+                "none",
+                "composer_not_empty",
+            }:
                 break
 
     if state.blocking_reason not in {"none", "composer_not_empty"}:
@@ -123,7 +148,9 @@ def run(*, timeout_seconds: float = 8.0) -> int:
 
     if state.pathname_class == "conversation":
         try:
-            preparation = prepare_chatgpt_fresh_composer(timeout_seconds=timeout_seconds)
+            preparation = prepare_chatgpt_fresh_composer(
+                timeout_seconds=timeout_seconds
+            )
         except ChatGPTWebModeError:
             _emit(
                 {
