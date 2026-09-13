@@ -69,6 +69,23 @@ def _can_safely_select_chat(state: Any) -> bool:
     )
 
 
+def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
+    """Allow a newly-created ChatGPT target to finish rendering before classifying it."""
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+    state = inspect_chatgpt_surface(tab, target_count=1)
+    transient = {"unknown_surface", "prompt_missing", "send_missing"}
+    while time.monotonic() < deadline:
+        if state.blocking_reason not in transient:
+            break
+        if state.prompt_present and state.composer_empty:
+            # An ambiguous rendered surface may already be safe to normalize
+            # through the exact Chat control; do not wait the whole timeout.
+            break
+        time.sleep(0.15)
+        state = inspect_chatgpt_surface(tab, target_count=1)
+    return state
+
+
 def run(*, timeout_seconds: float = 8.0) -> int:
     actions: list[str] = []
     tabs = controlled_chatgpt_tabs()
@@ -88,7 +105,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
         return 1
 
     tab = tabs[0]
-    state = inspect_chatgpt_surface(tab, target_count=1)
+    state = _wait_initial_surface(tab, timeout_seconds)
 
     # Acceptance owns this disposable target. If Chat/Work controls are visible
     # but selection semantics are absent, selecting one exact Chat control is a
