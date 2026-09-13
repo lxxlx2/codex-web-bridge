@@ -114,3 +114,28 @@ def test_provider_config_checks_exact_uwa_and_official_restore(tmp_path):
         encoding="utf-8",
     )
     smoke._require_official_restore(config)
+
+
+def test_preserve_checkout_uwa_log_copies_private_bootstrap_evidence(tmp_path):
+    home = tmp_path / "home"
+    private_dir = tmp_path / "private"
+    source = home / ".uwa" / "uwa.log"
+    source.parent.mkdir(parents=True)
+    source.write_text("[setup] installing standalone requirements\n", encoding="utf-8")
+
+    assert smoke._preserve_checkout_uwa_log(
+        home,
+        private_dir,
+        "checkout-uwa-first.log",
+    ) is True
+    copied = private_dir / "checkout-uwa-first.log"
+    assert copied.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+    assert copied.stat().st_mode & 0o077 == 0
+
+
+def test_preserve_checkout_uwa_log_is_optional_when_log_missing(tmp_path):
+    assert smoke._preserve_checkout_uwa_log(
+        tmp_path / "missing-home",
+        tmp_path / "private",
+        "checkout-uwa-first.log",
+    ) is False
