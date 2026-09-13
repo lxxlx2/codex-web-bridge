@@ -31,8 +31,11 @@ jobs:
           python -m py_compile tools/codex_hybrid_ledger.py
           python -m py_compile tools/codex_remote_compaction_compat.py
           python -m py_compile tools/standalone_dependency_audit.py
+          python -m py_compile tools/standalone_s3_live_core.py
           python -m py_compile tools/standalone_s3_live_acceptance.py
           python -m py_compile tools/chatgpt_surface_preflight.py
+          python -m py_compile tools/standalone_install_smoke.py
+          python -m py_compile tools/standalone_s4_release_gate.py
           python -m py_compile security_guard.py
           python -m py_compile start.py
           python -m py_compile main.py
@@ -122,12 +125,16 @@ jobs:
             tests/test_codex_chatgpt_executor.py \
             tests/test_codex_chatgpt_executor_parity.py \
             tests/test_chatgpt_web_surface.py \
+            tests/test_chatgpt_web_surface_preflight.py \
             tests/test_chatgpt_web_prepare.py \
             tests/test_chatgpt_web_rate_limit_guard.py \
             tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
             tests/test_standalone_health.py \
             tests/test_standalone_api_import_boundary.py \
-            tests/test_standalone_entrypoint.py
+            tests/test_standalone_entrypoint.py \
+            tests/test_codex_standalone_s3_runner.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
       - name: Audit standalone dependency closure
         run: |
           python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-runtime-audit.json \
@@ -164,6 +171,8 @@ jobs:
             tests/test_client_tool_policy*.py \
             tests/test_chatgpt_web_*.py \
             tests/test_standalone_health.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py \
             tests/test_install_codex_uwa_commands.py \
             tests/test_security_hardening.py
 
@@ -187,3 +196,36 @@ jobs:
           grep -q 'TEST_PLAN_APPROVED=YES' docs/RELEASE_TEST_PLAN.md
           grep -q 'leeguooooo/chatgpt-use' NOTICE.md
           grep -q 'kev489/gpt-tool-use' NOTICE.md
+      - name: Run release gate unit tests
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
+
+  macos-compat:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Validate macOS release-control compatibility
+        run: |
+          python -m pytest -q \
+            tests/test_codex_provider_switch.py \
+            tests/test_codex_uwa_lifecycle.py \
+            tests/test_install_codex_uwa_commands.py \
+            tests/test_chatgpt_web_surface.py \
+            tests/test_chatgpt_web_surface_preflight.py \
+            tests/test_chatgpt_web_prepare.py \
+            tests/test_chatgpt_web_rate_limit_guard.py \
+            tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_codex_standalone_s3_runner.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
