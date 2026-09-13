@@ -38,22 +38,84 @@ const visible = (el) => {
   return !!style && style.display !== 'none' && style.visibility !== 'hidden' &&
     rect.width > 0 && rect.height > 0;
 };
-const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-const exact = new Set(['chat', '聊天']);
-const matches = Array.from(document.querySelectorAll(
-  'button,a,[role="tab"],[role="button"]'
-)).filter(visible).filter((el) => {
+const norm = (value) => String(value || '').replace(/[\s\u200b-\u200d\ufeff]+/g, ' ').trim().toLowerCase();
+const exactChat = new Set(['chat', '聊天']);
+const exactWork = new Set(['work', '工作']);
+const valueOf = (el) => norm(
+  `${el && (el.innerText || el.textContent) || ''} ${
+    el && el.getAttribute && el.getAttribute('aria-label') || ''
+  }`
+);
+const exactValue = (el, values) => {
+  if (!el) return false;
   const text = norm(el.innerText || el.textContent);
-  const aria = norm(el.getAttribute('aria-label'));
-  return exact.has(text) || exact.has(aria);
+  const aria = norm(el.getAttribute && el.getAttribute('aria-label'));
+  return values.has(text) || values.has(aria);
+};
+
+// Preferred path: an explicitly interactive Chat control. This covers the
+// historical ChatGPT mode UI and remains the least ambiguous selector.
+const interactive = Array.from(document.querySelectorAll(
+  'button,a,[role="tab"],[role="button"],[aria-selected],[aria-pressed],'+
+  '[data-state],[data-selected],[tabindex]'
+)).filter(visible);
+const interactiveMatches = interactive.filter((el) => exactValue(el, exactChat));
+if (interactiveMatches.length === 1) {
+  interactiveMatches[0].click();
+  return {
+    clicked: true,
+    strategy: 'interactive',
+    interactive_matches: 1,
+    paired_matches: 0,
+  };
+}
+
+// Current ChatGPT can render the Chat/Work segmented selector as plain visible
+// div/span labels without button/tab semantics. Do not click an arbitrary text
+// node. Only accept one leaf-most exact Chat label that has exactly one exact
+// Work label in a small shared ancestor, then click that Chat label and rely on
+// normal DOM bubbling to the segmented-control handler.
+const labelSelector = 'span,div,p,label';
+const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelector))
+  .filter(visible)
+  .filter((el) => exactValue(el, values))
+  .filter((el) => !Array.from(el.querySelectorAll(labelSelector))
+    .filter((child) => child !== el && visible(child))
+    .some((child) => exactValue(child, values)));
+
+const chatLabels = leafLabels(exactChat);
+const workLabels = leafLabels(exactWork);
+const pairedMatches = chatLabels.filter((chat) => {
+  let ancestor = chat.parentElement;
+  for (let depth = 0; ancestor && ancestor !== document.body && depth < 5; depth += 1) {
+    const chatsHere = chatLabels.filter((el) => ancestor.contains(el));
+    const worksHere = workLabels.filter((el) => ancestor.contains(el));
+    if (chatsHere.length === 1 && worksHere.length === 1) return true;
+    ancestor = ancestor.parentElement;
+  }
+  return false;
 });
-if (matches.length !== 1) return {clicked: false, matches: matches.length};
-matches[0].click();
-return {clicked: true, matches: 1};
+
+if (pairedMatches.length === 1) {
+  pairedMatches[0].click();
+  return {
+    clicked: true,
+    strategy: 'paired_label',
+    interactive_matches: interactiveMatches.length,
+    paired_matches: 1,
+  };
+}
+
+return {
+  clicked: false,
+  strategy: 'none',
+  interactive_matches: interactiveMatches.length,
+  paired_matches: pairedMatches.length,
+};
 """
 
 # ChatGPT can paint an apparently-ready Chat composer before account-level mode
-# restoration finishes and flips the root page back to Work.  Acceptance must
+# restoration finishes and flips the root page back to Work. Acceptance must
 # observe a short consecutive ready window before it is allowed to send.
 READY_STABLE_SAMPLES = 10
 POLL_SECONDS = 0.15
@@ -75,12 +137,37 @@ def _can_safely_select_chat(state: Any) -> bool:
     )
 
 
+def _switch_probe(result: Any) -> dict[str, Any]:
+    """Return only sanitized selector metadata from the acceptance click probe."""
+    if not isinstance(result, dict):
+        return {
+            "strategy": "invalid_result",
+            "interactive_matches": 0,
+            "paired_matches": 0,
+        }
+
+    def _count(name: str) -> int:
+        try:
+            return max(0, int(result.get(name, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    strategy = str(result.get("strategy") or "none")
+    if strategy not in {"interactive", "paired_label", "none"}:
+        strategy = "unknown"
+    return {
+        "strategy": strategy,
+        "interactive_matches": _count("interactive_matches"),
+        "paired_matches": _count("paired_matches"),
+    }
+
+
 def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
     """Wait until the fresh target has reached a stable, classifiable surface.
 
     A newly-created root can transiently expose a Chat composer before the mode
-    chrome restores Work.  A ready Chat state therefore has to remain unchanged
-    for a bounded consecutive sample window.  Definitive blockers such as Work
+    chrome restores Work. A ready Chat state therefore has to remain unchanged
+    for a bounded consecutive sample window. Definitive blockers such as Work
     still return immediately so acceptance can normalize them safely.
     """
     deadline = time.monotonic() + max(1.0, float(timeout_seconds))
@@ -122,6 +209,7 @@ def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
 
 def run(*, timeout_seconds: float = 8.0) -> int:
     actions: list[str] = []
+    switch_probe: dict[str, Any] | None = None
     tabs = controlled_chatgpt_tabs()
     if len(tabs) != 1:
         _emit(
@@ -148,6 +236,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
     if _can_safely_select_chat(state):
         original_reason = state.blocking_reason
         result = tab.run_js(_SWITCH_CHAT_JS)
+        switch_probe = _switch_probe(result)
         if not isinstance(result, dict) or not result.get("clicked"):
             _emit(
                 {
@@ -157,6 +246,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
                     "surface_kind": state.surface_kind,
                     "blocking_reason": original_reason,
                     "actions": actions,
+                    "switch_probe": switch_probe,
                 }
             )
             return 1
@@ -164,29 +254,31 @@ def run(*, timeout_seconds: float = 8.0) -> int:
         state = _wait_initial_surface(tab, timeout_seconds)
 
     if state.blocking_reason not in {"none", "composer_not_empty"}:
-        _emit(
-            {
-                "ok": False,
-                "failure_class": _failure_class(state.blocking_reason),
-                "target_count": 1,
-                "surface_kind": state.surface_kind,
-                "blocking_reason": state.blocking_reason,
-                "actions": actions,
-            }
-        )
+        payload = {
+            "ok": False,
+            "failure_class": _failure_class(state.blocking_reason),
+            "target_count": 1,
+            "surface_kind": state.surface_kind,
+            "blocking_reason": state.blocking_reason,
+            "actions": actions,
+        }
+        if switch_probe is not None:
+            payload["switch_probe"] = switch_probe
+        _emit(payload)
         return 1
 
     if not state.composer_empty:
-        _emit(
-            {
-                "ok": False,
-                "failure_class": "chatgpt_composer_not_empty",
-                "target_count": 1,
-                "surface_kind": state.surface_kind,
-                "blocking_reason": "composer_not_empty",
-                "actions": actions,
-            }
-        )
+        payload = {
+            "ok": False,
+            "failure_class": "chatgpt_composer_not_empty",
+            "target_count": 1,
+            "surface_kind": state.surface_kind,
+            "blocking_reason": "composer_not_empty",
+            "actions": actions,
+        }
+        if switch_probe is not None:
+            payload["switch_probe"] = switch_probe
+        _emit(payload)
         return 1
 
     if state.pathname_class == "conversation":
@@ -221,24 +313,9 @@ def run(*, timeout_seconds: float = 8.0) -> int:
         state = _wait_initial_surface(tab, timeout_seconds)
 
     if not state.surface_ready:
-        _emit(
-            {
-                "ok": False,
-                "failure_class": _failure_class(state.blocking_reason),
-                "target_count": 1,
-                "surface_kind": state.surface_kind,
-                "pathname_class": state.pathname_class,
-                "composer_empty": state.composer_empty,
-                "blocking_reason": state.blocking_reason,
-                "actions": actions,
-            }
-        )
-        return 1
-
-    _emit(
-        {
-            "ok": True,
-            "failure_class": "none",
+        payload = {
+            "ok": False,
+            "failure_class": _failure_class(state.blocking_reason),
             "target_count": 1,
             "surface_kind": state.surface_kind,
             "pathname_class": state.pathname_class,
@@ -246,7 +323,24 @@ def run(*, timeout_seconds: float = 8.0) -> int:
             "blocking_reason": state.blocking_reason,
             "actions": actions,
         }
-    )
+        if switch_probe is not None:
+            payload["switch_probe"] = switch_probe
+        _emit(payload)
+        return 1
+
+    payload = {
+        "ok": True,
+        "failure_class": "none",
+        "target_count": 1,
+        "surface_kind": state.surface_kind,
+        "pathname_class": state.pathname_class,
+        "composer_empty": state.composer_empty,
+        "blocking_reason": state.blocking_reason,
+        "actions": actions,
+    }
+    if switch_probe is not None:
+        payload["switch_probe"] = switch_probe
+    _emit(payload)
     return 0
 
 
