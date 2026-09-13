@@ -51,6 +51,18 @@ def _release_tree(root: Path) -> None:
     )
 
 
+def _smoke_text(candidate: str = "abc123") -> str:
+    return (
+        "INSTALL_SMOKE=PASS\n"
+        "OFFICIAL_ROLLBACK=PASS\n"
+        "BASIC_CODEX_REQUEST=PASS\n"
+        "AUTH=UNCHANGED\n"
+        "WRAPPER_ROOT=PASS\n"
+        "LISTENER_OWNERSHIP=PASS\n"
+        f"candidate_commit={candidate}\n"
+    )
+
+
 def test_docs_gate_rejects_missing_file(tmp_path: Path):
     with pytest.raises(gate.GateFailure, match="missing=README.md"):
         gate.check_docs(tmp_path)
@@ -97,17 +109,18 @@ def test_s3_candidate_must_match_head(tmp_path: Path, monkeypatch):
         gate.check_s3_candidate(tmp_path, result)
 
 
-def test_install_smoke_requires_both_markers(tmp_path: Path):
+def test_install_smoke_requires_all_release_markers_and_candidate(tmp_path: Path):
     result = tmp_path / "install.txt"
-    result.write_text(
-        "INSTALL_SMOKE=PASS\nOFFICIAL_ROLLBACK=PASS\n",
-        encoding="utf-8",
-    )
-    gate.check_install_smoke(result)
+    result.write_text(_smoke_text("abc123"), encoding="utf-8")
+    gate.check_install_smoke(result, expected_candidate="abc123")
 
     result.write_text("INSTALL_SMOKE=PASS\n", encoding="utf-8")
     with pytest.raises(gate.GateFailure, match="official_rollback_not_pass"):
         gate.check_install_smoke(result)
+
+    result.write_text(_smoke_text("old"), encoding="utf-8")
+    with pytest.raises(gate.GateFailure, match="candidate_sha_mismatch"):
+        gate.check_install_smoke(result, expected_candidate="new")
 
 
 def test_full_release_checks_accept_clean_fixture(tmp_path: Path, monkeypatch):
@@ -119,10 +132,7 @@ def test_full_release_checks_accept_clean_fixture(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
     smoke = tmp_path / "smoke.txt"
-    smoke.write_text(
-        "INSTALL_SMOKE=PASS\nOFFICIAL_ROLLBACK=PASS\n",
-        encoding="utf-8",
-    )
+    smoke.write_text(_smoke_text("abc123"), encoding="utf-8")
     monkeypatch.setattr(gate, "require_clean_worktree", lambda root: None)
     monkeypatch.setattr(gate, "git_head", lambda root: "abc123")
 
