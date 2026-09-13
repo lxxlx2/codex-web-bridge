@@ -3,9 +3,10 @@
 
 This is a local macOS release gate. It creates a detached worktree and a
 temporary HOME, installs the public wrappers from that clean checkout, prepares
-the checkout-local runtime before touching the active listener, runs one small
-real Codex request through the checkout-owned listener, verifies the official
-rollback in the isolated HOME, then switches back and stops cleanly.
+the checkout-local runtime before touching the active listener, owns a fresh
+ChatGPT acceptance target, runs one small real Codex request through the
+checkout-owned listener, verifies the official rollback in the isolated HOME,
+then switches back and stops cleanly.
 
 It never copies or prints authentication material. Existing user Codex config is
 not modified because all wrapper/provider commands run with an isolated HOME.
@@ -26,7 +27,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -42,6 +47,7 @@ DEFAULT_PRIVATE_ROOT = Path.home() / ".uwa" / "standalone-s4"
 DEFAULT_RESULT = DEFAULT_PRIVATE_ROOT / "install-smoke-result.txt"
 DEFAULT_BOOTSTRAP_TIMEOUT_SEC = 900
 SMOKE_REPLY = "INSTALL_SMOKE_PASS"
+CDP_BASE = "http://127.0.0.1:9222"
 
 
 class SmokeFailure(RuntimeError):
@@ -298,6 +304,169 @@ def _restore_original_listener(was_running: bool) -> None:
     lifecycle.start_uwa(repo_root=REPO_ROOT)
 
 
+def _real_codex_running() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["/usr/bin/pgrep", "-x", "Codex"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def _quiet_real_codex_desktop() -> bool:
+    was_running = _real_codex_running()
+    if not was_running:
+        return False
+    subprocess.run(
+        ["/usr/bin/osascript", "-e", 'tell application "Codex" to quit'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+        check=False,
+    )
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline and _real_codex_running():
+        time.sleep(0.2)
+    if _real_codex_running():
+        raise SmokeFailure("browser_surface", "codex_desktop_not_quiet")
+    return True
+
+
+def _restore_real_codex_desktop(was_running: bool) -> None:
+    if not was_running or platform.system() != "Darwin" or _real_codex_running():
+        return
+    subprocess.run(
+        ["/usr/bin/open", "-a", "Codex"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+        check=False,
+    )
+
+
+def _http_json(url: str, *, timeout: float = 10.0) -> Any:
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except (OSError, urllib.error.URLError) as exc:
+        raise SmokeFailure("browser_surface", "http_probe_failed") from exc
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise SmokeFailure("browser_surface", "invalid_http_probe") from exc
+
+
+def _require_disposable_target_state() -> None:
+    payload = _http_json("http://127.0.0.1:8199/health", timeout=8.0)
+    if not isinstance(payload, dict) or payload.get("service") != "healthy":
+        raise SmokeFailure("browser_surface", "service_not_healthy")
+    try:
+        running = int(payload.get("running_count", 0) or 0)
+    except (TypeError, ValueError):
+        running = -1
+    if running != 0:
+        raise SmokeFailure("browser_surface", "request_manager_not_clean")
+    browser = payload.get("browser") if isinstance(payload.get("browser"), dict) else {}
+    if browser.get("connected") is not True:
+        raise SmokeFailure("browser_surface", "browser_not_connected")
+    web = payload.get("chatgpt_web") if isinstance(payload.get("chatgpt_web"), dict) else {}
+    surface = web.get("surface") if isinstance(web.get("surface"), dict) else {}
+    try:
+        target_count = int(surface.get("target_count", 0) or 0)
+    except (TypeError, ValueError):
+        target_count = 0
+    if target_count > 1:
+        raise SmokeFailure("chatgpt_target_ambiguous", f"target_count={target_count}")
+    if target_count == 1 and surface.get("composer_empty") is not True:
+        # Do not discard an unknown draft. The user may clear/save it and retry.
+        raise SmokeFailure("chatgpt_composer_not_empty", "existing_target_has_draft")
+
+
+def _cdp_json(path: str, *, method: str = "GET", timeout: float = 10.0) -> Any:
+    request = urllib.request.Request(CDP_BASE + path, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except (OSError, urllib.error.URLError) as exc:
+        raise SmokeFailure("browser_surface", "cdp_unavailable") from exc
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise SmokeFailure("browser_surface", "invalid_cdp_response") from exc
+
+
+def _cdp_close(path: str, *, timeout: float = 10.0) -> None:
+    request = urllib.request.Request(CDP_BASE + path, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read()
+    except (OSError, urllib.error.URLError) as exc:
+        raise SmokeFailure("browser_surface", "cdp_close_failed") from exc
+
+
+def _chatgpt_page_targets() -> list[dict[str, Any]]:
+    payload = _cdp_json("/json/list", timeout=5.0)
+    if not isinstance(payload, list):
+        raise SmokeFailure("browser_surface", "invalid_target_list")
+    result: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict) or str(item.get("type") or "") != "page":
+            continue
+        url = str(item.get("url") or "")
+        if url.startswith("https://chatgpt.com") or url.startswith("https://www.chatgpt.com"):
+            result.append(item)
+    return result
+
+
+def _reset_acceptance_chatgpt_target(private_dir: Path) -> dict[str, Any]:
+    _require_disposable_target_state()
+
+    closed = 0
+    for item in _chatgpt_page_targets():
+        target_id = str(item.get("id") or "").strip()
+        if not target_id:
+            continue
+        _cdp_close(
+            "/json/close/" + urllib.parse.quote(target_id, safe=""),
+            timeout=10.0,
+        )
+        closed += 1
+
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline and _chatgpt_page_targets():
+        time.sleep(0.2)
+    if _chatgpt_page_targets():
+        raise SmokeFailure("chatgpt_target_ambiguous", "stale_target_close_failed")
+
+    encoded = urllib.parse.quote("https://chatgpt.com/", safe=":/")
+    created = _cdp_json("/json/new?" + encoded, method="PUT", timeout=10.0)
+    if not isinstance(created, dict) or not str(created.get("id") or "").strip():
+        raise SmokeFailure("chatgpt_target_missing", "fresh_target_create_failed")
+
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        latest = _chatgpt_page_targets()
+        if len(latest) == 1:
+            evidence = {"closed_targets": closed, "fresh_target": True}
+            _write_private(
+                private_dir / "target-reset.json",
+                json.dumps(evidence, sort_keys=True, indent=2) + "\n",
+            )
+            return evidence
+        if len(latest) > 1:
+            raise SmokeFailure("chatgpt_target_ambiguous", f"target_count={len(latest)}")
+        time.sleep(0.25)
+    raise SmokeFailure("chatgpt_target_missing", "fresh_target_not_visible")
+
+
 def _run_wrapper(
     path: Path,
     *,
@@ -365,6 +534,18 @@ def _run_dependency_bootstrap(
         raise SmokeFailure("dependency_bootstrap", "runtime_not_prepared")
 
 
+def _parse_surface_preflight(text: str) -> dict[str, Any]:
+    prefix = "SURFACE_PREFLIGHT_JSON="
+    rows = [line[len(prefix):] for line in text.splitlines() if line.startswith(prefix)]
+    if len(rows) != 1:
+        return {}
+    try:
+        payload = json.loads(rows[0])
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _run_surface_preflight(*, checkout: Path, private_dir: Path) -> None:
     python = checkout / ".venv" / "bin" / "python"
     if not python.is_file():
@@ -380,8 +561,11 @@ def _run_surface_preflight(*, checkout: Path, private_dir: Path) -> None:
         timeout_sec=45,
     )
     _write_private(private_dir / "surface-preflight.log", result.stdout)
-    if result.returncode != 0:
-        raise SmokeFailure("surface_preflight", f"rc={result.returncode}")
+    payload = _parse_surface_preflight(result.stdout)
+    if result.returncode != 0 or payload.get("ok") is not True:
+        failure = str(payload.get("failure_class") or "surface_preflight")
+        detail = str(payload.get("blocking_reason") or f"rc={result.returncode}")
+        raise SmokeFailure(failure, detail)
 
 
 def _run_basic_codex(
@@ -430,6 +614,7 @@ def run(
     private_dir = _private_dir(private_root)
     candidate = ""
     original_listener_running = False
+    real_codex_was_running = False
     checkout: Path | None = None
     home: Path | None = None
     actual_auth = Path.home() / ".codex" / "auth.json"
@@ -509,6 +694,10 @@ def run(
         if status.returncode != 0 or "STATUS=HEALTHY" not in status.stdout:
             raise SmokeFailure("uwa_status", "status_not_healthy")
 
+        # Gate 3 sends a real Codex request, so it must own the target first.
+        # Preserve unknown drafts by refusing to reset a dirty composer.
+        real_codex_was_running = _quiet_real_codex_desktop()
+        _reset_acceptance_chatgpt_target(private_dir)
         _run_surface_preflight(
             checkout=checkout,
             private_dir=private_dir,
@@ -565,6 +754,7 @@ def run(
         text = (
             "INSTALL_SMOKE=PASS\n"
             "DEPENDENCY_BOOTSTRAP=PASS\n"
+            "ACCEPTANCE_TARGET_RESET=PASS\n"
             "OFFICIAL_ROLLBACK=PASS\n"
             "BASIC_CODEX_REQUEST=PASS\n"
             "AUTH=UNCHANGED\n"
@@ -575,6 +765,7 @@ def run(
         _write_private(result_path.expanduser(), text)
         print("INSTALL_SMOKE=PASS", flush=True)
         print("DEPENDENCY_BOOTSTRAP=PASS", flush=True)
+        print("ACCEPTANCE_TARGET_RESET=PASS", flush=True)
         print("OFFICIAL_ROLLBACK=PASS", flush=True)
         print("BASIC_CODEX_REQUEST=PASS", flush=True)
         print("AUTH=UNCHANGED", flush=True)
@@ -606,6 +797,10 @@ def run(
             pass
         try:
             _restore_original_listener(original_listener_running)
+        except Exception:
+            pass
+        try:
+            _restore_real_codex_desktop(real_codex_was_running)
         except Exception:
             pass
         if checkout is not None and checkout.exists():
