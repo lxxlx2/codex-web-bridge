@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,6 +38,7 @@ def test_parse_codex_final_ignores_non_agent_payloads():
 
 def test_isolated_env_rebinds_home_and_removes_codex_home(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", "/private/original")
+    monkeypatch.delenv("PIP_CACHE_DIR", raising=False)
     home = tmp_path / "home"
     bin_dir = tmp_path / "bin"
 
@@ -45,6 +47,7 @@ def test_isolated_env_rebinds_home_and_removes_codex_home(tmp_path, monkeypatch)
     assert env["HOME"] == str(home)
     assert "CODEX_HOME" not in env
     assert env["PATH"].split(os.pathsep)[0] == str(bin_dir)
+    assert env["PIP_CACHE_DIR"] == str(smoke._default_pip_cache())
 
 
 def test_desktop_stubs_prevent_real_desktop_process_control(tmp_path):
@@ -139,3 +142,55 @@ def test_preserve_checkout_uwa_log_is_optional_when_log_missing(tmp_path):
         tmp_path / "private",
         "checkout-uwa-first.log",
     ) is False
+
+
+def test_dependency_bootstrap_prepares_runtime_and_records_log(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    private_dir = tmp_path / "private"
+    checkout.mkdir()
+    (checkout / ".venv" / "bin").mkdir(parents=True)
+    (checkout / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+    (checkout / ".venv" / ".requirements.sha256").write_text("abc\n", encoding="utf-8")
+
+    calls = []
+
+    def fake_run(args, *, cwd, env=None, input_text=None, timeout_sec=120):
+        calls.append((list(args), cwd, timeout_sec))
+        return subprocess.CompletedProcess(args=list(args), returncode=0, stdout="ready\n")
+
+    monkeypatch.setattr(smoke, "_run", fake_run)
+
+    smoke._run_dependency_bootstrap(
+        checkout=checkout,
+        env={"HOME": str(tmp_path / "home")},
+        private_dir=private_dir,
+        timeout_sec=900,
+    )
+
+    assert calls[0][0][-1] == "--bootstrap-only"
+    assert calls[0][2] == 900
+    assert (private_dir / "dependency-bootstrap.log").read_text(encoding="utf-8") == "ready\n"
+
+
+def test_dependency_bootstrap_fails_when_runtime_was_not_prepared(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    private_dir = tmp_path / "private"
+    checkout.mkdir()
+
+    def fake_run(args, *, cwd, env=None, input_text=None, timeout_sec=120):
+        return subprocess.CompletedProcess(args=list(args), returncode=0, stdout="ready\n")
+
+    monkeypatch.setattr(smoke, "_run", fake_run)
+
+    try:
+        smoke._run_dependency_bootstrap(
+            checkout=checkout,
+            env={},
+            private_dir=private_dir,
+            timeout_sec=900,
+        )
+    except smoke.SmokeFailure as exc:
+        assert exc.gate == "dependency_bootstrap"
+        assert exc.detail == "runtime_not_prepared"
+    else:
+        raise AssertionError("expected SmokeFailure")
