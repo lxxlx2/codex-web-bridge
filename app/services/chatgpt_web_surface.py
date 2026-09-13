@@ -1,6 +1,6 @@
 """Sanitized ChatGPT Web surface inspection for the standalone bridge.
 
-The inspector intentionally returns only transport/readiness metadata.  It does
+The inspector intentionally returns only transport/readiness metadata. It does
 not return conversation text, composer text, cookies, storage, account ids,
 raw DOM, or raw conversation ids.
 """
@@ -8,7 +8,7 @@ raw DOM, or raw conversation ids.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 from app.core import get_browser
@@ -26,24 +26,29 @@ return (function() {
   const norm = (value) => String(value || '').replace(/[\s\u200b-\u200d\ufeff]+/g, ' ').trim();
   const low = (value) => norm(value).toLowerCase();
   const selected = (el) => {
-    const state = low(el && el.getAttribute ? el.getAttribute('data-state') : '');
-    const selectedAttr = low(el && el.getAttribute ? el.getAttribute('aria-selected') : '');
-    const checked = low(el && el.getAttribute ? el.getAttribute('aria-checked') : '');
-    const current = low(el && el.getAttribute ? el.getAttribute('aria-current') : '');
-    return selectedAttr === 'true' || checked === 'true' ||
-      ['active', 'selected', 'checked', 'on'].includes(state) || current === 'page';
+    const attr = (name) => low(el && el.getAttribute ? el.getAttribute(name) : '');
+    const state = attr('data-state');
+    return attr('aria-selected') === 'true' ||
+      attr('aria-checked') === 'true' ||
+      attr('aria-pressed') === 'true' ||
+      attr('data-selected') === 'true' ||
+      ['active', 'selected', 'checked', 'on'].includes(state) ||
+      attr('aria-current') === 'page';
   };
 
   const prompt = document.querySelector('#prompt-textarea') ||
     document.querySelector('[role="textbox"][aria-label*="ChatGPT"]') ||
     document.querySelector('[contenteditable="true"][role="textbox"]');
-  const composerText = prompt ? norm(prompt.innerText || prompt.textContent || prompt.value || '') : '';
+  const composerText = prompt ? norm(
+    prompt.innerText || prompt.textContent || prompt.value || ''
+  ) : '';
   const send = document.querySelector('[data-testid="send-button"]') ||
     document.querySelector('button[aria-label*="Send" i]') ||
     document.querySelector('button[aria-label*="发送"]');
 
   const controls = Array.from(document.querySelectorAll(
-    'button,a,[role="tab"],[role="button"],[aria-selected],[aria-current],[data-state]'
+    'button,a,[role="tab"],[role="button"],[aria-selected],[aria-pressed],'+
+    '[aria-current],[data-state],[data-selected]'
   )).filter(visible);
   const controlRows = controls.map((el) => ({
     text: norm(el.innerText || el.textContent),
@@ -66,7 +71,9 @@ return (function() {
     '[data-testid*="banner" i],[data-testid*="limit" i],[data-testid*="usage" i],'+
     '[class*="banner" i]'
   )).filter(visible);
-  const statusText = low(statusNodes.map((el) => norm(el.innerText || el.textContent)).join(' | '));
+  const statusText = low(
+    statusNodes.map((el) => norm(el.innerText || el.textContent)).join(' | ')
+  );
 
   const rateLimited =
     statusText.includes('too many requests') ||
@@ -76,22 +83,30 @@ return (function() {
     statusText.includes('暂时限制你访问对话记录');
 
   const workQuota =
-    statusText.includes('work usage') && (statusText.includes('limit') || statusText.includes('reset')) ||
+    (statusText.includes('work usage') &&
+      (statusText.includes('limit') || statusText.includes('reset'))) ||
     statusText.includes('used up work') ||
-    statusText.includes('工作用量') && (statusText.includes('用完') || statusText.includes('重置'));
+    (statusText.includes('工作用量') &&
+      (statusText.includes('用完') || statusText.includes('重置')));
 
   const usageExhausted = !workQuota && (
     statusText.includes('usage limit') ||
     statusText.includes('reached your limit') ||
-    statusText.includes('you have reached') && statusText.includes('limit') ||
+    (statusText.includes('you have reached') && statusText.includes('limit')) ||
     statusText.includes('使用上限') ||
     statusText.includes('用量已用完') ||
-    statusText.includes('已达到') && statusText.includes('上限')
+    (statusText.includes('已达到') && statusText.includes('上限'))
   );
 
-  const authNodes = Array.from(document.querySelectorAll('a,button,[role="button"]')).filter(visible);
+  const authNodes = Array.from(
+    document.querySelectorAll('a,button,[role="button"]')
+  ).filter(visible);
   const authRequired = authNodes.some((el) => {
-    const value = low(`${el.innerText || el.textContent || ''} ${el.getAttribute && el.getAttribute('aria-label') || ''}`);
+    const value = low(
+      `${el.innerText || el.textContent || ''} ${
+        el.getAttribute && el.getAttribute('aria-label') || ''
+      }`
+    );
     return ['log in', 'sign in', '登录'].includes(value);
   }) && !prompt;
 
@@ -163,7 +178,8 @@ def controlled_chatgpt_tabs() -> list[Any]:
     if not isinstance(health, dict) or not health.get("connected"):
         return []
     return [
-        tab for tab in list(browser.get_tabs() or [])
+        tab
+        for tab in list(browser.get_tabs() or [])
         if _is_chatgpt_url(_tab_url(tab))
     ]
 
@@ -177,7 +193,11 @@ def _pathname_class(pathname: str) -> str:
     return "other"
 
 
-def classify_surface_probe(raw: Dict[str, Any], *, target_count: int = 1) -> SurfaceSnapshot:
+def classify_surface_probe(
+    raw: Dict[str, Any],
+    *,
+    target_count: int = 1,
+) -> SurfaceSnapshot:
     data = dict(raw or {})
     host = str(data.get("host") or "").lower()
     host_ok = host in {"chatgpt.com", "www.chatgpt.com"}
@@ -205,7 +225,9 @@ def classify_surface_probe(raw: Dict[str, Any], *, target_count: int = 1) -> Sur
         surface_kind = "work"
     elif selected_chat:
         surface_kind = "chat"
-    elif prompt_present and (chat_control or not work_control):
+    elif prompt_present and chat_control and not work_control:
+        surface_kind = "chat"
+    elif prompt_present and not chat_control and not work_control:
         surface_kind = "chat"
     else:
         surface_kind = "unknown"
@@ -257,7 +279,11 @@ def classify_surface_probe(raw: Dict[str, Any], *, target_count: int = 1) -> Sur
     )
 
 
-def inspect_chatgpt_surface(tab: Any | None = None, *, target_count: int | None = None) -> SurfaceSnapshot:
+def inspect_chatgpt_surface(
+    tab: Any | None = None,
+    *,
+    target_count: int | None = None,
+) -> SurfaceSnapshot:
     if tab is None:
         tabs = controlled_chatgpt_tabs()
         count = len(tabs)
