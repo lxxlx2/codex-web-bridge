@@ -10,6 +10,7 @@ bootstrap logic.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import ipaddress
 import os
@@ -65,12 +66,23 @@ def _ensure_venv() -> Path:
     if installed != digest:
         print("[setup] installing standalone requirements", flush=True)
         result = subprocess.run(
-            [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(REQUIREMENTS)],
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--prefer-binary",
+                "-r",
+                str(REQUIREMENTS),
+            ],
             cwd=str(ROOT),
             check=False,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"dependency installation failed with exit code {result.returncode}")
+            raise RuntimeError(
+                f"dependency installation failed with exit code {result.returncode}"
+            )
         REQUIREMENTS_STAMP.write_text(digest + "\n", encoding="utf-8")
 
     return python
@@ -86,7 +98,18 @@ def _loopback_host(value: str) -> bool:
         return False
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--bootstrap-only",
+        action="store_true",
+        help="prepare the repository-local virtual environment and exit",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     os.chdir(ROOT)
     _load_env(ROOT / ".env")
 
@@ -115,6 +138,10 @@ def main() -> int:
         raise RuntimeError("APP_PORT must be between 1 and 65535")
 
     python = _ensure_venv()
+    if args.bootstrap_only:
+        print("[setup] standalone requirements ready", flush=True)
+        return 0
+
     argv = [
         str(python),
         "-m",
