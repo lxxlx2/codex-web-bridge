@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
-from typing import Iterable
 
 
 RC_VERSION = "0.1.0-rc.1"
@@ -167,14 +166,29 @@ def check_s3_candidate(root: Path, result_path: Path) -> None:
         raise GateFailure("s3_candidate_match", "candidate_sha_mismatch")
 
 
-def check_install_smoke(result_path: Path) -> None:
+def check_install_smoke(
+    result_path: Path,
+    *,
+    expected_candidate: str | None = None,
+) -> None:
     if not result_path.is_file():
         raise GateFailure("install_smoke", "result_missing")
     values = parse_key_values(result_path.read_text(encoding="utf-8"))
-    if values.get("INSTALL_SMOKE") != "PASS":
-        raise GateFailure("install_smoke", "install_smoke_not_pass")
-    if values.get("OFFICIAL_ROLLBACK") != "PASS":
-        raise GateFailure("official_rollback", "official_rollback_not_pass")
+    required = {
+        "INSTALL_SMOKE": "PASS",
+        "OFFICIAL_ROLLBACK": "PASS",
+        "BASIC_CODEX_REQUEST": "PASS",
+        "AUTH": "UNCHANGED",
+        "WRAPPER_ROOT": "PASS",
+        "LISTENER_OWNERSHIP": "PASS",
+    }
+    for key, expected in required.items():
+        if values.get(key) != expected:
+            gate = "official_rollback" if key == "OFFICIAL_ROLLBACK" else "install_smoke"
+            raise GateFailure(gate, f"{key.lower()}_not_{expected.lower()}")
+    if expected_candidate is not None:
+        if values.get("candidate_commit", "") != expected_candidate:
+            raise GateFailure("install_smoke", "candidate_sha_mismatch")
 
 
 def run(
@@ -193,7 +207,11 @@ def run(
         print("S4_SECURITY_CHECK=PASS", flush=True)
         check_provenance(root)
         print("S4_PROVENANCE_CHECK=PASS", flush=True)
-        check_install_smoke(install_smoke_result)
+        candidate = git_head(root)
+        check_install_smoke(
+            install_smoke_result,
+            expected_candidate=candidate,
+        )
         print("S4_INSTALL_SMOKE=PASS", flush=True)
         print("S4_OFFICIAL_ROLLBACK=PASS", flush=True)
         check_s3_candidate(root, s3_result)
@@ -209,8 +227,16 @@ def run(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--private-root", type=Path, default=Path.home() / ".uwa" / "standalone-s3")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+    )
+    parser.add_argument(
+        "--private-root",
+        type=Path,
+        default=Path.home() / ".uwa" / "standalone-s3",
+    )
     parser.add_argument("--s3-result", type=Path)
     parser.add_argument(
         "--install-smoke-result",
