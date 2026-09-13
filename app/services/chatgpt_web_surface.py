@@ -66,6 +66,19 @@ return (function() {
   const workControlPresent = controlRows.some((row) =>
     exactWork.has(low(row.text)) || exactWork.has(low(row.aria)));
 
+  // Some current ChatGPT Work conversations expose the active mode as a
+  // non-interactive badge next to the conversation title instead of a selected
+  // tab/button. Treat that badge as conservative Work evidence. Only a boolean
+  // leaves the page; no title or page text is returned.
+  const modeLabels = Array.from(document.querySelectorAll('span,div,p'))
+    .filter(visible)
+    .filter((el) => !el.children || el.children.length === 0)
+    .map((el) => low(el.innerText || el.textContent))
+    .filter((value) => value.length > 0 && value.length <= 160);
+  const workBadgePresent = modeLabels.some((value) =>
+    exactWork.has(value) || /(?:^|[·•])\s*(?:work|工作)$/.test(value)
+  );
+
   const statusNodes = Array.from(document.querySelectorAll(
     '[role="dialog"],[aria-modal="true"],[role="alert"],[role="status"],'+
     '[data-testid*="banner" i],[data-testid*="limit" i],[data-testid*="usage" i],'+
@@ -125,6 +138,7 @@ return (function() {
     selected_work: selectedWork,
     chat_control_present: chatControlPresent,
     work_control_present: workControlPresent,
+    work_badge_present: workBadgePresent,
     work_quota_exhausted: !!workQuota,
     usage_exhausted: !!usageExhausted,
     rate_limited: !!rateLimited,
@@ -218,10 +232,15 @@ def classify_surface_probe(
     selected_work = bool(data.get("selected_work"))
     chat_control = bool(data.get("chat_control_present"))
     work_control = bool(data.get("work_control_present"))
+    work_badge = bool(data.get("work_badge_present"))
 
-    if selected_chat and selected_work:
+    # A visible Work badge is mode evidence even when the UI does not expose a
+    # selected Work control. If Chat is simultaneously marked selected, fail
+    # closed as an ambiguous/conflicting surface instead of guessing Chat.
+    work_evidence = selected_work or work_badge
+    if selected_chat and work_evidence:
         surface_kind = "unknown"
-    elif selected_work:
+    elif work_evidence:
         surface_kind = "work"
     elif selected_chat:
         surface_kind = "chat"
