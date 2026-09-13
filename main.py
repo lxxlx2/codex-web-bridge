@@ -20,6 +20,7 @@ from app.services.chatgpt_web_rate_limit_guard import (
     install_chatgpt_web_rate_limit_guard,
     rate_limit_status,
 )
+from app.services.chatgpt_web_surface import sanitized_surface_status
 from app.services.request_manager import request_manager
 
 
@@ -40,6 +41,12 @@ def _request_status() -> Dict[str, Any]:
         return dict(raw) if isinstance(raw, dict) else {}
     except Exception:
         return {}
+
+
+def _chatgpt_web_status() -> Dict[str, Any]:
+    status = rate_limit_status()
+    status["surface"] = sanitized_surface_status()
+    return status
 
 
 @asynccontextmanager
@@ -82,6 +89,7 @@ async def health() -> Dict[str, Any]:
     request_status = _request_status()
     running_count = int(request_status.get("running_count", 0) or 0)
     browser_connected = browser_status.get("connected") is True
+    chatgpt_web = await asyncio.to_thread(_chatgpt_web_status)
 
     return {
         "service": "healthy" if browser_connected else "degraded",
@@ -89,5 +97,5 @@ async def health() -> Dict[str, Any]:
         "browser": browser_status,
         "running_count": running_count,
         "request_manager": request_status,
-        "chatgpt_web": rate_limit_status(),
+        "chatgpt_web": chatgpt_web,
     }
