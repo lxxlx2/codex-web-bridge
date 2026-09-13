@@ -15,13 +15,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scaffold:
-    runs-on: ubuntu-latest
+  scaffold-static:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Compile standalone control and service entrypoints
         run: |
           python -m py_compile tools/bootstrap_from_uwa.py
@@ -31,27 +31,41 @@ jobs:
           python -m py_compile tools/codex_hybrid_ledger.py
           python -m py_compile tools/codex_remote_compaction_compat.py
           python -m py_compile tools/standalone_dependency_audit.py
+          python -m py_compile tools/standalone_s3_live_acceptance.py
+          python -m py_compile tools/chatgpt_surface_preflight.py
           python -m py_compile security_guard.py
           python -m py_compile start.py
           python -m py_compile main.py
           python -m py_compile app/api/standalone_routes.py
           python -m py_compile app/api/codex_runtime.py
-          python -m py_compile app/api/chat.py
+          python -m py_compile app/api/codex_responses_v2.py
           python -m py_compile app/services/codex_chatgpt_executor.py
-      - name: Validate release metadata
+          python -m py_compile app/services/chatgpt_web_surface.py
+          python -m py_compile app/services/chatgpt_web_prepare.py
+          python -m py_compile app/services/chatgpt_web_rate_limit_guard.py
+      - name: Validate release control documents
         run: |
           test -f README.md
           test -f README.en.md
           test -f README.zh-CN.md
           test -f NOTICE.md
           test -f SECURITY.md
+          test -f LICENSE
           test -f .env.example
           test -f VERSION
           test -f docs/RELEASE_PROCESS.md
-      - name: Validate standalone import boundary
-        run: python -m unittest tests.test_standalone_api_import_boundary
-      - name: Validate standalone entrypoint boundary
-        run: python -m unittest tests.test_standalone_entrypoint
+          test -f docs/RELEASE_REQUIREMENTS.md
+          test -f docs/RELEASE_TECHNICAL_DESIGN.md
+          test -f docs/RELEASE_TEST_PLAN.md
+          grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
+          grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
+          grep -q 'TEST_PLAN_APPROVED=YES' docs/RELEASE_TEST_PLAN.md
+      - name: Validate standalone import and entrypoint boundaries
+        run: |
+          python -m unittest tests.test_standalone_api_import_boundary
+          python -m unittest tests.test_standalone_entrypoint
+      - name: Public repository safety
+        run: python tools/public_repo_safety_check.py
       - name: Validate extracted tree when present
         shell: bash
         run: |
@@ -69,12 +83,12 @@ jobs:
           fi
 
   runtime-import:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: pip
       - name: Install candidate runtime
         run: |
@@ -94,13 +108,11 @@ jobs:
           forbidden_prefixes = ('/api/config', '/api/system', '/api/browser', '/api/provider', '/v1/messages')
           leaked = sorted(path for path in paths if path.startswith(forbidden_prefixes))
           assert not leaked, f'generic UWA routes leaked into standalone app: {leaked}'
-          assert 'app.api.legacy_chat_runtime' not in sys.modules, 'legacy generic chat runtime loaded during standalone startup'
+          assert 'app.api.legacy_chat_runtime' not in sys.modules
           assert codex_runtime._run_chat_completion_final is execute_chatgpt_nonstream
           assert codex_compact._run_chat_completion_final is execute_chatgpt_nonstream
           assert codex_responses_v2._run_chat_completion_final is execute_chatgpt_nonstream
           print('STANDALONE_RUNTIME_IMPORT=PASS')
-          print('LEGACY_CHAT_STARTUP_IMPORT=NO')
-          print('CODEX_CHATGPT_EXECUTOR_BINDING=PASS')
           PY
       - name: Run focused standalone regression
         run: |
@@ -109,11 +121,16 @@ jobs:
             tests/test_codex_runtime_extraction.py \
             tests/test_codex_chatgpt_executor.py \
             tests/test_codex_chatgpt_executor_parity.py \
+            tests/test_chatgpt_web_surface.py \
+            tests/test_chatgpt_web_prepare.py \
+            tests/test_chatgpt_web_rate_limit_guard.py \
+            tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_standalone_health.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py
-      - name: Audit standalone static and startup dependency closure
+      - name: Audit standalone dependency closure
         run: |
-          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-s2-runtime-audit.json \
+          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-runtime-audit.json \
             --why app.core.config \
             --why app.models.schemas \
             --why app.services.config.engine \
@@ -123,12 +140,12 @@ jobs:
             --why app.services.parser_manager
 
   codex-regression:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: pip
       - name: Install candidate runtime
         run: |
@@ -146,5 +163,27 @@ jobs:
             $CODEX_TESTS \
             tests/test_client_tool_policy*.py \
             tests/test_chatgpt_web_*.py \
+            tests/test_standalone_health.py \
             tests/test_install_codex_uwa_commands.py \
             tests/test_security_hardening.py
+
+  release-metadata:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Validate frozen planning documents and provenance
+        run: |
+          test -f docs/RELEASE_REQUIREMENTS.md
+          test -f docs/RELEASE_TECHNICAL_DESIGN.md
+          test -f docs/RELEASE_TEST_PLAN.md
+          test -f LICENSE
+          test -f NOTICE.md
+          test -f SECURITY.md
+          grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
+          grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
+          grep -q 'TEST_PLAN_APPROVED=YES' docs/RELEASE_TEST_PLAN.md
+          grep -q 'leeguooooo/chatgpt-use' NOTICE.md
+          grep -q 'kev489/gpt-tool-use' NOTICE.md
