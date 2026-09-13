@@ -68,6 +68,37 @@ def test_fresh_target_waits_for_prompt_before_classification(monkeypatch, capsys
     assert '"ok": true' in capsys.readouterr().out
 
 
+def test_fresh_target_waits_for_delayed_work_badge_before_freezing_dirty_chat(monkeypatch, capsys):
+    tab = _Tab()
+    states = iter(
+        [
+            _state(
+                kind="chat",
+                ready=False,
+                reason="composer_not_empty",
+                empty=False,
+            ),
+            _state(kind="work", ready=False, reason="work_surface", empty=True),
+            _state(kind="chat", ready=True, reason="none", empty=True),
+        ]
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 1
+    out = capsys.readouterr().out
+    assert '"ok": true' in out
+    assert '"switch_to_chat"' in out
+
+
 def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
     tab = _Tab()
     states = iter(
@@ -150,6 +181,7 @@ def test_dirty_composer_fails_without_clearing(monkeypatch, capsys):
             empty=False,
         ),
     )
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
 
     rc = preflight.run(timeout_seconds=1)
 
