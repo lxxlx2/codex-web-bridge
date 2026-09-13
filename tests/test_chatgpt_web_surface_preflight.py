@@ -12,13 +12,19 @@ import chatgpt_surface_preflight as preflight
 
 
 class _Tab:
-    def __init__(self):
+    def __init__(self, switch_result=None):
         self.clicks = 0
+        self.switch_result = switch_result or {
+            "clicked": True,
+            "strategy": "interactive",
+            "interactive_matches": 1,
+            "paired_matches": 0,
+        }
 
     def run_js(self, script):
         assert script == preflight._SWITCH_CHAT_JS
         self.clicks += 1
-        return {"clicked": True, "matches": 1}
+        return dict(self.switch_result)
 
 
 def _state(
@@ -155,6 +161,69 @@ def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '"ok": true' in out
     assert '"switch_to_chat"' in out
+
+
+def test_segmented_label_fallback_switches_work_to_chat(monkeypatch, capsys):
+    tab = _Tab(
+        {
+            "clicked": True,
+            "strategy": "paired_label",
+            "interactive_matches": 0,
+            "paired_matches": 1,
+        }
+    )
+    states = iter(
+        [
+            _state(kind="work", ready=False, reason="work_surface"),
+            _state(kind="chat", ready=True, reason="none"),
+        ]
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
+    _fast_stable(monkeypatch)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert '"switch_to_chat"' in out
+    assert '"strategy": "paired_label"' in out
+    assert '"paired_matches": 1' in out
+
+
+def test_switch_failure_reports_only_sanitized_selector_counts(monkeypatch, capsys):
+    tab = _Tab(
+        {
+            "clicked": False,
+            "strategy": "none",
+            "interactive_matches": 0,
+            "paired_matches": 0,
+        }
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: _state(
+            kind="work",
+            ready=False,
+            reason="work_surface",
+        ),
+    )
+    _fast_stable(monkeypatch)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert '"failure_class": "chatgpt_work_surface"' in out
+    assert '"interactive_matches": 0' in out
+    assert '"paired_matches": 0' in out
+    assert '"strategy": "none"' in out
 
 
 def test_ambiguous_empty_surface_can_normalize_through_exact_chat(monkeypatch, capsys):
