@@ -52,6 +52,12 @@ matches[0].click();
 return {clicked: true, matches: 1};
 """
 
+# ChatGPT can paint an apparently-ready Chat composer before account-level mode
+# restoration finishes and flips the root page back to Work.  Acceptance must
+# observe a short consecutive ready window before it is allowed to send.
+READY_STABLE_SAMPLES = 10
+POLL_SECONDS = 0.15
+
 
 def _emit(payload: dict[str, Any]) -> None:
     print(
@@ -70,26 +76,36 @@ def _can_safely_select_chat(state: Any) -> bool:
 
 
 def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
-    """Allow a newly-created ChatGPT target to finish rendering before classifying it.
+    """Wait until the fresh target has reached a stable, classifiable surface.
 
-    ChatGPT can render the composer before the mode chrome/badge appears.  In
-    that window a restored draft can look like an ordinary Chat dirty composer
-    even though the fully-rendered page is Work.  Keep sampling a bounded number
-    of times when that exact provisional state appears so acceptance does not
-    freeze the classification too early.
+    A newly-created root can transiently expose a Chat composer before the mode
+    chrome restores Work.  A ready Chat state therefore has to remain unchanged
+    for a bounded consecutive sample window.  Definitive blockers such as Work
+    still return immediately so acceptance can normalize them safely.
     """
     deadline = time.monotonic() + max(1.0, float(timeout_seconds))
     state = inspect_chatgpt_surface(tab, target_count=1)
     transient = {"unknown_surface", "prompt_missing", "send_missing"}
     dirty_settle_samples = 0
     max_dirty_settle_samples = 12
+    ready_samples = 0
 
     while time.monotonic() < deadline:
+        if state.blocking_reason == "none" and state.surface_kind == "chat":
+            ready_samples += 1
+            if ready_samples >= max(1, int(READY_STABLE_SAMPLES)):
+                break
+            time.sleep(POLL_SECONDS)
+            state = inspect_chatgpt_surface(tab, target_count=1)
+            continue
+
+        ready_samples = 0
+
         if state.blocking_reason == "composer_not_empty":
             dirty_settle_samples += 1
             if dirty_settle_samples >= max_dirty_settle_samples:
                 break
-            time.sleep(0.15)
+            time.sleep(POLL_SECONDS)
             state = inspect_chatgpt_surface(tab, target_count=1)
             continue
 
@@ -99,7 +115,7 @@ def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
             # An ambiguous rendered surface may already be safe to normalize
             # through the exact Chat control; do not wait the whole timeout.
             break
-        time.sleep(0.15)
+        time.sleep(POLL_SECONDS)
         state = inspect_chatgpt_surface(tab, target_count=1)
     return state
 
@@ -145,15 +161,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
             )
             return 1
         actions.append("switch_to_chat")
-        deadline = time.monotonic() + max(1.0, float(timeout_seconds))
-        while time.monotonic() < deadline:
-            time.sleep(0.15)
-            state = inspect_chatgpt_surface(tab, target_count=1)
-            if state.surface_kind == "chat" and state.blocking_reason in {
-                "none",
-                "composer_not_empty",
-            }:
-                break
+        state = _wait_initial_surface(tab, timeout_seconds)
 
     if state.blocking_reason not in {"none", "composer_not_empty"}:
         _emit(
@@ -210,7 +218,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
             )
             return 1
         tab = tabs[0]
-        state = inspect_chatgpt_surface(tab, target_count=1)
+        state = _wait_initial_surface(tab, timeout_seconds)
 
     if not state.surface_ready:
         _emit(
