@@ -14,6 +14,7 @@ def _probe(**overrides):
         "selected_work": False,
         "chat_control_present": True,
         "work_control_present": True,
+        "work_badge_present": False,
         "work_quota_exhausted": False,
         "usage_exhausted": False,
         "rate_limited": False,
@@ -47,6 +48,32 @@ def test_work_selected_blocks():
     assert state.surface_kind == "work"
     assert state.surface_ready is False
     assert state.blocking_reason == "work_surface"
+
+
+def test_noninteractive_work_badge_blocks_when_selected_state_is_missing():
+    state = classify_surface_probe(
+        _probe(
+            selected_chat=False,
+            selected_work=False,
+            work_badge_present=True,
+        )
+    )
+    assert state.surface_kind == "work"
+    assert state.surface_ready is False
+    assert state.blocking_reason == "work_surface"
+
+
+def test_work_badge_conflicting_with_selected_chat_fails_closed():
+    state = classify_surface_probe(
+        _probe(
+            selected_chat=True,
+            selected_work=False,
+            work_badge_present=True,
+        )
+    )
+    assert state.surface_kind == "unknown"
+    assert state.surface_ready is False
+    assert state.blocking_reason == "unknown_surface"
 
 
 def test_conflicting_chat_and_work_evidence_fails_closed():
