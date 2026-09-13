@@ -24,16 +24,19 @@ def test_start_wrapper_uses_verified_restart_not_health_reuse():
     assert 'codex_uwa_lifecycle.py" restart' in START_WRAPPER
     assert 'codex_uwa_lifecycle.py" start' not in START_WRAPPER
     assert "health_ok" not in START_WRAPPER
+    assert '--start-timeout 90' in START_WRAPPER
 
 
-def test_start_wrapper_allows_extra_time_only_for_cold_or_changed_requirements():
-    assert "START_TIMEOUT=90" in START_WRAPPER
-    assert "START_TIMEOUT=300" in START_WRAPPER
-    assert 'VENV_PY="$ROOT/.venv/bin/python"' in START_WRAPPER
-    assert 'REQ="$ROOT/requirements.txt"' in START_WRAPPER
-    assert 'STAMP="$ROOT/.venv/.requirements.sha256"' in START_WRAPPER
-    assert 'shasum -a 256 "$REQ"' in START_WRAPPER
-    assert '--start-timeout "$START_TIMEOUT"' in START_WRAPPER
+def test_start_wrapper_bootstraps_dependencies_before_route_mutation():
+    bootstrap = 'python3 "$ROOT/start.py" --bootstrap-only'
+    memory = 'python3 "$ROOT/tools/codex_uwa_memory_guard.py" disable'
+    provider = 'python3 "$ROOT/tools/codex_provider_switch.py" uwa'
+
+    assert bootstrap in START_WRAPPER
+    assert START_WRAPPER.index(bootstrap) < START_WRAPPER.index(memory)
+    assert START_WRAPPER.index(bootstrap) < START_WRAPPER.index(provider)
+    assert "START_TIMEOUT=300" not in START_WRAPPER
+    assert "shasum -a 256" not in START_WRAPPER
 
 
 def test_start_wrapper_disables_memories_automatically():
