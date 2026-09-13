@@ -55,6 +55,28 @@ def test_conflicting_chat_and_work_evidence_fails_closed():
     assert state.blocking_reason == "unknown_surface"
 
 
+def test_visible_chat_and_work_without_selected_evidence_fails_closed():
+    state = classify_surface_probe(
+        _probe(selected_chat=False, selected_work=False)
+    )
+    assert state.surface_kind == "unknown"
+    assert state.surface_ready is False
+    assert state.blocking_reason == "unknown_surface"
+
+
+def test_prompt_only_layout_can_be_inferred_as_chat():
+    state = classify_surface_probe(
+        _probe(
+            selected_chat=False,
+            selected_work=False,
+            chat_control_present=False,
+            work_control_present=False,
+        )
+    )
+    assert state.surface_kind == "chat"
+    assert state.surface_ready is True
+
+
 def test_quota_and_transport_blockers_have_stable_precedence():
     cases = [
         ({"rate_limited": True}, "rate_limited"),
