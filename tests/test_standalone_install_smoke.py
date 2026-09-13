@@ -194,3 +194,96 @@ def test_dependency_bootstrap_fails_when_runtime_was_not_prepared(tmp_path, monk
         assert exc.detail == "runtime_not_prepared"
     else:
         raise AssertionError("expected SmokeFailure")
+
+
+def test_target_reset_refuses_to_discard_existing_dirty_composer(monkeypatch):
+    monkeypatch.setattr(
+        smoke,
+        "_http_json",
+        lambda *_args, **_kwargs: {
+            "service": "healthy",
+            "running_count": 0,
+            "browser": {"connected": True},
+            "chatgpt_web": {
+                "surface": {
+                    "target_count": 1,
+                    "composer_empty": False,
+                }
+            },
+        },
+    )
+
+    try:
+        smoke._require_disposable_target_state()
+    except smoke.SmokeFailure as exc:
+        assert exc.gate == "chatgpt_composer_not_empty"
+        assert exc.detail == "existing_target_has_draft"
+    else:
+        raise AssertionError("expected SmokeFailure")
+
+
+def test_target_reset_closes_existing_target_and_creates_fresh_root(tmp_path, monkeypatch):
+    private_dir = tmp_path / "private"
+    calls = []
+    target_rows = iter(
+        [
+            [{"id": "old-private-id", "type": "page", "url": "https://chatgpt.com/c/private"}],
+            [],
+            [],
+            [{"id": "new-private-id", "type": "page", "url": "https://chatgpt.com/"}],
+        ]
+    )
+
+    monkeypatch.setattr(smoke, "_require_disposable_target_state", lambda: None)
+    monkeypatch.setattr(smoke, "_chatgpt_page_targets", lambda: next(target_rows))
+    monkeypatch.setattr(
+        smoke,
+        "_cdp_close",
+        lambda path, **_kwargs: calls.append(("close", path)),
+    )
+
+    def fake_cdp(path, *, method="GET", timeout=10.0):
+        calls.append((method, path))
+        return {"id": "new-private-id"}
+
+    monkeypatch.setattr(smoke, "_cdp_json", fake_cdp)
+    monkeypatch.setattr(smoke.time, "sleep", lambda _seconds: None)
+
+    result = smoke._reset_acceptance_chatgpt_target(private_dir)
+
+    assert result == {"closed_targets": 1, "fresh_target": True}
+    assert calls[0][0] == "close"
+    assert any(method == "PUT" and "/json/new?" in path for method, path in calls if method != "close")
+    saved = json.loads((private_dir / "target-reset.json").read_text(encoding="utf-8"))
+    assert saved == {"closed_targets": 1, "fresh_target": True}
+    assert "private-id" not in (private_dir / "target-reset.json").read_text(encoding="utf-8")
+
+
+def test_surface_preflight_preserves_stable_failure_class(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    private_dir = tmp_path / "private"
+    (checkout / ".venv" / "bin").mkdir(parents=True)
+    (checkout / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+    payload = {
+        "ok": False,
+        "failure_class": "chatgpt_work_surface",
+        "blocking_reason": "work_surface",
+    }
+
+    monkeypatch.setattr(
+        smoke,
+        "_run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="SURFACE_PREFLIGHT_JSON=" + json.dumps(payload) + "\n",
+        ),
+    )
+
+    try:
+        smoke._run_surface_preflight(checkout=checkout, private_dir=private_dir)
+    except smoke.SmokeFailure as exc:
+        assert exc.gate == "chatgpt_work_surface"
+        assert exc.detail == "work_surface"
+    else:
+        raise AssertionError("expected SmokeFailure")
