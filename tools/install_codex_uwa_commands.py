@@ -33,9 +33,25 @@ python3 "$ROOT/tools/codex_provider_switch.py" uwa
 osascript -e 'tell application "Codex" to quit' >/dev/null 2>&1 || true
 sleep 1
 
-python3 "$ROOT/tools/codex_uwa_lifecycle.py" restart --root "$ROOT"
+START_TIMEOUT=90
+VENV_PY="$ROOT/.venv/bin/python"
+REQ="$ROOT/requirements.txt"
+STAMP="$ROOT/.venv/.requirements.sha256"
+if [[ ! -x "$VENV_PY" || ! -f "$STAMP" || ! -f "$REQ" ]]; then
+    START_TIMEOUT=300
+else
+    EXPECTED_REQ_SHA="$(shasum -a 256 "$REQ" | awk '{{print $1}}')"
+    INSTALLED_REQ_SHA="$(tr -d '\\r\\n' < "$STAMP")"
+    if [[ "$EXPECTED_REQ_SHA" != "$INSTALLED_REQ_SHA" ]]; then
+        START_TIMEOUT=300
+    fi
+fi
 
-if curl -fsS 'http://127.0.0.1:8199/v1/models?client_version=0.153.4' 2>/dev/null \\
+python3 "$ROOT/tools/codex_uwa_lifecycle.py" restart \
+    --root "$ROOT" \
+    --start-timeout "$START_TIMEOUT"
+
+if curl -fsS 'http://127.0.0.1:8199/v1/models?client_version=0.153.4' 2>/dev/null \
     | python3 -c '
 import json,sys
 try:
