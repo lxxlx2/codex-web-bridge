@@ -40,6 +40,12 @@ def _state(
     )
 
 
+def _fast_stable(monkeypatch, samples=1):
+    monkeypatch.setattr(preflight, "READY_STABLE_SAMPLES", samples)
+    monkeypatch.setattr(preflight, "POLL_SECONDS", 0)
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+
+
 def test_fresh_target_waits_for_prompt_before_classification(monkeypatch, capsys):
     tab = _Tab()
     states = iter(
@@ -59,13 +65,40 @@ def test_fresh_target_waits_for_prompt_before_classification(monkeypatch, capsys
         "inspect_chatgpt_surface",
         lambda *_args, **_kwargs: next(states),
     )
-    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
     assert rc == 0
     assert tab.clicks == 0
     assert '"ok": true' in capsys.readouterr().out
+
+
+def test_fresh_target_waits_for_delayed_work_badge_before_freezing_ready_chat(monkeypatch, capsys):
+    tab = _Tab()
+    states = iter(
+        [
+            _state(kind="chat", ready=True, reason="none", empty=True),
+            _state(kind="work", ready=False, reason="work_surface", empty=True),
+            _state(kind="chat", ready=True, reason="none", empty=True),
+            _state(kind="chat", ready=True, reason="none", empty=True),
+        ]
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
+    _fast_stable(monkeypatch, samples=2)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 1
+    out = capsys.readouterr().out
+    assert '"ok": true' in out
+    assert '"switch_to_chat"' in out
 
 
 def test_fresh_target_waits_for_delayed_work_badge_before_freezing_dirty_chat(monkeypatch, capsys):
@@ -88,7 +121,7 @@ def test_fresh_target_waits_for_delayed_work_badge_before_freezing_dirty_chat(mo
         "inspect_chatgpt_surface",
         lambda *_args, **_kwargs: next(states),
     )
-    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -113,7 +146,7 @@ def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
         "inspect_chatgpt_surface",
         lambda *_args, **_kwargs: next(states),
     )
-    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -138,7 +171,7 @@ def test_ambiguous_empty_surface_can_normalize_through_exact_chat(monkeypatch, c
         "inspect_chatgpt_surface",
         lambda *_args, **_kwargs: next(states),
     )
-    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -160,6 +193,7 @@ def test_ambiguous_dirty_surface_does_not_click_chat(monkeypatch, capsys):
             empty=False,
         ),
     )
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -181,7 +215,7 @@ def test_dirty_composer_fails_without_clearing(monkeypatch, capsys):
             empty=False,
         ),
     )
-    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -209,6 +243,7 @@ def test_existing_conversation_opens_new_chat_once(monkeypatch, capsys):
         "prepare_chatgpt_fresh_composer",
         lambda **_kwargs: {"opened_new_chat": True},
     )
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
@@ -228,6 +263,7 @@ def test_quota_blocker_fails_before_navigation(monkeypatch, capsys):
             reason="work_quota_exhausted",
         ),
     )
+    _fast_stable(monkeypatch)
 
     rc = preflight.run(timeout_seconds=1)
 
