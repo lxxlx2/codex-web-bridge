@@ -26,6 +26,16 @@ def test_start_wrapper_uses_verified_restart_not_health_reuse():
     assert "health_ok" not in START_WRAPPER
 
 
+def test_start_wrapper_allows_extra_time_only_for_cold_or_changed_requirements():
+    assert "START_TIMEOUT=90" in START_WRAPPER
+    assert "START_TIMEOUT=300" in START_WRAPPER
+    assert 'VENV_PY="$ROOT/.venv/bin/python"' in START_WRAPPER
+    assert 'REQ="$ROOT/requirements.txt"' in START_WRAPPER
+    assert 'STAMP="$ROOT/.venv/.requirements.sha256"' in START_WRAPPER
+    assert 'shasum -a 256 "$REQ"' in START_WRAPPER
+    assert '--start-timeout "$START_TIMEOUT"' in START_WRAPPER
+
+
 def test_start_wrapper_disables_memories_automatically():
     assert 'codex_uwa_memory_guard.py" disable' in START_WRAPPER
 
