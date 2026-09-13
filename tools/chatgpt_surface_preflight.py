@@ -70,11 +70,29 @@ def _can_safely_select_chat(state: Any) -> bool:
 
 
 def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
-    """Allow a newly-created ChatGPT target to finish rendering before classifying it."""
+    """Allow a newly-created ChatGPT target to finish rendering before classifying it.
+
+    ChatGPT can render the composer before the mode chrome/badge appears.  In
+    that window a restored draft can look like an ordinary Chat dirty composer
+    even though the fully-rendered page is Work.  Keep sampling a bounded number
+    of times when that exact provisional state appears so acceptance does not
+    freeze the classification too early.
+    """
     deadline = time.monotonic() + max(1.0, float(timeout_seconds))
     state = inspect_chatgpt_surface(tab, target_count=1)
     transient = {"unknown_surface", "prompt_missing", "send_missing"}
+    dirty_settle_samples = 0
+    max_dirty_settle_samples = 12
+
     while time.monotonic() < deadline:
+        if state.blocking_reason == "composer_not_empty":
+            dirty_settle_samples += 1
+            if dirty_settle_samples >= max_dirty_settle_samples:
+                break
+            time.sleep(0.15)
+            state = inspect_chatgpt_surface(tab, target_count=1)
+            continue
+
         if state.blocking_reason not in transient:
             break
         if state.prompt_present and state.composer_empty:
