@@ -28,6 +28,7 @@ def _state(
     ready=True,
     reason="none",
     empty=True,
+    prompt=True,
 ):
     return SimpleNamespace(
         surface_kind=kind,
@@ -35,6 +36,7 @@ def _state(
         surface_ready=ready,
         blocking_reason=reason,
         composer_empty=empty,
+        prompt_present=prompt,
     )
 
 
@@ -61,6 +63,50 @@ def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '"ok": true' in out
     assert '"switch_to_chat"' in out
+
+
+def test_ambiguous_empty_surface_can_normalize_through_exact_chat(monkeypatch, capsys):
+    tab = _Tab()
+    states = iter(
+        [
+            _state(kind="unknown", ready=False, reason="unknown_surface"),
+            _state(kind="chat", ready=True, reason="none"),
+        ]
+    )
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 1
+    assert '"switch_to_chat"' in capsys.readouterr().out
+
+
+def test_ambiguous_dirty_surface_does_not_click_chat(monkeypatch, capsys):
+    tab = _Tab()
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: _state(
+            kind="unknown",
+            ready=False,
+            reason="unknown_surface",
+            empty=False,
+        ),
+    )
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 1
+    assert tab.clicks == 0
+    assert '"failure_class": "chatgpt_surface_unknown"' in capsys.readouterr().out
 
 
 def test_dirty_composer_fails_without_clearing(monkeypatch, capsys):
