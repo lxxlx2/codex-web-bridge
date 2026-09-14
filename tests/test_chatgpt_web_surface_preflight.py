@@ -19,6 +19,7 @@ class _Tab:
             "strategy": "interactive",
             "interactive_matches": 1,
             "paired_matches": 0,
+            "segment_matches": 0,
         }
 
     def run_js(self, script):
@@ -163,13 +164,14 @@ def test_normalize_switches_work_to_chat_once(monkeypatch, capsys):
     assert '"switch_to_chat"' in out
 
 
-def test_segmented_label_fallback_switches_work_to_chat(monkeypatch, capsys):
+def test_segmented_branch_switches_work_to_chat(monkeypatch, capsys):
     tab = _Tab(
         {
             "clicked": True,
-            "strategy": "paired_label",
-            "interactive_matches": 0,
+            "strategy": "paired_segment",
+            "interactive_matches": 2,
             "paired_matches": 1,
+            "segment_matches": 1,
         }
     )
     states = iter(
@@ -191,8 +193,10 @@ def test_segmented_label_fallback_switches_work_to_chat(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert '"switch_to_chat"' in out
-    assert '"strategy": "paired_label"' in out
+    assert '"strategy": "paired_segment"' in out
+    assert '"interactive_matches": 2' in out
     assert '"paired_matches": 1' in out
+    assert '"segment_matches": 1' in out
 
 
 def test_switch_failure_reports_only_sanitized_selector_counts(monkeypatch, capsys):
@@ -202,6 +206,7 @@ def test_switch_failure_reports_only_sanitized_selector_counts(monkeypatch, caps
             "strategy": "none",
             "interactive_matches": 0,
             "paired_matches": 0,
+            "segment_matches": 0,
         }
     )
     monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
@@ -223,6 +228,7 @@ def test_switch_failure_reports_only_sanitized_selector_counts(monkeypatch, caps
     assert '"failure_class": "chatgpt_work_surface"' in out
     assert '"interactive_matches": 0' in out
     assert '"paired_matches": 0' in out
+    assert '"segment_matches": 0' in out
     assert '"strategy": "none"' in out
 
 
