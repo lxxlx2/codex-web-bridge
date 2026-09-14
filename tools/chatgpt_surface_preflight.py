@@ -41,11 +41,6 @@ const visible = (el) => {
 const norm = (value) => String(value || '').replace(/[\s\u200b-\u200d\ufeff]+/g, ' ').trim().toLowerCase();
 const exactChat = new Set(['chat', '聊天']);
 const exactWork = new Set(['work', '工作']);
-const valueOf = (el) => norm(
-  `${el && (el.innerText || el.textContent) || ''} ${
-    el && el.getAttribute && el.getAttribute('aria-label') || ''
-  }`
-);
 const exactValue = (el, values) => {
   if (!el) return false;
   const text = norm(el.innerText || el.textContent);
@@ -53,13 +48,16 @@ const exactValue = (el, values) => {
   return values.has(text) || values.has(aria);
 };
 
-// Preferred path: an explicitly interactive Chat control. This covers the
-// historical ChatGPT mode UI and remains the least ambiguous selector.
-const interactive = Array.from(document.querySelectorAll(
-  'button,a,[role="tab"],[role="button"],[aria-selected],[aria-pressed],'+
-  '[data-state],[data-selected],[tabindex]'
-)).filter(visible);
+const interactiveSelector = [
+  'button', 'a', '[role="tab"]', '[role="button"]',
+  '[aria-selected]', '[aria-pressed]', '[data-state]', '[data-selected]',
+  '[tabindex]'
+].join(',');
+const interactive = Array.from(document.querySelectorAll(interactiveSelector))
+  .filter(visible);
 const interactiveMatches = interactive.filter((el) => exactValue(el, exactChat));
+
+// Historical/semantic path: one unambiguous interactive Chat control.
 if (interactiveMatches.length === 1) {
   interactiveMatches[0].click();
   return {
@@ -67,14 +65,15 @@ if (interactiveMatches.length === 1) {
     strategy: 'interactive',
     interactive_matches: 1,
     paired_matches: 0,
+    segment_matches: 0,
   };
 }
 
-// Current ChatGPT can render the Chat/Work segmented selector as plain visible
-// div/span labels without button/tab semantics. Do not click an arbitrary text
-// node. Only accept one leaf-most exact Chat label that has exactly one exact
-// Work label in a small shared ancestor, then click that Chat label and rely on
-// normal DOM bubbling to the segmented-control handler.
+// Current ChatGPT can render the Chat/Work selector as nested div/span labels.
+// Clicking the leaf label is insufficient in this UI: the actual event handler
+// lives on the Chat segment branch. Resolve a unique Chat/Work pair inside the
+// smallest shared ancestor, then click only the direct Chat-side branch. This
+// stays fail-closed when the pair or branch is ambiguous.
 const labelSelector = 'span,div,p,label';
 const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelector))
   .filter(visible)
@@ -85,24 +84,52 @@ const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelecto
 
 const chatLabels = leafLabels(exactChat);
 const workLabels = leafLabels(exactWork);
-const pairedMatches = chatLabels.filter((chat) => {
+const pairs = [];
+for (const chat of chatLabels) {
   let ancestor = chat.parentElement;
   for (let depth = 0; ancestor && ancestor !== document.body && depth < 5; depth += 1) {
     const chatsHere = chatLabels.filter((el) => ancestor.contains(el));
     const worksHere = workLabels.filter((el) => ancestor.contains(el));
-    if (chatsHere.length === 1 && worksHere.length === 1) return true;
+    if (chatsHere.length === 1 && worksHere.length === 1) {
+      pairs.push({chat, work: worksHere[0], root: ancestor});
+      break;
+    }
     ancestor = ancestor.parentElement;
   }
-  return false;
-});
+}
 
-if (pairedMatches.length === 1) {
-  pairedMatches[0].click();
+const pairedMatches = pairs.map((pair) => pair.chat);
+const branchUnder = (root, leaf) => {
+  let node = leaf;
+  while (node && node.parentElement && node.parentElement !== root) {
+    node = node.parentElement;
+  }
+  return node && node.parentElement === root ? node : null;
+};
+
+const segmentCandidates = pairs.map((pair) => {
+  const chatBranch = branchUnder(pair.root, pair.chat);
+  const workBranch = branchUnder(pair.root, pair.work);
+  if (!chatBranch || !workBranch || chatBranch === workBranch) return null;
+  if (!visible(chatBranch) || !visible(workBranch)) return null;
+  if (!chatBranch.contains(pair.chat) || !workBranch.contains(pair.work)) return null;
+  // The Chat branch must not contain the Work label and vice versa.
+  if (chatBranch.contains(pair.work) || workBranch.contains(pair.chat)) return null;
+  return chatBranch;
+}).filter(Boolean);
+
+const uniqueSegments = segmentCandidates.filter(
+  (candidate, index, all) => all.indexOf(candidate) === index
+);
+
+if (uniqueSegments.length === 1) {
+  uniqueSegments[0].click();
   return {
     clicked: true,
-    strategy: 'paired_label',
+    strategy: 'paired_segment',
     interactive_matches: interactiveMatches.length,
-    paired_matches: 1,
+    paired_matches: pairedMatches.length,
+    segment_matches: 1,
   };
 }
 
@@ -111,6 +138,7 @@ return {
   strategy: 'none',
   interactive_matches: interactiveMatches.length,
   paired_matches: pairedMatches.length,
+  segment_matches: uniqueSegments.length,
 };
 """
 
@@ -144,6 +172,7 @@ def _switch_probe(result: Any) -> dict[str, Any]:
             "strategy": "invalid_result",
             "interactive_matches": 0,
             "paired_matches": 0,
+            "segment_matches": 0,
         }
 
     def _count(name: str) -> int:
@@ -153,12 +182,13 @@ def _switch_probe(result: Any) -> dict[str, Any]:
             return 0
 
     strategy = str(result.get("strategy") or "none")
-    if strategy not in {"interactive", "paired_label", "none"}:
+    if strategy not in {"interactive", "paired_segment", "none"}:
         strategy = "unknown"
     return {
         "strategy": strategy,
         "interactive_matches": _count("interactive_matches"),
         "paired_matches": _count("paired_matches"),
+        "segment_matches": _count("segment_matches"),
     }
 
 
