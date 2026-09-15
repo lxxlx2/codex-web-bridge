@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "source_repository": "lxxlx2/universal-web-api",
+  "source_commit": "a140002e65a02a3323abcde3e1fdb8674710c996",
+  "counts": {
+    "integration_python_files": 297,
+    "explicit_bridge_core": 25,
+    "static_reachable": 143,
+    "runtime_loaded": 165,
+    "runtime_only_side_effect_candidates": 32,
+    "validation_files": 46,
+    "python_exclusion_candidates": 76,
+    "direct_requirement_entries": 15,
+    "static_external_import_roots": 14
+  },
+  "main_coupling_targets": [
+    "app/api/__init__.py imports app.api.routes at package import time",
+    "app/core/parsers/__init__.py registers all built-in provider parsers at package import time",
+    "app/api/chat.py contains the shared Responses/backing-Web runtime that should be sliced for standalone use"
+  ],
+  "status": "S1 evidence sufficient for conservative extraction; final keep-set pending S2 standalone parity"
+}
