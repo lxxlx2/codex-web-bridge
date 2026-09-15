@@ -30,50 +30,54 @@ from app.services.chatgpt_web_surface import (  # noqa: E402
 )
 
 
-_SWITCH_CHAT_JS = r"""
-const visible = (el) => {
+_SWITCH_MARKER_ATTR = "data-uwa-acceptance-chat-target"
+_SWITCH_MARKER_SELECTOR = f'[{_SWITCH_MARKER_ATTR}="1"]'
+
+_SWITCH_CHAT_JS = rf"""
+const marker = '{_SWITCH_MARKER_ATTR}';
+document.querySelectorAll(`[${{marker}}]`).forEach((el) => el.removeAttribute(marker));
+const visible = (el) => {{
   if (!el) return false;
   const style = window.getComputedStyle(el);
   const rect = el.getBoundingClientRect();
   return !!style && style.display !== 'none' && style.visibility !== 'hidden' &&
     rect.width > 0 && rect.height > 0;
-};
+}};
 const norm = (value) => String(value || '').replace(/[\s\u200b-\u200d\ufeff]+/g, ' ').trim().toLowerCase();
 const exactChat = new Set(['chat', '聊天']);
 const exactWork = new Set(['work', '工作']);
-const exactValue = (el, values) => {
+const exactValue = (el, values) => {{
   if (!el) return false;
   const text = norm(el.innerText || el.textContent);
   const aria = norm(el.getAttribute && el.getAttribute('aria-label'));
   return values.has(text) || values.has(aria);
-};
+}};
+const mark = (el, payload) => {{
+  if (!el) return Object.assign({{marked: false}}, payload);
+  el.setAttribute(marker, '1');
+  return Object.assign({{marked: true}}, payload);
+}};
 
-const interactiveSelector = [
-  'button', 'a', '[role="tab"]', '[role="button"]',
-  '[aria-selected]', '[aria-pressed]', '[data-state]', '[data-selected]',
-  '[tabindex]'
-].join(',');
-const interactive = Array.from(document.querySelectorAll(interactiveSelector))
-  .filter(visible);
+// Preferred path: one explicitly interactive Chat control. Mark it for a real
+// browser-level click from DrissionPage instead of calling HTMLElement.click().
+const interactive = Array.from(document.querySelectorAll(
+  'button,a,[role="tab"],[role="button"],[aria-selected],[aria-pressed],'+
+  '[data-state],[data-selected],[tabindex]'
+)).filter(visible);
 const interactiveMatches = interactive.filter((el) => exactValue(el, exactChat));
-
-// Historical/semantic path: one unambiguous interactive Chat control.
-if (interactiveMatches.length === 1) {
-  interactiveMatches[0].click();
-  return {
-    clicked: true,
+if (interactiveMatches.length === 1) {{
+  return mark(interactiveMatches[0], {{
     strategy: 'interactive',
     interactive_matches: 1,
     paired_matches: 0,
-    segment_matches: 0,
-  };
-}
+    segment_matches: 1,
+  }});
+}}
 
-// Current ChatGPT can render the Chat/Work selector as nested div/span labels.
-// Clicking the leaf label is insufficient in this UI: the actual event handler
-// lives on the Chat segment branch. Resolve a unique Chat/Work pair inside the
-// smallest shared ancestor, then click only the direct Chat-side branch. This
-// stays fail-closed when the pair or branch is ambiguous.
+// Current ChatGPT can render Chat/Work as a segmented selector with nested
+// wrappers. Locate one exact Chat label paired with one exact Work label, derive
+// the unique Chat-side branch inside their nearest common ancestor, and mark
+// that branch for a browser-level click. No coordinates or fuzzy text clicks.
 const labelSelector = 'span,div,p,label';
 const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelector))
   .filter(visible)
@@ -85,61 +89,62 @@ const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelecto
 const chatLabels = leafLabels(exactChat);
 const workLabels = leafLabels(exactWork);
 const pairs = [];
-for (const chat of chatLabels) {
+for (const chat of chatLabels) {{
   let ancestor = chat.parentElement;
-  for (let depth = 0; ancestor && ancestor !== document.body && depth < 5; depth += 1) {
+  for (let depth = 0; ancestor && ancestor !== document.body && depth < 6; depth += 1) {{
     const chatsHere = chatLabels.filter((el) => ancestor.contains(el));
     const worksHere = workLabels.filter((el) => ancestor.contains(el));
-    if (chatsHere.length === 1 && worksHere.length === 1) {
-      pairs.push({chat, work: worksHere[0], root: ancestor});
+    if (chatsHere.length === 1 && worksHere.length === 1) {{
+      pairs.push({{chat, work: worksHere[0], ancestor}});
       break;
-    }
+    }}
     ancestor = ancestor.parentElement;
-  }
-}
+  }}
+}}
 
-const pairedMatches = pairs.map((pair) => pair.chat);
-const branchUnder = (root, leaf) => {
-  let node = leaf;
-  while (node && node.parentElement && node.parentElement !== root) {
-    node = node.parentElement;
-  }
-  return node && node.parentElement === root ? node : null;
-};
-
-const segmentCandidates = pairs.map((pair) => {
-  const chatBranch = branchUnder(pair.root, pair.chat);
-  const workBranch = branchUnder(pair.root, pair.work);
-  if (!chatBranch || !workBranch || chatBranch === workBranch) return null;
-  if (!visible(chatBranch) || !visible(workBranch)) return null;
-  if (!chatBranch.contains(pair.chat) || !workBranch.contains(pair.work)) return null;
-  // The Chat branch must not contain the Work label and vice versa.
-  if (chatBranch.contains(pair.work) || workBranch.contains(pair.chat)) return null;
-  return chatBranch;
-}).filter(Boolean);
-
-const uniqueSegments = segmentCandidates.filter(
-  (candidate, index, all) => all.indexOf(candidate) === index
+const uniquePairs = pairs.filter((pair, index) =>
+  pairs.findIndex((other) => other.chat === pair.chat && other.work === pair.work) === index
 );
+const segments = [];
+for (const pair of uniquePairs) {{
+  const branchUnder = (leaf, ancestor) => {{
+    let current = leaf;
+    while (current && current.parentElement && current.parentElement !== ancestor) {{
+      current = current.parentElement;
+    }}
+    return current && current.parentElement === ancestor ? current : null;
+  }};
+  const chatBranch = branchUnder(pair.chat, pair.ancestor);
+  const workBranch = branchUnder(pair.work, pair.ancestor);
+  if (chatBranch && workBranch && chatBranch !== workBranch && visible(chatBranch)) {{
+    segments.push(chatBranch);
+  }}
+}}
+const uniqueSegments = segments.filter((el, index) => segments.indexOf(el) === index);
 
-if (uniqueSegments.length === 1) {
-  uniqueSegments[0].click();
-  return {
-    clicked: true,
+if (uniquePairs.length === 1 && uniqueSegments.length === 1) {{
+  return mark(uniqueSegments[0], {{
     strategy: 'paired_segment',
     interactive_matches: interactiveMatches.length,
-    paired_matches: pairedMatches.length,
+    paired_matches: 1,
     segment_matches: 1,
-  };
-}
+  }});
+}}
 
-return {
-  clicked: false,
+return {{
+  marked: false,
   strategy: 'none',
   interactive_matches: interactiveMatches.length,
-  paired_matches: pairedMatches.length,
+  paired_matches: uniquePairs.length,
   segment_matches: uniqueSegments.length,
-};
+}};
+"""
+
+_CLEAN_SWITCH_MARKER_JS = rf"""
+document.querySelectorAll('[{_SWITCH_MARKER_ATTR}]').forEach(
+  (el) => el.removeAttribute('{_SWITCH_MARKER_ATTR}')
+);
+return true;
 """
 
 # ChatGPT can paint an apparently-ready Chat composer before account-level mode
@@ -192,6 +197,25 @@ def _switch_probe(result: Any) -> dict[str, Any]:
     }
 
 
+def _physical_click_marked_chat(tab: Any, result: Any) -> bool:
+    """Perform one real browser-level click on the unique marked Chat target."""
+    if not isinstance(result, dict) or not result.get("marked"):
+        return False
+    try:
+        element = tab.ele(f"css:{_SWITCH_MARKER_SELECTOR}", timeout=1.5)
+        if not element:
+            return False
+        clicked = element.click(by_js=False, timeout=2.0, wait_stop=True)
+        return clicked is not False
+    except Exception:
+        return False
+    finally:
+        try:
+            tab.run_js(_CLEAN_SWITCH_MARKER_JS)
+        except Exception:
+            pass
+
+
 def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
     """Wait until the fresh target has reached a stable, classifiable surface.
 
@@ -229,8 +253,6 @@ def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
         if state.blocking_reason not in transient:
             break
         if state.prompt_present and state.composer_empty:
-            # An ambiguous rendered surface may already be safe to normalize
-            # through the exact Chat control; do not wait the whole timeout.
             break
         time.sleep(POLL_SECONDS)
         state = inspect_chatgpt_surface(tab, target_count=1)
@@ -259,15 +281,11 @@ def run(*, timeout_seconds: float = 8.0) -> int:
     tab = tabs[0]
     state = _wait_initial_surface(tab, timeout_seconds)
 
-    # Acceptance owns this disposable target. If Chat/Work controls are visible
-    # but selection semantics are absent, selecting one exact Chat control is a
-    # safe normalization action only while the composer is empty. Normal runtime
-    # remains fail-closed and never performs this switch automatically.
     if _can_safely_select_chat(state):
         original_reason = state.blocking_reason
         result = tab.run_js(_SWITCH_CHAT_JS)
         switch_probe = _switch_probe(result)
-        if not isinstance(result, dict) or not result.get("clicked"):
+        if not _physical_click_marked_chat(tab, result):
             _emit(
                 {
                     "ok": False,
