@@ -76,8 +76,11 @@ if (interactiveMatches.length === 1) {{
 
 // Current ChatGPT can render Chat/Work as a segmented selector with nested
 // wrappers. Locate one exact Chat label paired with one exact Work label, derive
-// the unique Chat-side branch inside their nearest common ancestor, and mark
-// that branch for a browser-level click. No coordinates or fuzzy text clicks.
+// the unique Chat-side branch inside their nearest common ancestor, then mark
+// the nearest exact interactive ancestor around the Chat leaf for a real
+// browser-level click. Marking the whole branch is insufficient on the current
+// segmented control because its click handler lives on a nested interactive
+// node. No coordinates or fuzzy text clicks are used.
 const labelSelector = 'span,div,p,label';
 const leafLabels = (values) => Array.from(document.querySelectorAll(labelSelector))
   .filter(visible)
@@ -123,7 +126,23 @@ for (const pair of uniquePairs) {{
 const uniqueSegments = segments.filter((el, index) => segments.indexOf(el) === index);
 
 if (uniquePairs.length === 1 && uniqueSegments.length === 1) {{
-  return mark(uniqueSegments[0], {{
+  const pair = uniquePairs[0];
+  const chatBranch = uniqueSegments[0];
+  const distanceToLeaf = (ancestor, leaf) => {{
+    let current = leaf;
+    let distance = 0;
+    while (current && current !== ancestor) {{
+      current = current.parentElement;
+      distance += 1;
+    }}
+    return current === ancestor ? distance : 999;
+  }};
+  const pairedInteractive = interactiveMatches
+    .filter((el) => (el === chatBranch || chatBranch.contains(el)))
+    .filter((el) => el === pair.chat || el.contains(pair.chat))
+    .sort((a, b) => distanceToLeaf(a, pair.chat) - distanceToLeaf(b, pair.chat));
+  const target = pairedInteractive[0] || pair.chat;
+  return mark(target, {{
     strategy: 'paired_segment',
     interactive_matches: interactiveMatches.length,
     paired_matches: 1,
