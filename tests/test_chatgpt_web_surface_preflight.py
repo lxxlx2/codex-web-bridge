@@ -193,15 +193,54 @@ def test_missing_marker_fails_without_claiming_switch(monkeypatch, capsys):
     assert '"actions": []' in out
 
 
-def test_ambiguous_empty_surface_can_normalize_through_exact_chat(monkeypatch, capsys):
+def test_transient_unknown_empty_surface_waits_for_mode_chrome(monkeypatch, capsys):
     tab = _Tab()
     states = iter([
-        _state(kind="unknown", ready=False, reason="unknown_surface"),
+        _state(
+            kind="unknown",
+            ready=False,
+            reason="unknown_surface",
+            empty=True,
+            prompt=True,
+        ),
         _state(kind="chat", ready=True, reason="none"),
     ])
     monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
-    monkeypatch.setattr(preflight, "inspect_chatgpt_surface", lambda *_args, **_kwargs: next(states))
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: next(states),
+    )
     _fast_stable(monkeypatch)
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 0
+    assert '"switch_to_chat"' not in capsys.readouterr().out
+
+
+def test_persistent_ambiguous_empty_surface_can_normalize_through_exact_chat(
+    monkeypatch,
+    capsys,
+):
+    tab = _Tab()
+    settled = iter([
+        _state(
+            kind="unknown",
+            ready=False,
+            reason="unknown_surface",
+            empty=True,
+            prompt=True,
+        ),
+        _state(kind="chat", ready=True, reason="none"),
+    ])
+    monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
+    monkeypatch.setattr(
+        preflight,
+        "_wait_initial_surface",
+        lambda *_args, **_kwargs: next(settled),
+    )
 
     rc = preflight.run(timeout_seconds=1)
 
