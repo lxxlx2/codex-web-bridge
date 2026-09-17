@@ -70,3 +70,21 @@ Existing public reference behavior does support the narrow diagnosis: one refere
 ## Release discipline
 
 Do not broaden this fix into a selector rewrite, mode-switch rewrite, or transport refactor. The immediate objective is to remove the confirmed preflight false negative, preserve existing safety guards, and continue the S4 smoke from the next gate.
+
+
+## Implementation prepared
+
+The confirmed `send_missing` false negative is addressed with a narrow
+readiness-contract change.
+
+- An empty, verified Chat surface no longer requires a currently visible send
+  control in order to be safe for input.
+- `send_control_present` remains available as sanitized telemetry.
+- Dirty composer, Work surface, ambiguous target, authentication, challenge,
+  quota and rate-limit guards remain unchanged.
+- Actual submission capability remains covered by the real Codex request in the
+  install smoke.
+- A focused regression test covers the empty-composer/no-send-control state.
+
+No broader Chat/Work selector, transport or browser-workflow refactor is included
+in this S4 fix.

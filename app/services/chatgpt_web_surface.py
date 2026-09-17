@@ -276,8 +276,15 @@ def classify_surface_probe(
         reason = "prompt_missing"
     elif not composer_empty:
         reason = "composer_not_empty"
-    elif not send_control_present:
-        reason = "send_missing"
+
+    # ChatGPT may render an empty composer without exposing the submit control
+    # until text is inserted. A fresh empty Chat surface is therefore ready for
+    # safe input even when the send control is not currently visible.
+    #
+    # Keep send_control_present in SurfaceSnapshot as sanitized telemetry. The
+    # real browser workflow validates submission after the prompt is populated,
+    # so preflight must not turn the empty-composer UI state into a false
+    # send_missing blocker.
 
     return SurfaceSnapshot(
         target_count=int(target_count),

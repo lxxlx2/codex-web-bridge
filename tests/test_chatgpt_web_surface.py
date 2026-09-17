@@ -127,14 +127,26 @@ def test_dirty_composer_blocks_without_returning_text():
     assert "composer_text" not in payload
 
 
-def test_missing_prompt_or_send_control_blocks():
+def test_missing_prompt_blocks():
     no_prompt = classify_surface_probe(
         _probe(prompt_present=False, send_control_present=False)
     )
     assert no_prompt.blocking_reason in {"unknown_surface", "prompt_missing"}
 
-    no_send = classify_surface_probe(_probe(send_control_present=False))
-    assert no_send.blocking_reason == "send_missing"
+
+def test_empty_chat_does_not_require_send_control_before_input():
+    state = classify_surface_probe(
+        _probe(
+            composer_chars=0,
+            send_control_present=False,
+        )
+    )
+
+    assert state.surface_kind == "chat"
+    assert state.composer_empty is True
+    assert state.send_control_present is False
+    assert state.surface_ready is True
+    assert state.blocking_reason == "none"
 
 
 def test_target_missing_and_ambiguous_fail_before_page_state():
