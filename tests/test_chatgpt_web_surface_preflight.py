@@ -225,21 +225,24 @@ def test_persistent_ambiguous_empty_surface_can_normalize_through_exact_chat(
     capsys,
 ):
     tab = _Tab()
-    settled = iter([
-        _state(
-            kind="unknown",
-            ready=False,
-            reason="unknown_surface",
-            empty=True,
-            prompt=True,
-        ),
-        _state(kind="chat", ready=True, reason="none"),
-    ])
+    initial = _state(
+        kind="unknown",
+        ready=False,
+        reason="unknown_surface",
+        empty=True,
+        prompt=True,
+    )
+    settled = _state(kind="chat", ready=True, reason="none")
     monkeypatch.setattr(preflight, "controlled_chatgpt_tabs", lambda: [tab])
     monkeypatch.setattr(
         preflight,
         "_wait_initial_surface",
-        lambda *_args, **_kwargs: next(settled),
+        lambda *_args, **_kwargs: initial,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_after_chat_switch",
+        lambda *_args, **_kwargs: settled,
     )
 
     rc = preflight.run(timeout_seconds=1)
