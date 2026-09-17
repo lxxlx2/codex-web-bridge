@@ -282,6 +282,37 @@ def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
     return state
 
 
+def _wait_after_chat_switch(tab: Any, timeout_seconds: float) -> Any:
+    """Wait for a physical Work-to-Chat click to settle into stable Chat.
+
+    Immediately after the browser-level click, React may still expose the old
+    Work-selected DOM for one or more frames. Unlike the initial probe, Work is
+    therefore transient inside this bounded post-click window. Safety blockers
+    unrelated to mode settling remain fail-closed.
+    """
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+    state = inspect_chatgpt_surface(tab, target_count=1)
+    transient = {"work_surface", "unknown_surface", "prompt_missing", "send_missing"}
+    ready_samples = 0
+
+    while time.monotonic() < deadline:
+        if state.blocking_reason == "none" and state.surface_kind == "chat":
+            ready_samples += 1
+            if ready_samples >= max(1, int(READY_STABLE_SAMPLES)):
+                break
+        else:
+            ready_samples = 0
+            if state.blocking_reason not in transient:
+                break
+            if not state.composer_empty:
+                break
+
+        time.sleep(POLL_SECONDS)
+        state = inspect_chatgpt_surface(tab, target_count=1)
+
+    return state
+
+
 def run(*, timeout_seconds: float = 8.0) -> int:
     actions: list[str] = []
     switch_probe: dict[str, Any] | None = None
@@ -322,7 +353,7 @@ def run(*, timeout_seconds: float = 8.0) -> int:
             )
             return 1
         actions.append("switch_to_chat")
-        state = _wait_initial_surface(tab, timeout_seconds)
+        state = _wait_after_chat_switch(tab, timeout_seconds)
 
     if state.blocking_reason not in {"none", "composer_not_empty"}:
         payload = {
