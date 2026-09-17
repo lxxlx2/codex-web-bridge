@@ -63,7 +63,7 @@ def test_noninteractive_work_badge_blocks_when_selected_state_is_missing():
     assert state.blocking_reason == "work_surface"
 
 
-def test_work_badge_conflicting_with_selected_chat_fails_closed():
+def test_selected_chat_outranks_noninteractive_work_badge():
     state = classify_surface_probe(
         _probe(
             selected_chat=True,
@@ -71,9 +71,9 @@ def test_work_badge_conflicting_with_selected_chat_fails_closed():
             work_badge_present=True,
         )
     )
-    assert state.surface_kind == "unknown"
-    assert state.surface_ready is False
-    assert state.blocking_reason == "unknown_surface"
+    assert state.surface_kind == "chat"
+    assert state.surface_ready is True
+    assert state.blocking_reason == "none"
 
 
 def test_conflicting_chat_and_work_evidence_fails_closed():
