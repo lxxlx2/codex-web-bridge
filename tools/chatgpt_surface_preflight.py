@@ -252,8 +252,12 @@ def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
 
         if state.blocking_reason not in transient:
             break
-        if state.prompt_present and state.composer_empty:
-            break
+
+        # A fresh ChatGPT root may expose the composer before the account-level
+        # Chat/Work mode chrome has finished restoring. Keep polling transient
+        # states even when the prompt is already visible and empty. If the
+        # surface remains genuinely ambiguous for the whole bounded wait, run()
+        # may still use the exact safe Chat normalization path afterward.
         time.sleep(POLL_SECONDS)
         state = inspect_chatgpt_surface(tab, target_count=1)
     return state
