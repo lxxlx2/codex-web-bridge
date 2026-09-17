@@ -166,6 +166,27 @@ def check_s3_candidate(root: Path, result_path: Path) -> None:
         raise GateFailure("s3_candidate_match", "candidate_sha_mismatch")
 
 
+def check_desktop_candidate(root: Path, result_path: Path) -> None:
+    if not result_path.is_file():
+        raise GateFailure("desktop_candidate_match", "desktop_result_missing")
+    values = parse_key_values(result_path.read_text(encoding="utf-8"))
+    required = {
+        "STANDALONE_DESKTOP_E2E": "PASS",
+        "DESKTOP_CONTEXT": "PASS",
+        "DESKTOP_LOCAL_TOOLS": "PASS",
+        "DESKTOP_ROUTE_UWA_CHATGPT_HIGH": "PASS",
+        "DESKTOP_REQUEST_MANAGER_CLEAN": "PASS",
+    }
+    for key, expected in required.items():
+        if values.get(key) != expected:
+            raise GateFailure(
+                "desktop_candidate_match",
+                f"{key.lower()}_not_{expected.lower()}",
+            )
+    if values.get("candidate_commit", "") != git_head(root):
+        raise GateFailure("desktop_candidate_match", "candidate_sha_mismatch")
+
+
 def check_install_smoke(
     result_path: Path,
     *,
@@ -195,6 +216,7 @@ def run(
     *,
     root: Path,
     s3_result: Path,
+    desktop_result: Path,
     install_smoke_result: Path,
 ) -> int:
     try:
@@ -216,6 +238,8 @@ def run(
         print("S4_OFFICIAL_ROLLBACK=PASS", flush=True)
         check_s3_candidate(root, s3_result)
         print("S4_S3_CANDIDATE_MATCH=PASS", flush=True)
+        check_desktop_candidate(root, desktop_result)
+        print("S4_DESKTOP_E2E_CANDIDATE_MATCH=PASS", flush=True)
         print("STANDALONE_S4_LOCAL=PASS", flush=True)
         return 0
     except GateFailure as exc:
@@ -239,6 +263,11 @@ def main() -> int:
     )
     parser.add_argument("--s3-result", type=Path)
     parser.add_argument(
+        "--desktop-result",
+        type=Path,
+        default=Path.home() / ".uwa" / "standalone-desktop-e2e" / "result.txt",
+    )
+    parser.add_argument(
         "--install-smoke-result",
         type=Path,
         default=Path.home() / ".uwa" / "standalone-s4" / "install-smoke-result.txt",
@@ -249,6 +278,7 @@ def main() -> int:
     return run(
         root=args.root.expanduser().resolve(),
         s3_result=s3_result.expanduser(),
+        desktop_result=args.desktop_result.expanduser(),
         install_smoke_result=args.install_smoke_result.expanduser(),
     )
 
