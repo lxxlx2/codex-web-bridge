@@ -24,19 +24,22 @@ import argparse
 import json
 import platform
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    import codex_desktop_acceptance as desktop
-    import codex_route_audit as route_audit
-    import standalone_s3_live_acceptance as s3
-    import standalone_s3_live_core as core
-except ModuleNotFoundError:
-    from tools import codex_desktop_acceptance as desktop
-    from tools import codex_route_audit as route_audit
-    from tools import standalone_s3_live_acceptance as s3
-    from tools import standalone_s3_live_core as core
+# The release tools historically import sibling modules as top-level modules
+# because they are normally executed as scripts from tools/. Tests import this
+# gate as ``tools.standalone_desktop_e2e_gate`` instead. Put the tools directory
+# on sys.path once so both invocation modes resolve the exact same modules.
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+import codex_desktop_acceptance as desktop
+import codex_route_audit as route_audit
+import standalone_s3_live_acceptance as s3
+import standalone_s3_live_core as core
 
 
 DEFAULT_ACCEPTANCE_ROOT = Path.home() / "uwa-codex-acceptance"
