@@ -171,6 +171,45 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     s3._passive_surface_recheck(private_dir)
             self.assertEqual(ctx.exception.gate, "chatgpt_work_surface")
 
+    def test_mid_run_rate_limit_is_promoted_as_external_surface_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+            payload = {
+                "chatgpt_web": {
+                    "surface": {
+                        "surface_kind": "chat",
+                        "surface_ready": False,
+                        "pathname_class": "conversation",
+                        "composer_empty": True,
+                        "blocking_reason": "rate_limited",
+                    }
+                }
+            }
+            with patch.object(s3.core, "_health_ready", return_value=payload):
+                failure = s3._external_surface_failure_after_core_failure(private_dir)
+            self.assertIsNotNone(failure)
+            assert failure is not None
+            self.assertEqual(failure.gate, "chatgpt_web_rate_limited")
+            self.assertEqual(failure.detail, "rate_limited")
+
+    def test_mid_run_unknown_surface_does_not_mask_core_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+            payload = {
+                "chatgpt_web": {
+                    "surface": {
+                        "surface_kind": "unknown",
+                        "surface_ready": False,
+                        "pathname_class": "conversation",
+                        "composer_empty": True,
+                        "blocking_reason": "unknown_surface",
+                    }
+                }
+            }
+            with patch.object(s3.core, "_health_ready", return_value=payload):
+                failure = s3._external_surface_failure_after_core_failure(private_dir)
+            self.assertIsNone(failure)
+
     def test_core_result_is_promoted_with_candidate_sha(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             outer = Path(raw)
