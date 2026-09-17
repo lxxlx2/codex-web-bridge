@@ -32,6 +32,14 @@ import standalone_s3_live_core as core
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CDP_BASE = "http://127.0.0.1:9222"
+_EXTERNAL_SURFACE_FAILURES = {
+    "chatgpt_work_surface",
+    "chatgpt_work_quota_exhausted",
+    "chatgpt_usage_exhausted",
+    "chatgpt_web_rate_limited",
+    "chatgpt_auth_required",
+    "chatgpt_challenge",
+}
 
 # Backward-compatible exports used by existing non-live runner tests.
 GateFailure = core.GateFailure
@@ -232,6 +240,24 @@ def _passive_surface_recheck(private_dir: Path) -> dict[str, Any]:
     return sanitized
 
 
+def _external_surface_failure_after_core_failure(private_dir: Path) -> GateFailure | None:
+    """Return a stable external blocker if the browser entered one during live S3.
+
+    The initial surface preflight can be clean while the long compaction probe later
+    encounters account-side rate limiting or quota state. In that case preserve the
+    product failure evidence privately, but expose the external surface condition as
+    the outer release failure class so operators do not repeatedly rerun the full
+    stress probe while the account is still blocked.
+    """
+
+    try:
+        _passive_surface_recheck(private_dir)
+    except GateFailure as exc:
+        if exc.gate in _EXTERNAL_SURFACE_FAILURES:
+            return exc
+    return None
+
+
 def _promote_core_result(*, outer_private_dir: Path, candidate_commit: str, core_rc: int) -> None:
     result_paths = sorted(
         outer_private_dir.glob("*/result.txt"),
@@ -291,6 +317,12 @@ def run(
             turn_timeout_sec=turn_timeout_sec,
             compaction_timeout_sec=compaction_timeout_sec,
         )
+        if core_rc != 0:
+            external_failure = _external_surface_failure_after_core_failure(
+                outer_private_dir
+            )
+            if external_failure is not None:
+                raise external_failure
         _promote_core_result(
             outer_private_dir=outer_private_dir,
             candidate_commit=candidate,
