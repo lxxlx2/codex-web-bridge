@@ -109,6 +109,34 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         with self.assertRaises(s3.GateFailure):
             s3._parse_surface_preflight("no result\n")
 
+    def test_quiet_desktop_returns_whether_runner_changed_app_state(self) -> None:
+        with (
+            patch.object(s3, "_codex_desktop_running", return_value=False),
+            patch.object(s3.subprocess, "run") as run_mock,
+        ):
+            self.assertFalse(s3._quiet_codex_desktop())
+            run_mock.assert_not_called()
+
+        with (
+            patch.object(s3, "_codex_desktop_running", return_value=True),
+            patch.object(s3.subprocess, "run") as run_mock,
+            patch.object(s3.time, "sleep"),
+        ):
+            self.assertTrue(s3._quiet_codex_desktop())
+            self.assertEqual(run_mock.call_args.args[0][0:2], ["osascript", "-e"])
+
+    def test_restore_desktop_only_when_gate_quieted_running_app(self) -> None:
+        with (
+            patch.object(s3.sys, "platform", "darwin"),
+            patch.object(s3.subprocess, "run") as run_mock,
+        ):
+            s3._restore_codex_desktop(False)
+            run_mock.assert_not_called()
+
+            s3._restore_codex_desktop(True)
+            run_mock.assert_called_once()
+            self.assertEqual(run_mock.call_args.args[0], ["open", "-a", "Codex"])
+
     def test_surface_failure_stops_before_core_live_gate(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             private_root = Path(raw) / "private"
