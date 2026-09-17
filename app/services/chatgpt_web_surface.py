@@ -46,10 +46,10 @@ return (function() {
     document.querySelector('button[aria-label*="Send" i]') ||
     document.querySelector('button[aria-label*="发送"]');
 
-  const controls = Array.from(document.querySelectorAll(
+  const controlSelector =
     'button,a,[role="tab"],[role="button"],[aria-selected],[aria-pressed],'+
-    '[aria-current],[data-state],[data-selected]'
-  )).filter(visible);
+    '[aria-current],[data-state],[data-selected]';
+  const controls = Array.from(document.querySelectorAll(controlSelector)).filter(visible);
   const controlRows = controls.map((el) => ({
     text: norm(el.innerText || el.textContent),
     aria: norm(el.getAttribute && el.getAttribute('aria-label')),
@@ -66,18 +66,24 @@ return (function() {
   const workControlPresent = controlRows.some((row) =>
     exactWork.has(low(row.text)) || exactWork.has(low(row.aria)));
 
-  // Some current ChatGPT Work conversations expose the active mode as a
-  // non-interactive badge next to the conversation title instead of a selected
-  // tab/button. Treat that badge as conservative Work evidence. Only a boolean
-  // leaves the page; no title or page text is returned.
+  // Some Work conversations expose a non-interactive Work badge near the
+  // conversation title. The segmented Chat/Work selector also contains a leaf
+  // node whose text is literally "Work"/"工作", so exclude any matching label
+  // that lives inside an interactive control. Otherwise the inactive Work tab
+  // is misclassified as an active Work badge after Chat is selected.
   const modeLabels = Array.from(document.querySelectorAll('span,div,p'))
     .filter(visible)
     .filter((el) => !el.children || el.children.length === 0)
-    .map((el) => low(el.innerText || el.textContent))
-    .filter((value) => value.length > 0 && value.length <= 160);
-  const workBadgePresent = modeLabels.some((value) =>
-    exactWork.has(value) || /(?:^|[·•])\s*(?:work|工作)$/.test(value)
-  );
+    .filter((el) => {
+      const value = low(el.innerText || el.textContent);
+      return value.length > 0 && value.length <= 160;
+    });
+  const workBadgePresent = modeLabels.some((el) => {
+    const value = low(el.innerText || el.textContent);
+    const workLike = exactWork.has(value) || /(?:^|[·•])\s*(?:work|工作)$/.test(value);
+    if (!workLike) return false;
+    return !el.closest(controlSelector);
+  });
 
   const statusNodes = Array.from(document.querySelectorAll(
     '[role="dialog"],[aria-modal="true"],[role="alert"],[role="status"],'+
@@ -234,16 +240,18 @@ def classify_surface_probe(
     work_control = bool(data.get("work_control_present"))
     work_badge = bool(data.get("work_badge_present"))
 
-    # A visible Work badge is mode evidence even when the UI does not expose a
-    # selected Work control. If Chat is simultaneously marked selected, fail
-    # closed as an ambiguous/conflicting surface instead of guessing Chat.
-    work_evidence = selected_work or work_badge
-    if selected_chat and work_evidence:
+    # Explicit selected-control state is stronger mode evidence than a
+    # non-interactive badge. Keep truly conflicting selected Chat + selected
+    # Work evidence fail-closed, but do not let an inactive Work label/badge
+    # override an explicitly selected Chat control.
+    if selected_chat and selected_work:
         surface_kind = "unknown"
-    elif work_evidence:
+    elif selected_work:
         surface_kind = "work"
     elif selected_chat:
         surface_kind = "chat"
+    elif work_badge:
+        surface_kind = "work"
     elif prompt_present and chat_control and not work_control:
         surface_kind = "chat"
     elif prompt_present and not chat_control and not work_control:
