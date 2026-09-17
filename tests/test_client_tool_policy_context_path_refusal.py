@@ -77,6 +77,7 @@ def test_context_turn_path_refusal_roundtrip_becomes_exec_command(monkeypatch):
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     assert "workdir" not in result["tool_calls"][0]["function"]["arguments"]
 
+
 def _successful_workspace_guard_history():
     return [
         {
@@ -193,6 +194,7 @@ def test_post_tool_context_path_refusal_roundtrip_calls_exec(
         not in result["tool_calls"][0]["function"]["arguments"]
     )
 
+
 def _compacted_workspace_continuation_history():
     return [
         {
@@ -301,3 +303,75 @@ def test_compacted_function_output_path_refusal_roundtrip_repairs(
         "workdir"
         not in result["tool_calls"][0]["function"]["arguments"]
     )
+
+
+LIVE_POST_GUARD_REFUSAL = (
+    "当前实际可用环境中没有 `/Users/jerson/uwa-codex-acceptance` 工作区，"
+    "因此无法完成剩余的 `large_context/result.txt` 写入和回读校验。"
+)
+
+
+def _function_output_only_history():
+    return [
+        {
+            "role": "user",
+            "content": (
+                "[Function Call Output: exec_command (call_guard)]\n"
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "/Users/jerson/uwa-codex-acceptance\n"
+            ),
+        }
+    ]
+
+
+def test_function_output_fallback_alone_repairs_false_workspace_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_POST_GUARD_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert policy.should_repair_client_workspace_refusal(
+        messages=_function_output_only_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_POST_GUARD_REFUSAL,
+        parsed=parsed,
+    ) is True
+
+
+def test_function_output_fallback_roundtrip_forces_next_real_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    language_patch.install_codex_workspace_refusal_language_patch()
+
+    replies = iter(
+        [
+            LIVE_POST_GUARD_REFUSAL,
+            (
+                '<adapter_calls>'
+                '<call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt && cat large_context/result.txt"}'
+                ']]></arguments>'
+                '</call>'
+                '</adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_function_output_only_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "workdir" not in result["tool_calls"][0]["function"]["arguments"]
