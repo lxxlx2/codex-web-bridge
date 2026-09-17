@@ -63,6 +63,17 @@ def _smoke_text(candidate: str = "abc123") -> str:
     )
 
 
+def _desktop_text(candidate: str = "abc123") -> str:
+    return (
+        "STANDALONE_DESKTOP_E2E=PASS\n"
+        "DESKTOP_CONTEXT=PASS\n"
+        "DESKTOP_LOCAL_TOOLS=PASS\n"
+        "DESKTOP_ROUTE_UWA_CHATGPT_HIGH=PASS\n"
+        "DESKTOP_REQUEST_MANAGER_CLEAN=PASS\n"
+        f"candidate_commit={candidate}\n"
+    )
+
+
 def test_docs_gate_rejects_missing_file(tmp_path: Path):
     with pytest.raises(gate.GateFailure, match="missing=README.md"):
         gate.check_docs(tmp_path)
@@ -109,6 +120,21 @@ def test_s3_candidate_must_match_head(tmp_path: Path, monkeypatch):
         gate.check_s3_candidate(tmp_path, result)
 
 
+def test_desktop_candidate_requires_all_markers_and_same_head(tmp_path: Path, monkeypatch):
+    result = tmp_path / "desktop.txt"
+    result.write_text(_desktop_text("abc123"), encoding="utf-8")
+    monkeypatch.setattr(gate, "git_head", lambda root: "abc123")
+    gate.check_desktop_candidate(tmp_path, result)
+
+    result.write_text("STANDALONE_DESKTOP_E2E=PASS\n", encoding="utf-8")
+    with pytest.raises(gate.GateFailure, match="desktop_context_not_pass"):
+        gate.check_desktop_candidate(tmp_path, result)
+
+    result.write_text(_desktop_text("old"), encoding="utf-8")
+    with pytest.raises(gate.GateFailure, match="candidate_sha_mismatch"):
+        gate.check_desktop_candidate(tmp_path, result)
+
+
 def test_install_smoke_requires_all_release_markers_and_candidate(tmp_path: Path):
     result = tmp_path / "install.txt"
     result.write_text(_smoke_text("abc123"), encoding="utf-8")
@@ -131,9 +157,19 @@ def test_full_release_checks_accept_clean_fixture(tmp_path: Path, monkeypatch):
         "candidate_commit=abc123\n",
         encoding="utf-8",
     )
+    desktop = tmp_path / "desktop.txt"
+    desktop.write_text(_desktop_text("abc123"), encoding="utf-8")
     smoke = tmp_path / "smoke.txt"
     smoke.write_text(_smoke_text("abc123"), encoding="utf-8")
     monkeypatch.setattr(gate, "require_clean_worktree", lambda root: None)
     monkeypatch.setattr(gate, "git_head", lambda root: "abc123")
 
-    assert gate.run(root=tmp_path, s3_result=s3, install_smoke_result=smoke) == 0
+    assert (
+        gate.run(
+            root=tmp_path,
+            s3_result=s3,
+            desktop_result=desktop,
+            install_smoke_result=smoke,
+        )
+        == 0
+    )
