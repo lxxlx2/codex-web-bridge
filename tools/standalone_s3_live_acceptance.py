@@ -12,6 +12,8 @@ Safety:
 - never sends a prompt while normalizing the surface;
 - never clears unknown composer text;
 - never bypasses usage/rate limits;
+- temporarily quiets Codex Desktop for deterministic CLI evidence, then restores
+  the app if it was running when the gate started;
 - stores raw evidence only under the private S3 root.
 """
 
@@ -60,9 +62,24 @@ def _candidate_commit() -> str:
     return result.stdout.strip()
 
 
-def _quiet_codex_desktop() -> None:
+def _codex_desktop_running() -> bool:
     if sys.platform != "darwin":
-        return
+        return False
+    result = subprocess.run(
+        ["pgrep", "-x", "Codex"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=5,
+    )
+    return result.returncode == 0
+
+
+def _quiet_codex_desktop() -> bool:
+    """Quiet Codex Desktop and return whether this runner changed app state."""
+
+    if not _codex_desktop_running():
+        return False
     subprocess.run(
         ["osascript", "-e", 'tell application "Codex" to quit'],
         stdout=subprocess.DEVNULL,
@@ -71,6 +88,19 @@ def _quiet_codex_desktop() -> None:
         timeout=10,
     )
     time.sleep(1.0)
+    return True
+
+
+def _restore_codex_desktop(was_running: bool) -> None:
+    if sys.platform != "darwin" or was_running is not True:
+        return
+    subprocess.run(
+        ["open", "-a", "Codex"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=10,
+    )
 
 
 def _cdp_json(path: str, *, method: str = "GET", timeout: float = 10.0) -> Any:
@@ -283,6 +313,7 @@ def run(
 ) -> int:
     outer_private_dir = core._private_dir(private_root)
     candidate = ""
+    desktop_was_running = False
     try:
         core._preflight_repo()
         candidate = _candidate_commit()
@@ -293,7 +324,7 @@ def run(
         core._health_ready(require_clean=True)
         python = core._validation_python()
 
-        _quiet_codex_desktop()
+        desktop_was_running = _quiet_codex_desktop()
         core._wait_request_cleanup()
         _reset_acceptance_chatgpt_target()
         _emit("S3_PHASE=ACCEPTANCE_TARGET_RESET")
@@ -356,6 +387,8 @@ def run(
         _emit(f"FAILURE_DETAIL={exc.__class__.__name__}")
         _emit("PRIVATE_EVIDENCE_RECORDED=YES")
         return 1
+    finally:
+        _restore_codex_desktop(desktop_was_running)
 
 
 def main() -> int:
