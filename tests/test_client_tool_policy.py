@@ -739,3 +739,115 @@ def test_repair_prompt_preserves_specific_required_workspace_tool():
 
     assert "Call apply_patch now" in repair[1]["content"]
 
+def _compacted_workspace_messages():
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "ORBIT-5921\n\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Workspace validation already succeeded. "
+                "The unfinished next step is to use exec_command to write "
+                "large_context/result.txt with ORBIT-5921, then use exec_command "
+                "again to read and verify the file before replying LARGE_CONTEXT_PASS."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "Continue from the compacted state and finish the pending task.",
+        },
+    ]
+
+
+def test_repairs_tool_unavailable_claim_after_recursive_compaction(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    refusal = (
+        "当前 ChatGPT 会话本身不会新增 exec_command 工具。"
+        "虽然 ORBIT-5921 已从压缩状态恢复，但我不能真实写入并读取结果文件。"
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_recursive_compaction_refusal_into_next_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            (
+                "当前 ChatGPT 会话里没有 exec_command，"
+                "所以即使记得 ORBIT-5921 也无法真实写入并回读结果文件。"
+            ),
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \\\'ORBIT-5921\\\\n\\\' > large_context/result.txt '
+                '&& cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+
+
+def test_completed_only_compaction_does_not_force_workspace_repair(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "NONE\n\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "The earlier calc.py workspace repair and tests are completed. "
+                "The current task is to answer a conceptual Python question."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "Explain Python descriptors conceptually.",
+        },
+    ]
+
+    parsed = {
+        "mode": "final",
+        "content": "Python descriptors customize attribute access.",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is False
+
