@@ -851,3 +851,24 @@ def test_completed_only_compaction_does_not_force_workspace_repair(monkeypatch):
         parsed=parsed,
     ) is False
 
+def test_recursive_compaction_repair_prompt_keeps_exact_state():
+    repair = build_client_workspace_repair_messages(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        assistant_text=(
+            "当前会话没有 exec_command，"
+            "因此无法继续完成工作区写入。"
+        ),
+        attempt=1,
+        total_attempts=3,
+        tool_choice="auto",
+    )
+
+    user = repair[1]["content"]
+
+    assert "Compacted continuation state already present" in user
+    assert "ORBIT-5921" in user
+    assert "large_context/result.txt" in user
+    assert "Continue the task by calling exec_command again" not in user
+    assert "Call exec_command now" in user
+
