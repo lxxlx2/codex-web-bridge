@@ -131,6 +131,24 @@ The runtime fix now calls the existing ownership-checked unsent-composer rollbac
 
 Because this changes the candidate SHA, all release-bound Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated on the new HEAD.
 
+
+## 2026-09-18 Post-compaction quoted-protocol false positive
+
+The next exact-candidate S3 run reached post-compaction recovery and failed after the web model refused the required client tool. Private evidence showed the final validation summary:
+
+```text
+The reply looked like an XML-style tool call, but it could not be parsed into a valid declared tool.
+```
+
+There was no matching `XML tool-call parse rejected` structural log entry. The visible web reply explained that it could not fabricate `<adapter_calls>`, with the protocol tag shown as Markdown inline code. This exposed a validation/parser inconsistency:
+
+- the XML parser masks inline and fenced Markdown code before looking for executable tool envelopes;
+- malformed-tool detection scanned the raw text and therefore treated the quoted `<adapter_calls>` protocol name as a real malformed tool-call candidate.
+
+The validator now reuses the parser's ignored-markup masking before XML-like detection. Regression coverage proves that inline/fenced protocol examples are ignored while unquoted protocol markup is still treated as a malformed candidate. All actual XML parsing and declared-tool/schema validation remain fail-closed.
+
+This changes the release candidate SHA again. Desktop E2E evidence on `105bc97adb21786a4a312875f0c1dda028f9e137` remains historical capability evidence only; exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after the new fix is validated.
+
 ## Gate state
 
 ```text
