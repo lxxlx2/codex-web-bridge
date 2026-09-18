@@ -25,6 +25,7 @@ import json
 import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -63,20 +64,61 @@ def _candidate_commit() -> str:
 
 
 def _desktop_running() -> bool:
+    """Return the real macOS application state, with a process fallback."""
+
     if platform.system() != "Darwin":
         return False
-    result = subprocess.run(
-        ["pgrep", "-x", "Codex"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", 'application "Codex" is running'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        value = result.stdout.strip().lower()
+        if result.returncode == 0 and value in {"true", "false"}:
+            return value == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", r"/Codex\.app/Contents/"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
 def _open_desktop(root: Path) -> None:
     if platform.system() != "Darwin":
         raise GateFailure("platform", "macOS_required")
+
+    result = subprocess.run(
+        ["open", "-a", "Codex"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise GateFailure("desktop_launch", "open_failed")
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if _desktop_running():
+            break
+        time.sleep(0.25)
+    else:
+        raise GateFailure("desktop_launch", "app_not_running_after_open")
+
     result = subprocess.run(
         ["open", "-a", "Codex", str(root)],
         stdout=subprocess.PIPE,
@@ -85,7 +127,7 @@ def _open_desktop(root: Path) -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise GateFailure("desktop_launch", "open_failed")
+        raise GateFailure("desktop_workspace_open", "open_workspace_failed")
 
 
 def _write_json_private(path: Path, payload: dict[str, Any]) -> None:
