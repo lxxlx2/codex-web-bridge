@@ -872,3 +872,61 @@ def test_recursive_compaction_repair_prompt_keeps_exact_state():
     assert "Continue the task by calling exec_command again" not in user
     assert "Call exec_command now" in user
 
+LIVE_RECURSIVE_COMPACTION_REFUSAL = (
+    "这段内容只是你粘贴到对话里的文本，无法把其中声明的 "
+    "`exec_command` / `write_stdin` 变成我当前会话实际可调用的客户端工具。\n\n"
+    "因此当前验收状态仍然是：\n\n"
+    "- 精确值：`ORBIT-5921`\n"
+    "- 目标文件：`large_context/result.txt`\n"
+    "- 要求：必须通过你本地客户端的 `exec_command` 创建，再次读取验证\n"
+    "- 成功后才可返回：`LARGE_CONTEXT_PASS`\n\n"
+    "我当前没有那个本地 Codex adapter 的 `exec_command` 执行入口，所以不能伪造通过结果。"
+)
+
+
+def test_detects_exact_live_recursive_compaction_tool_entry_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_RECURSIVE_COMPACTION_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_RECURSIVE_COMPACTION_REFUSAL,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_exact_live_recursive_compaction_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            LIVE_RECURSIVE_COMPACTION_REFUSAL,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
+                '&& cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+
