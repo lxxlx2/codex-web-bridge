@@ -4,9 +4,10 @@
 
 Codex Web Bridge เป็นโปรเจกต์ local bridge แบบไม่เป็นทางการ สำหรับส่งคำขอ reasoning ของ Codex Desktop / Codex CLI ไปยัง ChatGPT Web ที่ล็อกอินไว้แล้ว โดยยังคงให้การเข้าถึงไฟล์, Shell, การแก้ไขโค้ด, การทดสอบ, Git, sandbox และ approval ทำงานผ่าน Codex client ในเครื่องของผู้ใช้
 
-> สถานะปัจจุบัน: S1 และ S2 ปิดแล้ว ขณะนี้ `standalone-dev` อยู่ใน S3 สำหรับการทดสอบ standalone CLI/Desktop/live parity ส่วน S4 สำหรับ standalone release แรกยังรอให้ S3 ปิดครบทั้งหมด
+> สถานะ release candidate: S1/S2 ปิดแล้ว และ real Codex Desktop E2E ของ standalone ได้พิสูจน์ same-thread context, local-tool execution จริง, route `uwa / chatgpt / high` และ request cleanup แล้ว จะสร้าง tag ของ RC แรกก็ต่อเมื่อ final S3 live, Desktop E2E, clean-install smoke, CI และ S4 release gate ผ่านบน candidate SHA เดียวกันทั้งหมด
 >
-> จุดตรวจล่าสุดของ S3: restart continuity, native auto-compaction, Remote V2 compaction และความต่อเนื่องของ required-tool completion ข้าม compaction lineage ได้รับการพิสูจน์แล้วบนเส้นทางจริง ปัญหาที่ยังเหลือคือ post-compaction workspace validation ในรอบ recovery ล่าสุด Codex เรียก `exec_command` ฝั่ง client จริง แต่รันเพียง `pwd` แทนที่จะรันการตรวจ marker และไดเรกทอรี `large_context` ให้ครบตาม prompt จึงตอบ `ACCEPTANCE_WORKSPACE_MISMATCH` ทั้งที่ตรวจแยกแล้วว่า workspace, marker และไดเรกทอรี `large_context` มีอยู่จริง ดังนั้น S3 ยังไม่ปิด
+> เอกสารนี้ไม่ยึด blocker ชั่วคราวจาก live run ใด run หนึ่ง การตัดสิน release ใช้ candidate-bound gate evidence เท่านั้น เมื่อ HEAD เปลี่ยนต้องสร้าง live evidence ที่เกี่ยวข้องใหม่
+
 
 ## เริ่มต้นใช้งานอย่างรวดเร็ว
 
@@ -89,46 +90,21 @@ reasoning effort = high
 5. จะไม่ replay local tool แบบอัตโนมัติเมื่อสถานะ side effect ไม่แน่นอน
 6. public repository จะไม่เก็บ private prompt, command body, tool output, cookies, browser profile หรือ full wire trace
 
-## ความคืบหน้า S3
+## ข้อกำหนดการยอมรับ RC
+
+หลักฐาน release ทั้งหมดต้องผูกกับ candidate commit เดียวกัน:
 
 ```text
-S1 dependency / import / runtime audit           PASS / CLOSED
-S2 standalone extraction and decoupling          PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity        CURRENT
-S4 first standalone release                      PENDING
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-สิ่งที่พิสูจน์แล้วบน standalone live path:
-
-```text
-repository / local safety gates                  PASS
-UWA route = uwa / chatgpt / high                 PASS
-real client exec_command round trip               PASS
-same-thread continuity after UWA restart          PASS
-native auto-compaction trigger                   PASS
-Remote V2 compaction route + completion          PASS
-required-tool completion across compaction       PASS
-request-manager cleanup / healthy listener       PASS
-```
-
-สิ่งที่ยังเปิดอยู่:
-
-```text
-post-compaction full recovery                    OPEN
-STANDALONE_S3=PASS_LIVE_CLOSED                   NOT YET
-```
-
-ปัญหาปัจจุบันผ่านขั้น compaction trigger, repeated compaction, empty output และ required-tool replay มาแล้ว รอบล่าสุดรัน `/bin/zsh -lc pwd` ใน acceptance workspace ที่ถูกต้อง แต่ไม่ได้รัน marker และ directory checks ที่เหลือใน instruction เดียวกัน จึงให้ gate ล้มแบบ fail closed ตามการออกแบบ
-
-S4 จะยังไม่เริ่มจนกว่าจะได้ผลครบดังนี้:
-
-```text
-S3_POST_COMPACTION_RECOVERY=PASS
-S3_ROUTE_UWA_CHATGPT_HIGH=PASS
-S3_REQUEST_MANAGER_CLEAN=PASS
-S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
-STANDALONE_S3=PASS_LIVE_CLOSED
-```
+Desktop gate พิสูจน์ Desktop จริง, same-thread context, local tools และ route ส่วน S3 พิสูจน์ restart, native/remote compaction, post-compaction recovery, route และ request cleanup หลักฐานที่ SHA ไม่ตรงกับ HEAD ปัจจุบันใช้ release ไม่ได้
 
 ## Continuity และ long context
 
