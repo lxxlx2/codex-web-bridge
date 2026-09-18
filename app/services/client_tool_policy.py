@@ -550,6 +550,10 @@ def build_client_workspace_repair_messages(
         + prior_history_rule
         + f"The current request explicitly declares these workspace tool names: {declared_names}. "
         "This declaration is authoritative for tool availability in this request. "
+        "The XML adapter_calls response is the transport that the local client consumes to execute a tool call. "
+        "Returning a valid adapter_calls envelope for a declared client tool is the real invocation request; it is "
+        "not a fabricated result and does not require the browser UI itself to expose a filesystem control. "
+        "Do not wait for the web page to display a local tool before emitting the declared client-tool call. "
         + f"For a local workspace task, call {preferred_name} before claiming that a path or file is unavailable. "
         "For exec_command, shell_command, or local_shell, OMIT the workdir field unless the user explicitly asks to "
         "change the working directory. The client's current turn cwd is authoritative. Never use '/' as a default, "
@@ -580,6 +584,23 @@ def build_client_workspace_repair_messages(
                 " This is a repeated root-workdir error. The corrected tool call must omit workdir entirely."
             )
         action = f"Call {preferred_name} again now. Preserve the intended command and omit workdir. Return only the corrected tool-call output."
+    elif specifically_required:
+        correction = (
+            f"The request-level tool choice explicitly requires {preferred_name}. This is a protocol contract, "
+            "not a suggestion. A text-only answer is invalid for this turn. Emit the declared client-tool call "
+            "through the adapter_calls transport instead of discussing whether the browser UI exposes the tool."
+        )
+        if repeated:
+            correction += (
+                " This required-tool refusal has already repeated. Do not provide any more capability commentary. "
+                "The next response must be one executable client-tool call. If the Original user request supplies "
+                "the first command to run, preserve that command exactly and omit workdir unless it was explicitly requested."
+            )
+        action = (
+            f"Return exactly one {preferred_name} call now and no prose. "
+            "Use the command/action required by the Original user request. "
+            "Do not invent a result; the client will execute the emitted call."
+        )
     elif has_prior_workspace_call:
         correction = (
             "The previous reply contradicted the existing client tool history by claiming that the client execution "
