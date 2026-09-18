@@ -1791,7 +1791,7 @@ class WorkflowExecutorSendMixin:
     def _execute_click_send_stealth(self, selector: str, target_key: str, optional: bool):
         """
         隐身模式发送（零 JS 注入）
-
+        
         - 无图片：直接点击
         - 有图片：先单击并观察发送信号，仅在未确认时做少量重试
         """
@@ -1930,7 +1930,7 @@ class WorkflowExecutorSendMixin:
         ):
             logger.info("[STEALTH] 发送成功（首击后信号确认）")
             return
-
+        
         for retry_count in range(1, max_retry_count + 1):
             if self._check_cancelled():
                 return
@@ -1992,4 +1992,4 @@ class WorkflowExecutorSendMixin:
             "[STEALTH] 图片发送未拿到确认信号，结束重试并交由后续监听 "
             f"(max_retry={max_retry_count}, observe={observe_window:.1f}s)"
         )
-
+    
