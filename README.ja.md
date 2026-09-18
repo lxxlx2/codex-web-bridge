@@ -4,9 +4,10 @@
 
 Codex Web Bridge は、Codex Desktop / Codex CLI のモデル推論リクエストを、ログイン済みの ChatGPT Web セッションへルーティングする非公式のローカルブリッジです。ファイルアクセス、Shell、編集、テスト、Git、sandbox、approval は引き続き Codex クライアント側で実行されます。
 
-> 現在の状態: S1 と S2 は完了済みです。`standalone-dev` は S3 の standalone CLI/Desktop/live parity 検証中です。S4 の最初の standalone Release は、S3 が完全にクローズするまで保留です。
+> Release candidate 状態: S1/S2 は完了済みで、standalone の実 Codex Desktop E2E により same-thread context、実 local-tool execution、`uwa / chatgpt / high` route、request cleanup が確認されています。最初の RC は、final S3 live、Desktop E2E、clean-install smoke、CI、S4 release gate が同一 candidate SHA で全て PASS した場合のみ tag を作成します。
 >
-> 最新の S3 チェックポイント: restart continuity、native auto-compaction、Remote V2 compaction、compaction lineage をまたぐ required-tool completion の継続性は実環境で確認済みです。残っているブロッカーは post-compaction workspace validation です。最新の recovery turn では、Codex は実際にクライアント側の `exec_command` を呼び出しましたが、prompt で要求された marker と `large_context` ディレクトリの完全な確認ではなく `pwd` だけを実行したため、`ACCEPTANCE_WORKSPACE_MISMATCH` を返しました。acceptance workspace、marker、`large_context` ディレクトリ自体は存在が確認されています。S3 はまだクローズしていません。
+> この README では一時的な live blocker を current status として固定しません。release 判定は candidate-bound gate evidence のみを使用し、HEAD が変わった場合は該当する live evidence を再生成します。
+
 
 ## クイックスタート
 
@@ -89,46 +90,21 @@ reasoning effort = high
 5. tool の side effect 状態が不明な場合、local tool を無条件で replay しません。
 6. public repository には private prompt、command body、tool output、cookies、browser profile、full wire trace を保存しません。
 
-## S3 の進捗
+## RC acceptance requirements
+
+最初の RC の release evidence はすべて同一 candidate commit に紐付く必要があります。
 
 ```text
-S1 dependency / import / runtime audit           PASS / CLOSED
-S2 standalone extraction and decoupling          PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity        CURRENT
-S4 first standalone release                      PENDING
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-standalone live path で確認済み:
-
-```text
-repository / local safety gates                  PASS
-UWA route = uwa / chatgpt / high                 PASS
-real client exec_command round trip               PASS
-same-thread continuity after UWA restart          PASS
-native auto-compaction trigger                   PASS
-Remote V2 compaction route + completion          PASS
-required-tool completion across compaction       PASS
-request-manager cleanup / healthy listener       PASS
-```
-
-未完了:
-
-```text
-post-compaction full recovery                    OPEN
-STANDALONE_S3=PASS_LIVE_CLOSED                   NOT YET
-```
-
-現在の問題は、compaction trigger、repeated compaction、empty output、required-tool replay の段階をすでに通過しています。最新の recovery では正しい acceptance workspace で `/bin/zsh -lc pwd` が実行されましたが、同じ required-tool instruction に含まれる marker と directory の残りの確認が実行されず、設計どおり gate は fail closed しました。
-
-S4 は次の完全な live gate が得られるまで開始しません。
-
-```text
-S3_POST_COMPACTION_RECOVERY=PASS
-S3_ROUTE_UWA_CHATGPT_HIGH=PASS
-S3_REQUEST_MANAGER_CLEAN=PASS
-S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
-STANDALONE_S3=PASS_LIVE_CLOSED
-```
+Desktop gate は実 Desktop の same-thread context、local file/shell tools、route を証明します。S3 は restart、native/remote compaction、post-compaction recovery、route、request cleanup を証明します。現在の HEAD と SHA が異なる evidence は release に使用できません。
 
 ## Continuity と long context
 
