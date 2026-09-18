@@ -19,6 +19,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, Request
@@ -220,12 +221,43 @@ def _current_user_texts(source: Any) -> List[str]:
     return texts
 
 
+def _normalize_required_tool_text(value: str) -> str:
+    """Normalize presentation-only escapes before required-tool detection.
+
+    Codex Desktop can serialize tool-name text with markdown escapes or Unicode
+    format characters even when the UI renders the canonical tool name. Keep
+    this normalization detector-only so the original user request is preserved
+    verbatim for repair prompts.
+    """
+
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.replace("\\_", "_")
+    text = "".join(
+        char
+        for char in text
+        if unicodedata.category(char) != "Cf"
+    )
+
+    aliases = {
+        "exec_command": r"\bexec[\s_-]+command\b",
+        "shell_command": r"\bshell[\s_-]+command\b",
+        "local_shell": r"\blocal[\s_-]+shell\b",
+        "apply_patch": r"\bapply[\s_-]+patch\b",
+        "write_stdin": r"\bwrite[\s_-]+stdin\b",
+    }
+    for canonical, pattern in aliases.items():
+        text = re.sub(pattern, canonical, text, flags=re.IGNORECASE)
+
+    return text
+
+
 def _required_tool_request_text(body: ResponsesRequest, required_tool: str) -> str:
     """Return the current-turn user text that explicitly requires the tool."""
 
     for user_text in _current_user_texts(body.input):
+        detection_text = _normalize_required_tool_text(user_text)
         for pattern in _REQUIRED_TOOL_PATTERNS:
-            match = pattern.search(user_text)
+            match = pattern.search(detection_text)
             if not match:
                 continue
             if str(match.group(1) or "").strip() == required_tool:
@@ -255,8 +287,9 @@ def required_declared_tool(body: ResponsesRequest) -> str:
         return choice_name
 
     for user_text in _current_user_texts(body.input):
+        detection_text = _normalize_required_tool_text(user_text)
         for pattern in _REQUIRED_TOOL_PATTERNS:
-            match = pattern.search(user_text)
+            match = pattern.search(detection_text)
             if not match:
                 continue
             name = str(match.group(1) or "").strip()
