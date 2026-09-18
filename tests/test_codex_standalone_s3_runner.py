@@ -109,6 +109,23 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         with self.assertRaises(s3.GateFailure):
             s3._parse_surface_preflight("no result\n")
 
+    def test_desktop_running_prefers_native_macos_application_state(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["osascript"],
+            0,
+            stdout="true\n",
+            stderr="",
+        )
+        with (
+            patch.object(s3.sys, "platform", "darwin"),
+            patch.object(s3.subprocess, "run", return_value=completed) as run_mock,
+        ):
+            self.assertTrue(s3._codex_desktop_running())
+            self.assertEqual(
+                run_mock.call_args.args[0],
+                ["osascript", "-e", 'application "Codex" is running'],
+            )
+
     def test_quiet_desktop_returns_whether_runner_changed_app_state(self) -> None:
         with (
             patch.object(s3, "_codex_desktop_running", return_value=False),
