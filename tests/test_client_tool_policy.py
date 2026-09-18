@@ -547,3 +547,141 @@ def test_required_exec_repeated_refusal_still_fails_closed(monkeypatch):
             round_executor=lambda _messages: refusal,
         )
 
+def test_specific_required_exec_repairs_unmatched_final_text(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = [
+        {
+            "role": "user",
+            "content": "Continue the requested operation.",
+        }
+    ]
+    refusal = "I don't have that local command interface in this chat."
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_specific_required_exec_repairs_after_latest_user_is_generated_context(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = [
+        {
+            "role": "user",
+            "content": "必须使用客户端 exec_command 执行 pwd。",
+        },
+        {
+            "role": "user",
+            "content": "<environment_context><cwd>/tmp/project</cwd></environment_context>",
+        },
+    ]
+    refusal = "I cannot perform that operation from here."
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_generic_required_does_not_force_workspace_repair(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    other_tool = {
+        "type": "function",
+        "function": {
+            "name": "request_user_input",
+            "description": "Ask the user a question.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                },
+                "required": ["question"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    parsed = {
+        "mode": "final",
+        "content": "I can answer directly.",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[
+            {
+                "role": "user",
+                "content": "Give a normal answer.",
+            }
+        ],
+        tools=[*EXEC_TOOLS, other_tool],
+        tool_choice="required",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is False
+
+
+def test_specific_required_non_workspace_tool_does_not_force_workspace_repair(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    other_tool = {
+        "type": "function",
+        "function": {
+            "name": "request_user_input",
+            "description": "Ask the user a question.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                },
+                "required": ["question"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    parsed = {
+        "mode": "final",
+        "content": "I can answer directly.",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[
+            {
+                "role": "user",
+                "content": "Give a normal answer.",
+            }
+        ],
+        tools=[*EXEC_TOOLS, other_tool],
+        tool_choice={
+            "type": "function",
+            "name": "request_user_input",
+        },
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is False
+
