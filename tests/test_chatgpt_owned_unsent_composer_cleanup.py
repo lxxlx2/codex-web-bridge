@@ -69,3 +69,32 @@ def test_attachment_composer_is_never_auto_cleared():
 
     assert executor._clear_owned_unsent_composer() is False
     assert element.text == "owned prompt"
+
+def _prepare_cleanup_executor(executor):
+    executor._cleanup_workflow_scripts = lambda: None
+    executor._attachment_monitor = None
+    executor._network_monitor = None
+    executor._stream_monitor = None
+
+
+def test_workflow_teardown_clears_owned_unsent_composer():
+    executor, element = _executor_with_fill("cancelled helper prompt")
+    _prepare_cleanup_executor(executor)
+
+    executor.cleanup_after_workflow()
+
+    assert element.text == ""
+    assert executor._last_fill_text_length == 0
+    assert executor._last_fill_text_sha256 == ""
+
+
+def test_workflow_teardown_preserves_composer_after_real_dispatch():
+    executor, element = _executor_with_fill("sent prompt")
+    _prepare_cleanup_executor(executor)
+    executor._require_send_action_dispatched(True)
+
+    executor.cleanup_after_workflow()
+
+    assert element.text == "sent prompt"
+    assert executor._last_send_dispatched_since_fill is True
+
