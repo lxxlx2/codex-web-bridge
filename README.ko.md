@@ -4,9 +4,10 @@
 
 Codex Web Bridge는 Codex Desktop / Codex CLI의 모델 추론 요청을 로그인된 ChatGPT Web 세션으로 라우팅하는 비공식 로컬 브리지입니다. 파일 접근, Shell, 코드 편집, 테스트, Git, sandbox, approval은 계속 Codex 클라이언트가 로컬에서 담당합니다.
 
-> 현재 상태: S1과 S2는 종료되었습니다. `standalone-dev`는 S3 standalone CLI/Desktop/live parity 검증 단계에 있습니다. 첫 standalone Release인 S4는 S3가 완전히 종료될 때까지 보류됩니다.
+> Release candidate 상태: S1/S2는 종료되었고 standalone의 실제 Codex Desktop E2E에서 same-thread context, 실제 local-tool execution, `uwa / chatgpt / high` route, request cleanup을 확인했습니다. 첫 RC는 final S3 live, Desktop E2E, clean-install smoke, CI, S4 release gate가 모두 동일한 candidate SHA에서 PASS한 경우에만 tag를 생성합니다.
 >
-> 최신 S3 체크포인트: restart continuity, native auto-compaction, Remote V2 compaction, compaction lineage를 가로지르는 required-tool completion 연속성은 실제 경로에서 확인되었습니다. 남은 blocker는 post-compaction workspace validation입니다. 최신 recovery turn에서 Codex는 실제 클라이언트 `exec_command`를 호출했지만, prompt가 요구한 marker 및 `large_context` 디렉터리 검증 전체를 수행하지 않고 `pwd`만 실행했습니다. 그 결과 `ACCEPTANCE_WORKSPACE_MISMATCH`를 반환했습니다. acceptance workspace, marker, `large_context` 디렉터리는 별도로 존재가 확인되었습니다. S3는 아직 종료되지 않았습니다.
+> 이 README는 특정 임시 live blocker를 현재 상태로 고정하지 않습니다. release 판단은 candidate-bound gate evidence만 사용하며 HEAD가 바뀌면 관련 live evidence를 다시 생성해야 합니다.
+
 
 ## 빠른 시작
 
@@ -89,46 +90,21 @@ reasoning effort = high
 5. side effect 상태가 불확실할 때 local tool을 무조건 replay하지 않습니다.
 6. public repository에는 private prompt, command body, tool output, cookies, browser profile, full wire trace를 저장하지 않습니다.
 
-## S3 진행 상황
+## RC acceptance requirements
+
+첫 RC의 release evidence는 모두 동일한 candidate commit에 연결되어야 합니다.
 
 ```text
-S1 dependency / import / runtime audit           PASS / CLOSED
-S2 standalone extraction and decoupling          PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity        CURRENT
-S4 first standalone release                      PENDING
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-standalone live path에서 이미 확인된 항목:
-
-```text
-repository / local safety gates                  PASS
-UWA route = uwa / chatgpt / high                 PASS
-real client exec_command round trip               PASS
-same-thread continuity after UWA restart          PASS
-native auto-compaction trigger                   PASS
-Remote V2 compaction route + completion          PASS
-required-tool completion across compaction       PASS
-request-manager cleanup / healthy listener       PASS
-```
-
-아직 열려 있는 항목:
-
-```text
-post-compaction full recovery                    OPEN
-STANDALONE_S3=PASS_LIVE_CLOSED                   NOT YET
-```
-
-현재 문제는 compaction trigger, repeated compaction, empty output, required-tool replay 단계를 이미 통과했습니다. 최신 recovery에서는 올바른 acceptance workspace에서 `/bin/zsh -lc pwd`가 실행되었지만, 같은 required-tool instruction에 들어 있던 marker 및 directory 검증의 나머지 부분을 실행하지 않았기 때문에 gate가 설계대로 fail closed 했습니다.
-
-S4는 다음 전체 live gate가 나올 때까지 시작하지 않습니다.
-
-```text
-S3_POST_COMPACTION_RECOVERY=PASS
-S3_ROUTE_UWA_CHATGPT_HIGH=PASS
-S3_REQUEST_MANAGER_CLEAN=PASS
-S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
-STANDALONE_S3=PASS_LIVE_CLOSED
-```
+Desktop gate는 실제 Desktop의 same-thread context, local file/shell tools, route를 증명합니다. S3는 restart, native/remote compaction, post-compaction recovery, route, request cleanup을 증명합니다. 현재 HEAD와 SHA가 다른 evidence는 release에 사용할 수 없습니다.
 
 ## Continuity와 long context
 
