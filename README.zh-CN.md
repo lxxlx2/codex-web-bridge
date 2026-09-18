@@ -8,33 +8,19 @@ Codex Web Bridge 是一个非官方本地桥接项目，用于把 Codex Desktop 
 
 ## 当前状态
 
-```text
-S1 依赖 / import / runtime 审计              PASS / CLOSED
-S2 standalone 抽取与解耦                    PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity    CURRENT
-S4 首个 standalone Release                  PENDING
-```
-
-S3 已经在真实链路中证明：
+首个 RC 已进入 candidate-bound 最终验收。发布证据必须全部对应同一个 candidate commit：
 
 ```text
-本地 safety / dependency gates               PASS
-UWA route = uwa / chatgpt / high             PASS
-真实 exec_command 往返                       PASS
-UWA restart 后 same-thread continuity        PASS
-native auto-compaction                       PASS
-Remote V2 compaction                         PASS
-compaction lineage 下 required-tool 连续性   PASS
-request-manager cleanup / healthy listener   PASS
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-当前尚未关闭的是 post-compaction full recovery。最新一次恢复轮中，Codex 确实发出了真实客户端 `exec_command`，但只执行了：
-
-```text
-/bin/zsh -lc pwd
-```
-
-工作目录正确位于 `~/uwa-codex-acceptance`，而且验收 marker 与 `large_context` 目录都真实存在。模型没有继续执行同一条 required-tool 指令中要求的完整 marker / 目录检查，因此返回 `ACCEPTANCE_WORKSPACE_MISMATCH`。S3 仍按 fail-closed 原则保持未关闭状态。
+standalone 真实 Codex Desktop 路径已经证明同线程上下文、真实本地工具执行、`uwa / chatgpt / high` 路由和 request cleanup。最终发布仍以当前 HEAD 的 Desktop、S3、install smoke 与 S4 gate 结果为准；HEAD 改变后必须重新生成受影响的证据。
 
 ## 快速开始
 
