@@ -91,6 +91,7 @@ def _maybe_build_client_workspace_repair(
         assistant_text=assistant_text,
         attempt=attempt,
         total_attempts=total_attempts,
+        tool_choice=tool_choice,
     )
 
 
