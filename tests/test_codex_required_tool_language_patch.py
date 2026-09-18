@@ -201,3 +201,26 @@ def test_historical_required_exec_does_not_leak_past_assistant_boundary():
 
     assert v2.required_declared_tool(body) == ""
 
+def test_detector_accepts_markdown_escaped_desktop_tool_name():
+    install_codex_required_tool_language_patch()
+    body = _body("必须使用客户端 exec\\_command 执行 pwd。")
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def test_detector_accepts_zero_width_desktop_tool_name():
+    install_codex_required_tool_language_patch()
+    body = _body("必须使用客户端 exec\u200b_command 执行 pwd。")
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def test_detector_accepts_display_spaced_desktop_tool_name():
+    install_codex_required_tool_language_patch()
+    body = _body("必须使用客户端 exec command 执行 pwd。")
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def test_normalized_detector_preserves_explanatory_non_requirement():
+    install_codex_required_tool_language_patch()
+    body = _body("你必须解释为什么 exec\\_command 在客户端执行。")
+    assert v2.required_declared_tool(body) == ""
+
