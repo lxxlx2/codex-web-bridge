@@ -4,9 +4,10 @@
 
 Codex Web Bridge is an unofficial local bridge that routes Codex Desktop / Codex CLI model requests through a logged-in ChatGPT Web session while keeping file access, shell commands, edits, tests, Git operations, sandboxing, and approvals under the Codex client.
 
-> Current status: S1 and S2 are closed. `standalone-dev` is in S3 standalone CLI/Desktop/live parity acceptance. S4, the first standalone release, remains blocked until S3 is fully closed.
+> Release-candidate status: S1/S2 are closed, and the standalone real Codex Desktop E2E path has proven same-thread context, real local-tool execution, the `uwa / chatgpt / high` route, and request cleanup. The first RC will be tagged only after final S3 live, Desktop E2E, clean-install smoke, CI, and the S4 release gate all pass on the exact same candidate SHA.
 >
-> Latest S3 checkpoint: restart continuity, native auto-compaction, Remote V2 compaction, and required-tool completion across compaction lineage have been proven on the real path. The remaining blocker is post-compaction workspace validation. In the latest recovery turn Codex issued a real client-side `exec_command`, but it executed only `pwd` instead of the complete marker and `large_context` directory check required by the prompt, so the model returned `ACCEPTANCE_WORKSPACE_MISMATCH`. The acceptance workspace, marker, and `large_context` directory were independently confirmed to exist. S3 is not closed yet.
+> This README no longer tracks one transient live blocker. Release decisions are based only on candidate-bound gate evidence; any code or documentation commit that changes HEAD requires the affected live evidence to be regenerated.
+
 
 ## Quick start
 
@@ -89,46 +90,21 @@ reasoning effort = high
 5. Local tools are not blindly replayed when side-effect state is uncertain.
 6. Public repository data excludes private prompts, command bodies, tool output, cookies, browser profiles, and full wire traces.
 
-## S3 acceptance progress
+## RC acceptance requirements
+
+All release evidence for the first RC must bind to the same candidate commit:
 
 ```text
-S1 dependency / import / runtime audit           PASS / CLOSED
-S2 standalone extraction and decoupling          PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity        CURRENT
-S4 first standalone release                      PENDING
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-Already proven on the standalone live path:
-
-```text
-repository / local safety gates                  PASS
-UWA route = uwa / chatgpt / high                 PASS
-real client exec_command round trip               PASS
-same-thread continuity after UWA restart          PASS
-native auto-compaction trigger                   PASS
-Remote V2 compaction route + completion          PASS
-required-tool completion across compaction       PASS
-request-manager cleanup / healthy listener       PASS
-```
-
-Still open:
-
-```text
-post-compaction full recovery                    OPEN
-STANDALONE_S3=PASS_LIVE_CLOSED                   NOT YET
-```
-
-The current failure has moved past earlier issues around compaction triggering, repeated compaction, empty output, and required-tool replay. The latest recovery command was `/bin/zsh -lc pwd` in the correct acceptance workspace, but the model did not complete the remaining marker and directory checks contained in the same required-tool instruction, so the gate correctly failed closed.
-
-S4 will not start until the full live gate reports:
-
-```text
-S3_POST_COMPACTION_RECOVERY=PASS
-S3_ROUTE_UWA_CHATGPT_HIGH=PASS
-S3_REQUEST_MANAGER_CLEAN=PASS
-S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
-STANDALONE_S3=PASS_LIVE_CLOSED
-```
+The Desktop and CLI/live evidence are complementary. Desktop proves real desktop same-thread context, local file/shell tools and route behavior. S3 proves restart continuity, native/remote compaction, post-compaction recovery, route verification and request cleanup. Evidence from a different HEAD SHA cannot be used for release.
 
 ## Continuity and long context
 
