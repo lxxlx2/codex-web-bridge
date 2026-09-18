@@ -63,15 +63,36 @@ def _candidate_commit() -> str:
 
 
 def _codex_desktop_running() -> bool:
+    """Return the real Codex Desktop state on macOS."""
+
     if sys.platform != "darwin":
         return False
-    result = subprocess.run(
-        ["pgrep", "-x", "Codex"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=5,
-    )
+
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", 'application "Codex" is running'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        value = result.stdout.strip().lower()
+        if result.returncode == 0 and value in {"true", "false"}:
+            return value == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", r"/Codex\.app/Contents/"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
