@@ -114,6 +114,23 @@ Current live candidate after those fixes:
 ```
 
 S3 remains open. The new candidate still requires local regression and a repeated Desktop live probe before the CDATA case can be considered closed.
+
+## 2026-09-18 Desktop E2E cancelled-helper composer follow-up
+
+The first exact-candidate Desktop E2E retry on `9e9cff581fbcce7285ee1a2ebabfad0d7b70ebd0` exposed a separate cancellation cleanup race.
+
+Step 1 completed and bound a ChatGPT conversation. Before Step 2, a helper request using the same controlled browser tab started a fresh ChatGPT turn, filled the composer, and was cancelled before dispatch. The browser workflow observed cancellation only after `FILL_INPUT` completed, so the helper-owned prompt remained in the shared composer. Step 2 then failed closed during fresh-turn preparation with:
+
+```text
+chatgpt_web_composer_not_empty: blocking_reason=composer_not_empty
+```
+
+Private wire evidence also showed the operator Step 2 request itself had not reached a real `exec_command`; the dirty composer was created by the cancelled helper workflow.
+
+The runtime fix now calls the existing ownership-checked unsent-composer rollback from `cleanup_after_workflow()`. It only clears an exact normalized hash match owned by that executor, refuses attachment/user-modified composers, and does nothing once a real send action has been dispatched. Focused regressions cover both cancellation cleanup and post-dispatch preservation.
+
+Because this changes the candidate SHA, all release-bound Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated on the new HEAD.
+
 ## Gate state
 
 ```text
