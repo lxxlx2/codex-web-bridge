@@ -105,7 +105,9 @@ class WorkflowExecutor(
         self._last_new_chat_clicked_snapshot: Dict[str, Any] = {}
         self._last_fill_completed_at = 0.0
         self._last_fill_text_length = 0
+        self._last_fill_text_sha256 = ""
         self._last_fill_after_new_chat = False
+        self._last_send_dispatched_since_fill = False
         self._workflow_scope_depth = 0
         self._workflow_focus_emulation_active = False
         self._workflow_visibility_emulation_active = False
@@ -1260,6 +1262,17 @@ class WorkflowExecutor(
                 "send_blocked_by_preexisting_generation",
                 "send_action_not_dispatched",
             }:
+                if error_code in {
+                    "send_blocked_by_preexisting_generation",
+                    "send_action_not_dispatched",
+                }:
+                    try:
+                        self._clear_owned_unsent_composer()
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "[SEND_CLEANUP] owned unsent composer cleanup failed safely: "
+                            f"{type(cleanup_exc).__name__}"
+                        )
                 raise
             if error_code.startswith("file_paste_length_error:"):
                 message = error_code.split(":", 1)[1].strip() or "输入文本超过站点配置的长度限制"

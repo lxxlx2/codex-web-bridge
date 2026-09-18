@@ -695,15 +695,14 @@ class WorkflowExecutorSendMixin:
         )
         raise WorkflowError("send_blocked_by_preexisting_generation")
 
-    @staticmethod
-    def _require_send_action_dispatched(dispatched: Any) -> None:
-        """Reject confirmation when the click layer explicitly skipped submission."""
-        if dispatched is not False:
-            return
-        logger.error(
-            "[SEND] 本次发送动作未执行，禁止使用页面已有的生成/停止态确认发送成功"
-        )
-        raise WorkflowError("send_action_not_dispatched")
+    def _require_send_action_dispatched(self, dispatched: Any) -> None:
+        """Reject skipped submission and remember when this fill was actually sent."""
+        if dispatched is False:
+            logger.error(
+                "[SEND] 本次发送动作未执行，禁止使用页面已有的生成/停止态确认发送成功"
+            )
+            raise WorkflowError("send_action_not_dispatched")
+        self._last_send_dispatched_since_fill = True
 
     def _get_recent_fill_expected_text_length(self, max_age: float = 12.0) -> int:
         try:
@@ -1792,7 +1791,7 @@ class WorkflowExecutorSendMixin:
     def _execute_click_send_stealth(self, selector: str, target_key: str, optional: bool):
         """
         隐身模式发送（零 JS 注入）
-        
+
         - 无图片：直接点击
         - 有图片：先单击并观察发送信号，仅在未确认时做少量重试
         """
@@ -1931,7 +1930,7 @@ class WorkflowExecutorSendMixin:
         ):
             logger.info("[STEALTH] 发送成功（首击后信号确认）")
             return
-        
+
         for retry_count in range(1, max_retry_count + 1):
             if self._check_cancelled():
                 return
@@ -1993,4 +1992,4 @@ class WorkflowExecutorSendMixin:
             "[STEALTH] 图片发送未拿到确认信号，结束重试并交由后续监听 "
             f"(max_retry={max_retry_count}, observe={observe_window:.1f}s)"
         )
-    
+

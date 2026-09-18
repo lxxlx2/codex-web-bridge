@@ -7,6 +7,7 @@ app/core/workflow/executor_interaction.py - 工作流执行器页面交互 Mixin
 - 跨标签页并发点击的执行排队机制
 """
 
+import hashlib
 import time
 import threading
 from contextlib import contextmanager
@@ -276,11 +277,82 @@ class WorkflowExecutorInteractionMixin:
     def _note_fill_completion(self, text: str, *, after_new_chat: bool = False) -> None:
         self._last_fill_completed_at = time.time()
         self._last_fill_text_length = max(0, len(text or ""))
+        normalized = self._text_handler.normalize_for_compare(text or "")
+        self._last_fill_text_sha256 = hashlib.sha256(
+            normalized.encode("utf-8", "replace")
+        ).hexdigest()
         self._last_fill_after_new_chat = bool(after_new_chat)
+        self._last_send_dispatched_since_fill = False
         logger.debug(
             f"[FILL_COMPLETED] 输入框填充完成: expected_len={self._last_fill_text_length}, "
             f"after_new_chat={after_new_chat}"
         )
+
+    def _clear_owned_unsent_composer(self) -> bool:
+        """Clear only an unsent composer still proven to contain our own fill."""
+        if bool(getattr(self, "_last_send_dispatched_since_fill", False)):
+            logger.debug(
+                "[SEND_CLEANUP] send action was already dispatched; composer rollback skipped"
+            )
+            return False
+
+        expected_hash = str(
+            getattr(self, "_last_fill_text_sha256", "") or ""
+        ).strip()
+        expected_len = int(
+            getattr(self, "_last_fill_text_length", 0) or 0
+        )
+        if not expected_hash or expected_len <= 0:
+            return False
+
+        context = getattr(self, "_context", None)
+        if isinstance(context, dict) and context.get("images"):
+            logger.warning(
+                "[SEND_CLEANUP] attachments are present; refusing automatic composer rollback"
+            )
+            return False
+
+        element = self._resolve_active_text_input()
+        if element is None:
+            element = getattr(self, "_last_input_element", None)
+        if element is None:
+            return False
+
+        current_text = self._text_handler.read_input_full_text(element)
+        current_normalized = self._text_handler.normalize_for_compare(
+            current_text or ""
+        )
+        current_hash = hashlib.sha256(
+            current_normalized.encode("utf-8", "replace")
+        ).hexdigest()
+
+        if current_hash != expected_hash:
+            logger.warning(
+                "[SEND_CLEANUP] composer no longer matches the executor-owned fill; "
+                "leaving it untouched"
+            )
+            return False
+
+        self._text_handler.clear_input_safely(element)
+        remaining = self._text_handler.normalize_for_compare(
+            self._text_handler.read_input_full_text(element) or ""
+        )
+        if remaining:
+            logger.warning(
+                "[SEND_CLEANUP] owned composer clear was attempted but content remains"
+            )
+            return False
+
+        self._last_fill_completed_at = 0.0
+        self._last_fill_text_length = 0
+        self._last_fill_text_sha256 = ""
+        self._last_fill_after_new_chat = False
+        self._last_send_dispatched_since_fill = False
+
+        logger.info(
+            "[SEND_CLEANUP] cleared executor-owned prompt after terminal undispatched send"
+        )
+        return True
 
     def _get_recent_fill_send_wait_timeout(self, target_key: str, default_timeout: float) -> float:
         if (target_key or "") != "send_btn":
