@@ -182,6 +182,57 @@ def _latest_user_text(source: Any) -> str:
     return ""
 
 
+def _current_user_texts(source: Any) -> List[str]:
+    """Return user messages from the current turn, newest first.
+
+    Codex Desktop appends an additional user-shaped environment/context item
+    after the operator prompt. A plain "latest user message" lookup therefore
+    sees that generated context instead of the operator action. Walk backwards
+    through only the current user cluster and stop at the previous assistant
+    turn so historical tool requirements cannot leak into a later request.
+    """
+
+    if isinstance(source, str):
+        return [source] if source else []
+    if not isinstance(source, list):
+        return []
+
+    texts: List[str] = []
+    saw_user = False
+    for item in reversed(source):
+        if not isinstance(item, dict):
+            continue
+
+        role = str(item.get("role") or "").strip().lower()
+        item_type = str(item.get("type") or "").strip().lower()
+        is_user = role == "user" or (item_type == "message" and role == "user")
+
+        if is_user:
+            text = _content_text(item.get("content"))
+            if text:
+                texts.append(text)
+            saw_user = True
+            continue
+
+        if saw_user and role == "assistant":
+            break
+
+    return texts
+
+
+def _required_tool_request_text(body: ResponsesRequest, required_tool: str) -> str:
+    """Return the current-turn user text that explicitly requires the tool."""
+
+    for user_text in _current_user_texts(body.input):
+        for pattern in _REQUIRED_TOOL_PATTERNS:
+            match = pattern.search(user_text)
+            if not match:
+                continue
+            if str(match.group(1) or "").strip() == required_tool:
+                return user_text
+    return _latest_user_text(body.input)
+
+
 def _input_has_compaction_checkpoint(source: Any) -> bool:
     if not isinstance(source, list):
         return False
@@ -203,14 +254,14 @@ def required_declared_tool(body: ResponsesRequest) -> str:
     if choice_name in declared:
         return choice_name
 
-    user_text = _latest_user_text(body.input)
-    for pattern in _REQUIRED_TOOL_PATTERNS:
-        match = pattern.search(user_text)
-        if not match:
-            continue
-        name = str(match.group(1) or "").strip()
-        if name in declared:
-            return name
+    for user_text in _current_user_texts(body.input):
+        for pattern in _REQUIRED_TOOL_PATTERNS:
+            match = pattern.search(user_text)
+            if not match:
+                continue
+            name = str(match.group(1) or "").strip()
+            if name in declared:
+                return name
     return ""
 
 
@@ -226,8 +277,9 @@ def _clone_for_required_tool_retry(
 
     cloned = _model_copy(body)
 
-    original_request = _latest_user_text(
-        body.input
+    original_request = _required_tool_request_text(
+        body,
+        required_tool,
     ).strip()
 
     max_context_chars = 12000
