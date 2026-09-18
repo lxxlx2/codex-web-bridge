@@ -4,9 +4,10 @@
 
 Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让文件、Shell、编辑、测试、Git 等本地工具由 Codex 客户端自身执行。
 
-> 当前状态：S1 和 S2 已关闭，`standalone-dev` 正在进行 S3 独立 CLI/Desktop/live parity 验收。S4 首个 standalone Release 仍然等待 S3 完整关闭。
+> 发布候选状态：S1/S2 已关闭，standalone 真实 Codex Desktop E2E 已证明同线程上下文、真实本地工具执行、`uwa / chatgpt / high` 路由和 request cleanup。首个 RC 只会在同一个 candidate SHA 上同时通过最终 S3 live、Desktop E2E、clean-install smoke、CI 和 S4 release gate 后打 tag。
 >
-> 最新 S3 检查点：restart continuity、native auto-compaction、Remote V2 compaction、required-tool completion 跨 compaction lineage 的连续性均已在真实链路中证明。当前剩余阻塞位于 post-compaction recovery 的工作区校验阶段。最新一次恢复中 Codex 真实执行了客户端 `exec_command`，但只执行了 `pwd`，没有执行 prompt 要求的完整 marker / `large_context` 目录校验，因此返回 `ACCEPTANCE_WORKSPACE_MISMATCH`。验收工作区本身已确认存在、marker 存在、`large_context` 目录存在。S3 尚未关闭。
+> 当前文档不再记录某一次临时 live blocker。发布判断只以 candidate-bound gate 结果为准，任何代码或文档提交改变 HEAD 后，都必须重新生成对应的 live evidence。
+
 
 ## 快速开始
 
@@ -89,48 +90,21 @@ reasoning effort = high
 5. tool side effect 状态不确定时，不允许无条件自动重放本地工具。
 6. private trace 默认只保存验收所需 metadata，公开仓库不接收私人 prompt、命令正文、工具输出、cookies、浏览器 profile 或完整 wire trace。
 
-## S3 当前验收进度
+## RC 验收要求
+
+首个 RC 的 release evidence 必须全部绑定到同一个 candidate commit：
 
 ```text
-S1 dependency / import / runtime audit           PASS / CLOSED
-S2 standalone extraction 与解耦                  PASS / CLOSED
-S3 CI + Codex CLI / Desktop / live parity        CURRENT
-S4 首个 standalone Release                       PENDING
+S1 / S2                                         PASS / CLOSED
+standalone non-live regression                  PASS
+Codex Desktop E2E                               REQUIRED ON CANDIDATE
+S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
+clean-checkout install smoke                    REQUIRED
+S4 docs/version/security/provenance gate        REQUIRED
+CI                                              REQUIRED
 ```
 
-已经在 standalone live path 中证明的项目包括：
-
-```text
-repository / local safety gates                  PASS
-UWA route = uwa / chatgpt / high                 PASS
-真实客户端 exec_command 往返                    PASS
-UWA restart 后 same-thread continuity           PASS
-native auto-compaction trigger                   PASS
-Remote V2 compaction route + completion          PASS
-compaction 后 required-tool completion lineage  PASS
-request-manager cleanup / healthy listener       PASS
-```
-
-当前还没有通过的项目：
-
-```text
-post-compaction full recovery                    OPEN
-STANDALONE_S3=PASS_LIVE_CLOSED                   NOT YET
-```
-
-当前 failure 已从早期的 compaction trigger、重复 compaction、empty output、required-tool replay 等问题收敛到 post-compaction workspace validation。最新恢复轮真实命令为 `/bin/zsh -lc pwd`，工作目录正确指向验收工作区，但模型没有完成同一个 required-tool 指令中后续的 marker 与目录校验，因此验收按设计 fail closed。
-
-在看到完整的：
-
-```text
-S3_POST_COMPACTION_RECOVERY=PASS
-S3_ROUTE_UWA_CHATGPT_HIGH=PASS
-S3_REQUEST_MANAGER_CLEAN=PASS
-S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
-STANDALONE_S3=PASS_LIVE_CLOSED
-```
-
-之前，不进入 S4，也不发布首个 RC。
+Desktop 与 CLI/live 两条证据互补：Desktop gate 证明真实桌面端同线程上下文、本地文件/Shell 工具和 route；S3 证明 restart、native/remote compaction、post-compaction recovery、route 和 request cleanup。任一证据与当前 HEAD SHA 不一致都不能用于发布。
 
 ## 连续性与长上下文
 
