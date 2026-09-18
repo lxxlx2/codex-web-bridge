@@ -31,6 +31,7 @@ from app.services.tool_calling_common import (
 from app.services.tool_calling_parse import (
     _coerce_arguments_object,
     _decode_tool_arguments,
+    _mask_ignored_tool_markup_regions,
 )
 from app.services.tool_calling_prompts import _generate_tool_few_shot_examples
 
@@ -478,7 +479,12 @@ _TOOL_XML_PAYLOAD_PATTERNS = (
 
 
 def _looks_like_tool_xml_payload(text: str, allowed_tool_names: Optional[set[str]] = None) -> bool:
-    value = str(text or "").strip()
+    # Match the parser's Markdown masking policy. Protocol names shown inside
+    # inline/fenced code are explanatory text, not executable XML envelopes.
+    # Without this, a refusal such as "cannot fabricate `<adapter_calls>`"
+    # is misclassified as malformed XML and obscures the real required-tool
+    # / workspace-refusal error.
+    value = _mask_ignored_tool_markup_regions(str(text or "")).strip()
     if any(pattern.search(value) for pattern in _TOOL_XML_PAYLOAD_PATTERNS):
         return True
 
@@ -486,7 +492,6 @@ def _looks_like_tool_xml_payload(text: str, allowed_tool_names: Optional[set[str
         return False
 
     return False
-
 
 def _decode_tool_arguments(tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     function_data = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
