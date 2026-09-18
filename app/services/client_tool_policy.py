@@ -597,6 +597,7 @@ def build_client_workspace_repair_messages(
                 "the first command to run, preserve that command exactly and omit workdir unless it was explicitly requested."
             )
         action = (
+            f"Call {preferred_name} now. "
             f"Return exactly one {preferred_name} call now and no prose. "
             "Use the command/action required by the Original user request. "
             "Do not invent a result; the client will execute the emitted call."
