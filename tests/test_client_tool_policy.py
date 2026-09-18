@@ -473,3 +473,77 @@ def test_roundtrip_repairs_post_tool_readback_refusal_into_exec(monkeypatch):
         result["tool_calls"][0]["function"]["name"]
         == "exec_command"
     )
+
+def test_required_exec_refusal_uses_workspace_repair_before_generic_retry(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            (
+                "当前环境没有可用的客户端 exec_command 工具，"
+                "因此无法真实执行 pwd。"
+            ),
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"pwd"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen_messages = []
+
+    def executor(browser_messages):
+        seen_messages.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=[
+            {
+                "role": "user",
+                "content": "必须使用客户端 exec_command 执行 pwd。",
+            }
+        ],
+        tools=EXEC_TOOLS,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen_messages) == 2
+    assert "Client Workspace Repair" in seen_messages[1][1]["content"]
+    assert "Call exec_command now" in seen_messages[1][1]["content"]
+
+
+def test_required_exec_repeated_refusal_still_fails_closed(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "1")
+
+    refusal = (
+        "当前环境没有可用的客户端 exec_command 工具，"
+        "因此无法真实执行 pwd。"
+    )
+
+    with pytest.raises(RuntimeError, match="client_workspace_tool_refusal"):
+        complete_tool_calling_roundtrip(
+            messages=[
+                {
+                    "role": "user",
+                    "content": "必须使用客户端 exec_command 执行 pwd。",
+                }
+            ],
+            tools=EXEC_TOOLS,
+            tool_choice={
+                "type": "function",
+                "name": "exec_command",
+            },
+            parallel_tool_calls=False,
+            round_executor=lambda _messages: refusal,
+        )
+
