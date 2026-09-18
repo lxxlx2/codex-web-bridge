@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -125,3 +126,33 @@ def test_route_gate_wraps_core_failure(monkeypatch):
         gate._route_gate(123.0)
 
     assert exc.value.gate == "desktop_route"
+
+def test_desktop_running_prefers_native_macos_application_state(monkeypatch):
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="true\n")
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+
+    assert gate._desktop_running() is True
+    assert calls == [["osascript", "-e", 'application "Codex" is running']]
+
+
+def test_desktop_running_uses_process_fallback_when_applescript_fails(monkeypatch):
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[0] == "osascript":
+            return SimpleNamespace(returncode=1, stdout="")
+        return SimpleNamespace(returncode=0, stdout="123\n")
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+
+    assert gate._desktop_running() is True
+    assert calls[1][:2] == ["pgrep", "-f"]
+
