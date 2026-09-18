@@ -213,6 +213,30 @@ The probe now switches to tiny arm turns when the remaining margin is within one
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Restart/resume required-tool repair exhaustion
+
+The S3 run on `dc3f78ce930ed9d80ac8cc89a047c4419971ceff` failed before the compaction probe during restart continuity:
+
+```text
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=rc=1
+```
+
+Private restart evidence showed the seed turn completed exactly with `CONTEXT_READY`, preserved the same thread id, and the resume request explicitly required `exec_command`. The web model returned two consecutive false client-tool-unavailable replies. Both were detected by the specialized workspace repair path, but the configured two repair retries were exhausted before any function call was emitted:
+
+```text
+STRICT_ATTEMPT=1  required_tool=exec_command  satisfied=false
+STRICT_ATTEMPT=2  response_status=failed
+tool_call_validation_exhausted: client_workspace_tool_refusal
+```
+
+The repair contract is now stronger for an explicitly required workspace tool. It explains that a valid `adapter_calls` envelope is the real transport consumed by the local client, forbids further capability commentary on repeated refusal, and requires a single tool-call-only response using the operation from the original request. A specifically required workspace tool also receives one narrow additional focused-repair attempt; generic tool validation retry limits are unchanged.
+
+Regression coverage reproduces the restart workspace-guard command and verifies that two refusals can recover on the extra required-workspace attempt while repeated refusals still fail closed.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
