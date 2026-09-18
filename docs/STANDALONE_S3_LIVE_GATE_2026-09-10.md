@@ -149,6 +149,30 @@ The validator now reuses the parser's ignored-markup masking before XML-like det
 
 This changes the release candidate SHA again. Desktop E2E evidence on `105bc97adb21786a4a312875f0c1dda028f9e137` remains historical capability evidence only; exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after the new fix is validated.
 
+
+## 2026-09-18 Recursive-compaction workspace continuation follow-up
+
+The next S3 retry on `240904e5d39b4b66e29f2b54bfcddf1c3237b545` advanced past XML validation and successfully executed the post-compaction workspace-validation command. The retained exact token also survived recursive compaction. The remaining failure was:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+Private trace evidence showed one successful `exec_command`:
+
+```text
+pwd && test -f .uwa_codex_acceptance && test -d large_context
+```
+
+and the final web reply correctly remembered `ORBIT-5921` plus the still-pending requirement to write and read back `large_context/result.txt`, but then falsely claimed that the current ChatGPT session did not have `exec_command`. No result file was created.
+
+The root cause was the compacted-workspace repair predicate. It only recognized compacted workspace intent when the newest user-shaped message was a function-output fallback. A recursive compaction can occur after the first successful client tool call and before the remaining write/read steps, leaving the durable assistant compaction state plus a normal continuation user item. In that shape, the false tool-unavailable claim escaped specialized repair.
+
+The policy now treats the newest structured `[ACTIVE CONTINUATION STATE]` as durable unresolved workspace intent even when the latest user item is not a function-output fallback. Focused repair prompts also carry the bounded compacted continuation state so exact values and pending file operations remain available during the repair sub-round. Regression coverage includes the exact recursive-compaction refusal pattern and verifies completed-only compacted history does not force a workspace repair.
+
+This changes the release candidate SHA again. Exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
