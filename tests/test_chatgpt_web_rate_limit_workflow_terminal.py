@@ -30,3 +30,20 @@ def test_ambiguous_submit_terminal_chunk_is_not_retried():
     assert BrowserWorkflowMixin._get_stream_terminal_error_detail(chunk) == (
         "422 Unprocessable Entity: chatgpt_send_submission_unknown"
     )
+
+def test_preexisting_generation_send_block_is_terminal():
+    assert BrowserWorkflowMixin._is_terminal_step_workflow_error(
+        "send_blocked_by_preexisting_generation"
+    ) is True
+
+
+def test_undispatched_send_action_is_terminal():
+    assert BrowserWorkflowMixin._is_terminal_step_workflow_error(
+        "send_action_not_dispatched"
+    ) is True
+
+
+def test_unrelated_workflow_error_is_not_promoted_to_terminal_send_failure():
+    assert BrowserWorkflowMixin._is_terminal_step_workflow_error(
+        "some_other_workflow_error"
+    ) is False
