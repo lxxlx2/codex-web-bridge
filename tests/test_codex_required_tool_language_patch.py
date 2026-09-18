@@ -125,3 +125,79 @@ def test_explanatory_english_reference_does_not_force_execution():
     install_codex_required_tool_language_patch()
     body = _body("Explain when to use exec_command in this protocol.")
     assert v2.required_declared_tool(body) == ""
+
+def test_desktop_generated_trailing_user_context_does_not_hide_required_exec():
+    install_codex_required_tool_language_patch()
+    body = ResponsesRequest(
+        model="chatgpt",
+        stream=True,
+        input=[
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "desktop instructions"}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": (
+                        "第一步必须通过客户端 exec_command 在当前 Codex 工作区执行 "
+                        "pwd && test -f .uwa_codex_acceptance && test -d multi_file。"
+                    ),
+                }],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<environment_context><cwd>/tmp/project</cwd></environment_context>",
+                }],
+            },
+        ],
+        tools=[_tool("exec_command"), _tool("write_stdin")],
+    )
+
+    assert v2.required_declared_tool(body) == "exec_command"
+
+
+def test_historical_required_exec_does_not_leak_past_assistant_boundary():
+    install_codex_required_tool_language_patch()
+    body = ResponsesRequest(
+        model="chatgpt",
+        stream=True,
+        input=[
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "必须通过客户端 exec_command 执行 pwd。",
+                }],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "done"}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "解释刚才发生了什么。"}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<environment_context><cwd>/tmp/project</cwd></environment_context>",
+                }],
+            },
+        ],
+        tools=[_tool("exec_command"), _tool("write_stdin")],
+    )
+
+    assert v2.required_declared_tool(body) == ""
+
