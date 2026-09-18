@@ -156,6 +156,42 @@ def has_client_workspace_tools(tools: List[Dict[str, Any]]) -> bool:
     return bool(_workspace_tool_defs(tools))
 
 
+def _specific_required_workspace_tool_name(
+    tool_choice: Any,
+    tools: List[Dict[str, Any]],
+) -> str:
+    """Return a specifically required declared workspace tool, if any.
+
+    Only an explicit named tool choice is authoritative here. A generic
+    tool_choice='required' can refer to any declared tool and must not be
+    coerced into a workspace-tool repair.
+    """
+
+    if not isinstance(tool_choice, dict):
+        return ""
+
+    function_data = (
+        tool_choice.get("function")
+        if isinstance(tool_choice.get("function"), dict)
+        else {}
+    )
+    name = str(
+        function_data.get("name")
+        or tool_choice.get("name")
+        or ""
+    ).strip()
+
+    if name not in _WORKSPACE_TOOL_PRIORITY:
+        return ""
+
+    declared = {
+        _tool_name(item)
+        for item in tools or []
+        if _tool_name(item)
+    }
+    return name if name in declared else ""
+
+
 def _has_tool_history(messages: List[Dict[str, Any]]) -> bool:
     for message in messages or []:
         if not isinstance(message, dict):
@@ -371,6 +407,14 @@ def should_repair_client_workspace_refusal(
             _has_workspace_tool_call_history(messages)
             and looks_like_post_tool_unavailable_claim(assistant_text)
         )
+
+    # A specific required workspace tool is protocol-level evidence that this
+    # turn must call that client tool. If the model returns only final text and
+    # no parsed tool call, repair the tool-availability contradiction directly
+    # instead of relying on request/refusal wording regexes. Generic
+    # tool_choice='required' intentionally does not enter this path.
+    if _specific_required_workspace_tool_name(tool_choice, tools):
+        return True
 
     local_workspace_request = (
         looks_like_local_workspace_request(
