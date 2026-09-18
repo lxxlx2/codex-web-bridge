@@ -653,6 +653,24 @@ _TOOL_XML_MAX_CHARS = 200_000
 _TOOL_XML_FORBIDDEN_DECL_RE = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
 
 
+def _log_tool_xml_parse_failure(
+    reason: str,
+    text: str,
+    *,
+    wrapper_count: int,
+) -> None:
+    """Log structural XML failure metadata without echoing tool arguments."""
+    value = str(text or "")
+    logger.warning(
+        "[tool_calling] XML tool-call parse rejected "
+        f"reason={reason} "
+        f"chars={len(value)} "
+        f"wrapper_count={wrapper_count} "
+        f"cdata_open={value.count('<![CDATA[')} "
+        f"cdata_close={value.count(']]>')}"
+    )
+
+
 def _mask_ignored_tool_markup_regions(text: str) -> str:
     if not text:
         return ""
@@ -1076,6 +1094,50 @@ def _parse_xml_invoke_arguments(
     return payload
 
 
+def _diagnose_wrapped_xml_tool_failure(
+    text: str,
+    allowed_tools: Dict[str, Dict[str, Any]],
+) -> str:
+    """Return a fixed structural reason code without including XML payload data."""
+    normalized = _normalize_tool_xml_markup(text)
+    try:
+        root = _safe_xml_fromstring(normalized)
+    except ValueError as exc:
+        message = str(exc)
+        if "maximum length" in message:
+            return "xml_too_large"
+        if "DTD and entity declarations" in message:
+            return "xml_forbidden_declaration"
+        return "xml_malformed_or_incomplete"
+
+    if root.attrib or str(root.text or "").strip():
+        return "xml_invalid_wrapper_shape"
+
+    children = list(root)
+    if not children:
+        return "xml_empty_calls"
+
+    for child in children:
+        if _xml_local_name(child.tag).lower() not in {
+            _PREFERRED_XML_CALL_TAG,
+            _LEGACY_XML_CALL_TAG,
+            "tool_call",
+        }:
+            return "xml_invalid_call_element"
+        if set(child.attrib) != {"name"} or str(child.tail or "").strip():
+            return "xml_invalid_call_shape"
+
+        raw_name = str(child.attrib.get("name", "") or "").strip()
+        name = _resolve_tool_name(raw_name, allowed_tools)
+        if not name:
+            return "xml_undeclared_tool"
+
+        if _parse_xml_invoke_arguments(child, allowed_tools.get(name)) is None:
+            return "xml_invalid_arguments"
+
+    return "xml_invalid_envelope"
+
+
 def _parse_wrapped_xml_tool_calls(
     text: str,
     allowed_tools: Dict[str, Dict[str, Any]],
@@ -1131,10 +1193,26 @@ def _try_parse_xml_tool_calls(
     raw = str(text or "")
     wrapper_spans = _find_tool_xml_wrapper_spans(raw)
     if len(wrapper_spans) != 1:
+        masked = _mask_ignored_tool_markup_regions(raw)
+        if (
+            wrapper_spans
+            or _TOOL_XML_WRAPPER_OPEN_RE.search(masked)
+            or _TOOL_XML_INVOKE_OPEN_RE.search(masked)
+        ):
+            _log_tool_xml_parse_failure(
+                "xml_wrapper_count",
+                raw,
+                wrapper_count=len(wrapper_spans),
+            )
         return None
     start, end, block = wrapper_spans[0]
     tool_calls = _parse_wrapped_xml_tool_calls(block, allowed_tools)
     if not tool_calls:
+        _log_tool_xml_parse_failure(
+            _diagnose_wrapped_xml_tool_failure(block, allowed_tools),
+            block,
+            wrapper_count=1,
+        )
         return None
 
     visible_text = _replace_unicode_surrogates(

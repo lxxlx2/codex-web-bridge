@@ -793,6 +793,7 @@ def _build_tool_repair_system_prompt(
         f"  </{_PREFERRED_XML_CALL_TAG}>\n"
         f"</{_PREFERRED_XML_WRAPPER_TAG}>\n"
         "Return exactly one complete tool-call XML root when a tool is needed.\n"
+        "Inside <arguments encoding=\"json\">, wrap the complete JSON object in CDATA. If its text contains the literal ]]> terminator, split that terminator across adjacent CDATA sections as ]]]]><![CDATA[> so the XML stays well-formed and the JSON text is unchanged.\n"
         "You may retain a brief user-visible progress message before or after that XML root; when progress is required, put it before the XML root. Do not put it inside the XML.\n"
         "If no tool is needed, answer normally in plain text.\n"
         "Rules:\n"
@@ -816,7 +817,7 @@ def _format_focused_tool_retry_feedback(
 ) -> str:
     lines = [
         "[Focused Repair Task]",
-        "Repair the rejected assistant JSON response below.",
+        "Repair the rejected assistant tool-call response below.",
         "Do not reconsider the full conversation. Keep the original intent and change as little as possible.",
         f"Attempt: {attempt}/{total_attempts}",
         "Validation errors:",
@@ -846,7 +847,7 @@ def _format_focused_tool_retry_feedback(
     lines.extend(
         [
             "Return only the corrected tool-call output.",
-            "Prefer the XML tool-call block for tool use. JSON assistant payloads are still accepted.",
+            "When a tool is needed, return exactly one canonical <adapter_calls> XML root; do not switch to a JSON assistant wrapper during focused repair.",
             "If the rejected response is almost correct, make the smallest possible fix.",
             "Do not repeat the same invalid response unchanged.",
         ]

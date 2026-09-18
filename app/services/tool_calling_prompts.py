@@ -429,7 +429,7 @@ def _render_xml_tool_call_example(name: str, arguments: Dict[str, Any]) -> str:
     return (
         f"<{_PREFERRED_XML_WRAPPER_TAG}>\n"
         f'  <{_PREFERRED_XML_CALL_TAG} name="{_escape_xml_text(name)}">\n'
-        f'    <arguments encoding="json"><![CDATA[{_json_dumps_safe(arguments)}]]></arguments>\n'
+        f'    <arguments encoding="json">{_wrap_cdata(_json_dumps_safe(arguments))}</arguments>\n'
         f"  </{_PREFERRED_XML_CALL_TAG}>\n"
         f"</{_PREFERRED_XML_WRAPPER_TAG}>"
     )
@@ -437,8 +437,7 @@ def _render_xml_tool_call_example(name: str, arguments: Dict[str, Any]) -> str:
 
 def _render_xml_parameters(arguments: Dict[str, Any], indent: str) -> str:
     return (
-        f'{indent}<arguments encoding="json"><![CDATA['
-        f"{_json_dumps_safe(arguments or {})}]]></arguments>"
+        f'{indent}<arguments encoding="json">{_wrap_cdata(_json_dumps_safe(arguments or {}))}</arguments>'
     )
 
 
@@ -447,6 +446,7 @@ def _render_xml_value(value: Any, indent: str) -> str:
 
 
 def _wrap_cdata(text: str) -> str:
+    """Serialize arbitrary text as one or more adjacent XML CDATA sections."""
     value = str(text or "")
     return "<![CDATA[" + value.replace("]]>", "]]]]><![CDATA[>") + "]]>"
 
@@ -473,6 +473,7 @@ def _build_tool_system_prompt_core(
         "- You may include brief user-visible plain text before or after the XML root. Use it for progress updates; when progress is required, put the update before the XML root. Never put user-visible text inside the XML root.\n"
         f"- Put the tool name in the <{_PREFERRED_XML_CALL_TAG}> name attribute.\n"
         "- Put the complete arguments object in one arguments element with encoding=\"json\".\n"
+        "- If the JSON contains the literal CDATA terminator ]]>, split that terminator across adjacent CDATA sections as ]]]]><![CDATA[> so the XML remains well-formed and the JSON text round-trips unchanged.\n"
         "- Do not use markdown code fences.\n"
         "When you answer without tools, answer normally in plain text.\n"
         "Rules:\n"

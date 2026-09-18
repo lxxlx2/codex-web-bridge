@@ -445,6 +445,8 @@ def build_client_workspace_repair_messages(
         "Only report a missing path, permission error, or failed test after an actual client tool result says so. "
         "Return exactly one complete <adapter_calls> root when calling tools. Put the tool name in the call name "
         "attribute and put one JSON object inside <arguments encoding=\"json\"><![CDATA[...]]></arguments>. "
+        "If that JSON contains the literal CDATA terminator ]]>, split it across adjacent CDATA sections as "
+        "]]]]><![CDATA[> so the XML remains well-formed and the JSON text is unchanged. "
         "Use only fields permitted by the declared tool schema. Do not use markdown fences. Do not invent tool results.\n\n"
         "AVAILABLE CLIENT WORKSPACE TOOLS:\n"
         f"{tool_defs}"
