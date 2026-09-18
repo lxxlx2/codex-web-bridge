@@ -190,6 +190,29 @@ The refusal policy now covers this current-session / actual-callable / execution
 
 This changes the release candidate SHA again. Exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after validation.
 
+
+## 2026-09-19 Fine-to-arm boundary calibration
+
+The S3 run on `dcfa6b5a8a5814e9d85f7d454747f9463c27ae2d` did not reach post-compaction recovery. The remote compaction probe advanced cleanly through coarse rounds and fine round 8:
+
+```text
+ACTIVE_LAST_TOKENS=72221
+MARGIN_TO_TRIGGER=929
+previous fine step ~= 858
+```
+
+The probe then sent another fixed fine filler. That turn failed before emitting a usage snapshot, producing:
+
+```text
+RUN_FAIL fine_usage_missing round=9
+```
+
+The prior arm-switch predicate only switched when `margin <= previous_fine_step` or the fixed 512-token guard. At 929/858 it therefore attempted another ~858-token fine step with only ~71 tokens of expected residual headroom before the configured hard-context trigger. This is too narrow for live variation and can fail before a normal completed-turn usage event.
+
+The probe now switches to tiny arm turns when the remaining margin is within one observed fine step plus the fixed arm guard. This is a live-gate calibration change only; runtime compaction behavior is unchanged. Regression coverage includes the exact observed 929/858 boundary.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
