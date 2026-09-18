@@ -80,6 +80,40 @@ STANDALONE_S3=PASS_LIVE_CLOSED
 
 Any mismatch stops the run and prints only `FAILURE_CLASS` plus a sanitized detail. Raw evidence remains private under `~/.uwa/standalone-s3/`.
 
+## 2026-09-18 Desktop required-tool and send-state follow-up
+
+Live Desktop evidence on `standalone-dev` proved the specifically required client-tool path can recover from an initial Web refusal:
+
+```text
+REQUIRED_TOOL='exec_command'
+STRICT_ATTEMPT=1  FUNCTION_CALL_NAMES=[]             REQUIRED_TOOL_SATISFIED=False
+STRICT_ATTEMPT=2  FUNCTION_CALL_NAMES=['exec_command'] REQUIRED_TOOL_SATISFIED=True
+final continuation completed after function_call_output
+```
+
+The next targeted CDATA live probe exposed a separate browser-workflow failure. The prompt was filled, but the ChatGPT page was still classified as a pre-existing generation state. The send guard correctly refused to submit and raised `send_blocked_by_preexisting_generation`, but the workflow layer did not classify that code as terminal. A network monitor therefore remained alive until RequestManager's 600-second zombie sweep cancelled the request. Private evidence recorded:
+
+```text
+[SEND] wait for pre-existing generation -> timeout=120s
+send_blocked_by_preexisting_generation
+request remained RUNNING
+zombie_timeout after about 614s
+surface blocker after failure: composer_not_empty
+```
+
+Follow-up fixes:
+
+- `ee6414c3` makes blocked/undispatched sends re-raise directly from the step layer.
+- `0b7e18f9` classifies blocked/undispatched sends as terminal workflow errors so cleanup can run immediately.
+- `1088b986` adds regression coverage for the terminal send-state classification.
+
+Current live candidate after those fixes:
+
+```text
+1088b986fb61cfe65d25380d6027d6cf3235eb84
+```
+
+S3 remains open. The new candidate still requires local regression and a repeated Desktop live probe before the CDATA case can be considered closed.
 ## Gate state
 
 ```text
