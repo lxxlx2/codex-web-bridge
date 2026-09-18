@@ -154,6 +154,24 @@ class BrowserWorkflowMixin:
         return [selected] if selected else []
 
     @staticmethod
+    def _is_terminal_step_workflow_error(error_code: str) -> bool:
+        """Return whether a step failure must terminate the current browser turn.
+
+        A prompt that was filled but never dispatched must not fall through to
+        later stream-monitor steps. Otherwise the monitor can wait until the
+        RequestManager zombie sweep even though the send already failed.
+        """
+
+        return str(error_code or "").strip() in {
+            "new_chat_transition_timeout",
+            "send_unconfirmed",
+            "arena_direct_unexpected_battle_redirect",
+            "arena_send_no_target",
+            "send_blocked_by_preexisting_generation",
+            "send_action_not_dispatched",
+        }
+
+    @staticmethod
     def _emit_request_block(emitted_blocks: set[int], block_no: int, title: str, detail: str = "") -> None:
         if block_no in emitted_blocks:
             return
@@ -2402,17 +2420,13 @@ class BrowserWorkflowMixin:
 
                         if isinstance(e, WorkflowError):
                             err_str = str(e)
-                            if err_str in {
-                                "new_chat_transition_timeout",
-                                "send_unconfirmed",
-                                "arena_direct_unexpected_battle_redirect",
-                                "arena_send_no_target",
-                            }:
+                            if self._is_terminal_step_workflow_error(err_str):
                                 error_code = err_str
                                 workflow_aborted = True
                                 yield self.formatter.pack_error(
                                     f"stream_terminal_error:{error_code}",
                                     code=error_code,
+                                    retryable=False,
                                 )
                             elif err_str.startswith("stream_terminal_error:"):
                                 workflow_aborted = True
