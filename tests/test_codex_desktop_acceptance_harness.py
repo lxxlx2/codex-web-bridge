@@ -68,6 +68,7 @@ def test_context_prompts_are_two_round_same_thread_protocol(tmp_path):
     assert second.returncode == 0
     assert "EMBER-7319" in first.stdout
     assert "不要向我询问上一轮令牌" in second.stdout
+    assert "必须通过客户端 exec_command" in second.stdout
 
 
 def test_failure_recovery_prompt_guards_current_workspace_and_audits_runs(tmp_path):
