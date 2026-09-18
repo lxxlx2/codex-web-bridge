@@ -143,10 +143,17 @@ def should_arm_before_next_fine(
     if margin_to_trigger <= DEFAULT_ARM_GUARD_TOKENS:
         return True
 
-    return bool(
-        previous_fine_step is not None
-        and previous_fine_step > 0
-        and margin_to_trigger <= previous_fine_step
+    if previous_fine_step is None or previous_fine_step <= 0:
+        return False
+
+    # Leave one observed fine-step plus the fixed guard as headroom. The live
+    # body_after_prefix probe can fail before emitting usage when another ~858
+    # token fine turn lands too close to the hard-context trigger. Switching to
+    # tiny arm turns slightly earlier preserves the same thread while avoiding
+    # an oversized boundary-crossing filler.
+    return (
+        margin_to_trigger
+        <= previous_fine_step + DEFAULT_ARM_GUARD_TOKENS
     )
 
 
