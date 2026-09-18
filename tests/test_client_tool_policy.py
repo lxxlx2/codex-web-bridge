@@ -930,3 +930,89 @@ def test_roundtrip_repairs_exact_live_recursive_compaction_refusal(monkeypatch):
     assert result["mode"] == "tool_calls"
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
 
+def test_required_exec_repair_prompt_explains_adapter_transport_and_no_prose():
+    repair = build_client_workspace_repair_messages(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "第一步必须通过客户端 exec_command 在当前工作区执行 "
+                    "pwd && test -f .uwa_codex_acceptance && test -d context。"
+                ),
+            }
+        ],
+        tools=EXEC_TOOLS,
+        assistant_text=(
+            "当前 ChatGPT 会话没有实际可调用的 exec_command，"
+            "因此无法执行。"
+        ),
+        attempt=2,
+        total_attempts=4,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+    )
+
+    system = repair[0]["content"]
+    user = repair[1]["content"]
+
+    assert "adapter_calls response is the transport" in system
+    assert "real invocation request" in system
+    assert "protocol contract, not a suggestion" in user
+    assert "next response must be one executable client-tool call" in user
+    assert "Return exactly one exec_command call now and no prose" in user
+    assert "pwd && test -f .uwa_codex_acceptance && test -d context" in user
+
+
+def test_specific_required_exec_gets_one_extra_repair_attempt(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "1")
+
+    refusal = (
+        "当前 ChatGPT 会话没有实际可调用的 exec_command，"
+        "因此无法执行本地工作区命令。"
+    )
+    replies = iter(
+        [
+            refusal,
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"pwd && test -f .uwa_codex_acceptance && test -d context"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "第一步必须通过客户端 exec_command 在当前工作区执行 "
+                    "pwd && test -f .uwa_codex_acceptance && test -d context。"
+                ),
+            }
+        ],
+        tools=EXEC_TOOLS,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 3
+    assert "Attempt: 2/3" in seen[2][1]["content"]
+    assert "next response must be one executable client-tool call" in seen[2][1]["content"]
+
