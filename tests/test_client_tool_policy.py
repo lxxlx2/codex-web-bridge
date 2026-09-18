@@ -797,7 +797,7 @@ def test_roundtrip_repairs_recursive_compaction_refusal_into_next_exec(monkeypat
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"printf \\\'ORBIT-5921\\\\n\\\' > large_context/result.txt '
+                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
                 '&& cat large_context/result.txt"}'
                 ']]></arguments></call></adapter_calls>'
             ),
