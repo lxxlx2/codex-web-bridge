@@ -336,6 +336,29 @@ def _looks_like_compacted_workspace_continuation(
     return False
 
 
+def _latest_compacted_continuation_text(
+    messages: List[Dict[str, Any]],
+) -> str:
+    """Return the newest compacted continuation state, bounded for repair prompts."""
+
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+
+        text = _message_content_text(message)
+        if "[Compacted prior context]" not in text:
+            continue
+
+        value = text.strip()
+        if len(value) > 3200:
+            value = value[:3197] + "..."
+        return value
+
+    return ""
+
+
 def looks_like_client_access_refusal(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
@@ -484,6 +507,10 @@ def build_client_workspace_repair_messages(
     if len(rejected) > 1400:
         rejected = rejected[:1397] + "..."
 
+    compacted_context = _latest_compacted_continuation_text(
+        messages
+    )
+
     has_prior_workspace_call = _has_workspace_tool_call_history(messages)
     root_workdir_repair = bool(_ROOT_WORKDIR_TEXT_PATTERN.search(str(assistant_text or "")))
     prior_history_rule = (
@@ -558,11 +585,20 @@ def build_client_workspace_repair_messages(
             )
         action = f"Call {preferred_name} now to inspect the actual client workspace. Return only the corrected tool-call output."
 
+    compacted_block = (
+        "Compacted continuation state already present in this conversation:\n"
+        + compacted_context
+        + "\n\n"
+        if compacted_context
+        else ""
+    )
+
     user = (
         "[Client Workspace Repair]\n"
         f"Attempt: {attempt}/{total_attempts}\n"
         f"{correction}\n\n"
-        "Original user request:\n"
+        + compacted_block
+        + "Original user request:\n"
         f"{user_request}\n\n"
         "Rejected reply:\n"
         f"{rejected}\n\n"
