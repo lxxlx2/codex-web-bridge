@@ -76,6 +76,25 @@ _REFUSAL_PATTERNS = (
         re.IGNORECASE | re.DOTALL,
     ),
 
+    # recursive_compaction_current_session_tool_entry_absent:
+    # Live S3 wording after recursive compaction: the model remembers the
+    # durable state and pending workspace action but incorrectly says the
+    # current chat/session cannot turn the declared client tool into an
+    # actually callable execution entry.
+    re.compile(
+        r"(?:当前(?:这个)?(?:ChatGPT\s*)?会话|当前环境|当前这个会话)"
+        r".{0,140}(?:无法|不能|没有|并无|不存在)"
+        r".{0,140}(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)"
+        r".{0,100}(?:实际可调用|可调用|执行入口|客户端工具|本地工具|执行工具)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)"
+        r".{0,140}(?:无法|不能|没有|并无|不存在)"
+        r".{0,140}(?:实际可调用|可调用|执行入口|当前(?:ChatGPT\s*)?会话|当前会话)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+
 )
 
 # Strong contradiction patterns that remain invalid even after a prior tool result.
