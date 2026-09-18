@@ -10,6 +10,7 @@ from app.services.tool_calling_prompts import (
 )
 from app.services.tool_calling_validation_retry import (
     _build_tool_repair_system_prompt,
+    _detect_malformed_tool_payload,
     _format_focused_tool_retry_feedback,
     _inspect_tool_response,
 )
@@ -232,3 +233,40 @@ def test_client_workspace_repair_contract_documents_cdata_split():
     system_prompt = repair[0]["content"]
     assert "CDATA terminator ]]>" in system_prompt
     assert "]]]]><![CDATA[>" in system_prompt
+
+def test_inline_code_protocol_name_is_not_malformed_xml_tool_call():
+    raw = (
+        "当前实际可调用工具集中没有 exec_command，因此无法真实执行该客户端工具调用，"
+        "也不能伪造 `<adapter_calls>` 或执行结果。"
+    )
+
+    assert _detect_malformed_tool_payload(
+        raw,
+        allowed_tool_names={"exec_command"},
+    ) == ""
+
+
+def test_fenced_protocol_example_is_not_malformed_xml_tool_call():
+    raw = (
+        "Example only:\n"
+        "```xml\n"
+        "<adapter_calls><call name=\"exec_command\">"
+        "<arguments encoding=\"json\"><![CDATA[{\"cmd\":\"pwd\"}]]></arguments>"
+        "</call></adapter_calls>\n"
+        "```"
+    )
+
+    assert _detect_malformed_tool_payload(
+        raw,
+        allowed_tool_names={"exec_command"},
+    ) == ""
+
+
+def test_unquoted_protocol_markup_remains_malformed_xml_candidate():
+    raw = "prefix <adapter_calls> malformed"
+
+    assert "XML-style tool call" in _detect_malformed_tool_payload(
+        raw,
+        allowed_tool_names={"exec_command"},
+    )
+
