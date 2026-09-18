@@ -396,6 +396,15 @@ def should_repair_client_workspace_refusal(
     if str(parsed.get("mode") or "").strip().lower() != "final":
         return False
 
+    # A specific required workspace tool is protocol-level evidence that this
+    # turn must call that client tool. If the model returns only final text and
+    # no parsed tool call, repair the contradiction directly instead of relying
+    # on request/refusal wording regexes. This remains authoritative even after
+    # earlier tool history. Generic tool_choice='required' intentionally does
+    # not enter this path.
+    if _specific_required_workspace_tool_name(tool_choice, tools):
+        return True
+
     has_history = _has_tool_history(messages)
     if has_history:
         # Once a workspace tool has really appeared in the conversation, an
@@ -407,14 +416,6 @@ def should_repair_client_workspace_refusal(
             _has_workspace_tool_call_history(messages)
             and looks_like_post_tool_unavailable_claim(assistant_text)
         )
-
-    # A specific required workspace tool is protocol-level evidence that this
-    # turn must call that client tool. If the model returns only final text and
-    # no parsed tool call, repair the tool-availability contradiction directly
-    # instead of relying on request/refusal wording regexes. Generic
-    # tool_choice='required' intentionally does not enter this path.
-    if _specific_required_workspace_tool_name(tool_choice, tools):
-        return True
 
     local_workspace_request = (
         looks_like_local_workspace_request(
@@ -444,11 +445,19 @@ def build_client_workspace_repair_messages(
     assistant_text: str,
     attempt: int,
     total_attempts: int,
+    tool_choice: Any = None,
 ) -> List[Dict[str, str]]:
     """Build a small corrective prompt without exposing additional local data."""
 
     workspace_tools = _workspace_tool_defs(tools)
-    preferred_name = _tool_name(workspace_tools[0]) if workspace_tools else "exec_command"
+    specifically_required = _specific_required_workspace_tool_name(
+        tool_choice,
+        tools,
+    )
+    preferred_name = (
+        specifically_required
+        or (_tool_name(workspace_tools[0]) if workspace_tools else "exec_command")
+    )
     declared_names = [name for name in (_tool_name(item) for item in workspace_tools) if name]
     tool_defs = json.dumps(workspace_tools, ensure_ascii=False, indent=2)
     user_request = _latest_user_text(messages).strip()
