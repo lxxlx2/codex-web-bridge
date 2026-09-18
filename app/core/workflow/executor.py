@@ -1257,6 +1257,8 @@ class WorkflowExecutor(
                 "send_unconfirmed",
                 "arena_send_no_target",
                 "stream_recovery_exhausted",
+                "send_blocked_by_preexisting_generation",
+                "send_action_not_dispatched",
             }:
                 raise
             if error_code.startswith("file_paste_length_error:"):
