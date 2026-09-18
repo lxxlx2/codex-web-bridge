@@ -280,12 +280,21 @@ def _latest_user_is_function_output_fallback(
 def _looks_like_compacted_workspace_continuation(
     messages: List[Dict[str, Any]],
 ) -> bool:
-    """Recover workspace intent after compaction removed explicit tool history."""
+    """Recover unresolved workspace intent after compaction removed tool history.
 
-    if not _latest_user_is_function_output_fallback(
-        messages
-    ):
-        return False
+    A post-compaction continuation is not guaranteed to present the latest
+    client-tool result as the newest user-shaped message. In particular, Codex
+    may compact again between a successful workspace-validation call and the
+    remaining write/read steps. The compacted assistant state is therefore the
+    durable source of active intent.
+
+    Prefer the ACTIVE CONTINUATION STATE section when present so completed
+    historical workspace actions do not become actionable again. Legacy
+    compaction summaries without structured sections fall back to the full
+    compacted text.
+    """
+
+    active_header = "[ACTIVE CONTINUATION STATE]"
 
     for message in reversed(
         messages or []
@@ -310,8 +319,16 @@ def _looks_like_compacted_workspace_continuation(
         ):
             continue
 
+        candidate = text
+
+        if active_header in text:
+            candidate = text.split(
+                active_header,
+                1,
+            )[1]
+
         return any(
-            pattern.search(text)
+            pattern.search(candidate)
             for pattern
             in _WORKSPACE_REQUEST_PATTERNS
         )
