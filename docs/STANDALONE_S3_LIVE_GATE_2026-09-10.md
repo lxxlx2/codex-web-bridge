@@ -173,6 +173,23 @@ The policy now treats the newest structured `[ACTIVE CONTINUATION STATE]` as dur
 
 This changes the release candidate SHA again. Exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after validation.
 
+
+## 2026-09-19 Exact recursive-compaction refusal wording follow-up
+
+The S3 retry on `7bfe6947614fe1a7ba69e2a6a78846e9d247b17e` again reached post-compaction recovery with one successful workspace-validation `exec_command`, exact recovery of `ORBIT-5921`, and no result file. The final web reply explicitly preserved the pending file-write/read task but used a live refusal shape that the compacted-workspace policy still did not classify:
+
+```text
+无法把其中声明的 exec_command / write_stdin 变成我当前会话实际可调用的客户端工具
+...
+我当前没有那个本地 Codex adapter 的 exec_command 执行入口
+```
+
+No client-workspace repair log appeared after the recursive compaction, confirming the previous continuation-state fix was reached but the final refusal wording escaped the refusal detector.
+
+The refusal policy now covers this current-session / actual-callable / execution-entry wording while remaining limited to declared workspace client tools and unresolved compacted workspace intent. Exact live wording regression coverage verifies both direct detection and conversion into a repaired `exec_command` call.
+
+This changes the release candidate SHA again. Exact-SHA Desktop E2E / S3 / install-smoke / S4 evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
