@@ -37,4 +37,4 @@ The project may later add generated convenience bundles and SHA-256 checksums, b
 
 ## Current state
 
-`standalone-dev` is still an extraction branch. The repository intentionally shows "No releases published" until the standalone release-candidate gate is complete.
+`standalone-dev` is the active `v0.1.0-rc.1` candidate branch. S1/S2 are closed. A real standalone Codex Desktop E2E path has been proven, but release evidence is valid only when final S3 live closure, Desktop E2E, clean-install smoke, CI, and the S4 local gate all pass on the exact same candidate SHA. `main` and the `v0.1.0-rc.1` tag remain untouched until that candidate-bound matrix is complete.
