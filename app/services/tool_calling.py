@@ -134,20 +134,28 @@ def complete_tool_calling_roundtrip(
             parallel_tool_calls=parallel_tool_calls,
         )
         errors = inspection.get("errors") or []
+
+        # A model may explicitly refuse a declared client workspace tool at
+        # exactly the same time that a required-tool validation error is
+        # present. Handle that contradiction with the specialized workspace
+        # repair before the generic missing-tool retry. This never executes a
+        # malformed call: the policy only repairs final text with no parsed
+        # tool_calls and all subsequent output still passes normal validation.
+        client_repair = _maybe_build_client_workspace_repair(
+            messages=conversation,
+            tools=tools,
+            tool_choice=tool_choice,
+            assistant_text=assistant_text,
+            parsed=parsed,
+            attempt=attempt,
+            total_attempts=total_attempts,
+        )
+        if client_repair is not None:
+            last_summary = "client_workspace_tool_refusal"
+            pending_retry_messages = client_repair
+            continue
+
         if not errors:
-            client_repair = _maybe_build_client_workspace_repair(
-                messages=conversation,
-                tools=tools,
-                tool_choice=tool_choice,
-                assistant_text=assistant_text,
-                parsed=parsed,
-                attempt=attempt,
-                total_attempts=total_attempts,
-            )
-            if client_repair is not None:
-                last_summary = "client_workspace_tool_refusal"
-                pending_retry_messages = client_repair
-                continue
             if attempt > 1:
                 logger.warning(
                     "[tool_calling] 函数调用候选已在内部修复后通过校验 "
@@ -264,20 +272,22 @@ async def complete_tool_calling_roundtrip_async(
             parallel_tool_calls=parallel_tool_calls,
         )
         errors = inspection.get("errors") or []
+
+        client_repair = _maybe_build_client_workspace_repair(
+            messages=conversation,
+            tools=tools,
+            tool_choice=tool_choice,
+            assistant_text=assistant_text,
+            parsed=parsed,
+            attempt=attempt,
+            total_attempts=total_attempts,
+        )
+        if client_repair is not None:
+            last_summary = "client_workspace_tool_refusal"
+            pending_retry_messages = client_repair
+            continue
+
         if not errors:
-            client_repair = _maybe_build_client_workspace_repair(
-                messages=conversation,
-                tools=tools,
-                tool_choice=tool_choice,
-                assistant_text=assistant_text,
-                parsed=parsed,
-                attempt=attempt,
-                total_attempts=total_attempts,
-            )
-            if client_repair is not None:
-                last_summary = "client_workspace_tool_refusal"
-                pending_retry_messages = client_repair
-                continue
             if attempt > 1:
                 logger.warning(
                     "[tool_calling] 函数调用候选已在内部修复后通过校验 "
