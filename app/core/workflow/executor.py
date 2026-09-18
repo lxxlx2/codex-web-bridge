@@ -408,6 +408,19 @@ class WorkflowExecutor(
 
     def cleanup_after_workflow(self) -> None:
         """Release page-side helpers installed for this executor."""
+        try:
+            # A cancelled workflow can finish FILL_INPUT and stop before the
+            # send action runs.  In that case the exact prompt written by this
+            # executor would otherwise remain in the shared ChatGPT composer
+            # and poison the next Codex turn.  The rollback helper is
+            # ownership-checked: it only clears an exact hash match, refuses
+            # attachments/user edits, and does nothing after dispatch.
+            self._clear_owned_unsent_composer()
+        except Exception as e:
+            logger.debug(
+                f"[SEND_CLEANUP] workflow teardown rollback failed safely: "
+                f"{type(e).__name__}"
+            )
         self._cleanup_workflow_scripts()
         try:
             if self._attachment_monitor is not None:
