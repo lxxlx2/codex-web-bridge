@@ -80,8 +80,9 @@ PROMPTS: Dict[str, str] = {
     ),
     "context_2": (
         "这是同一个 Codex 对话的第二轮。不要向我询问上一轮令牌。"
-        "使用上一轮上下文记住的令牌，创建 context/result.txt，文件只包含该令牌和一个换行。"
-        "然后实际读取文件确认内容，并回复 CONTEXT_PASS。"
+        "必须通过客户端 exec_command 使用上一轮上下文记住的令牌创建 context/result.txt，"
+        "文件只包含该令牌和一个换行。然后必须通过客户端 exec_command 实际读取该文件确认内容，"
+        "最后只回复 CONTEXT_PASS。"
     ),
 }
 
