@@ -685,3 +685,57 @@ def test_specific_required_non_workspace_tool_does_not_force_workspace_repair(mo
         parsed=parsed,
     ) is False
 
+def test_specific_required_exec_repairs_even_with_prior_tool_history(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = _successful_read_history()
+    refusal = "I cannot perform the requested command from this chat."
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice={
+            "type": "function",
+            "name": "exec_command",
+        },
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_repair_prompt_preserves_specific_required_workspace_tool():
+    apply_patch_tool = {
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a patch in the local client workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch": {"type": "string"},
+                },
+                "required": ["patch"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    repair = build_client_workspace_repair_messages(
+        messages=[{"role": "user", "content": "Apply the requested change."}],
+        tools=[*EXEC_TOOLS, apply_patch_tool],
+        assistant_text="I cannot perform that operation from here.",
+        attempt=1,
+        total_attempts=3,
+        tool_choice={
+            "type": "function",
+            "name": "apply_patch",
+        },
+    )
+
+    assert "Call apply_patch now" in repair[1]["content"]
+
