@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from app.services.client_tool_policy import (
+    _specific_required_workspace_tool_name,
     build_client_workspace_repair_messages,
     should_repair_client_workspace_refusal,
 )
@@ -106,7 +107,17 @@ def complete_tool_calling_roundtrip(
     conversation = _copy_message_list_shallow(messages)
     retry_limit = _get_tool_validation_retry_limit()
     retry_strategy = _get_tool_retry_strategy()
-    total_attempts = retry_limit + 1
+    required_workspace_tool = _specific_required_workspace_tool_name(
+        tool_choice,
+        tools,
+    )
+    # An explicitly required client workspace tool is a protocol-level
+    # obligation. Live Codex restart/resume evidence showed two consecutive
+    # false "tool unavailable" replies before recovery. Give this narrow case
+    # one additional focused repair opportunity without broadening the generic
+    # validation retry budget.
+    workspace_required_bonus = 1 if required_workspace_tool else 0
+    total_attempts = retry_limit + 1 + workspace_required_bonus
     last_summary = "tool_call_validation_failed"
     last_parsed: Dict[str, Any] = {"mode": "final", "content": "", "tool_calls": []}
     pending_retry_messages: Optional[List[Dict[str, str]]] = None
@@ -244,7 +255,17 @@ async def complete_tool_calling_roundtrip_async(
     conversation = _copy_message_list_shallow(messages)
     retry_limit = _get_tool_validation_retry_limit()
     retry_strategy = _get_tool_retry_strategy()
-    total_attempts = retry_limit + 1
+    required_workspace_tool = _specific_required_workspace_tool_name(
+        tool_choice,
+        tools,
+    )
+    # An explicitly required client workspace tool is a protocol-level
+    # obligation. Live Codex restart/resume evidence showed two consecutive
+    # false "tool unavailable" replies before recovery. Give this narrow case
+    # one additional focused repair opportunity without broadening the generic
+    # validation retry budget.
+    workspace_required_bonus = 1 if required_workspace_tool else 0
+    total_attempts = retry_limit + 1 + workspace_required_bonus
     last_summary = "tool_call_validation_failed"
     last_parsed: Dict[str, Any] = {"mode": "final", "content": "", "tool_calls": []}
     pending_retry_messages: Optional[List[Dict[str, str]]] = None
