@@ -127,12 +127,27 @@ def test_switches_from_fixed_fine_fill_to_tiny_arm_near_boundary():
         400,
         858,
     )
+    # Live S3 reached margin=929 with the previous fine step at 858 and the
+    # next fine turn failed before reporting usage. Keep one fine-step plus the
+    # fixed guard as headroom so this point switches to tiny arm turns.
+    assert probe.should_arm_before_next_fine(
+        929,
+        858,
+    )
+    assert probe.should_arm_before_next_fine(
+        1_370,
+        858,
+    )
     assert not probe.should_arm_before_next_fine(
-        909,
+        1_371,
         858,
     )
     assert probe.should_arm_before_next_fine(
         400,
+        None,
+    )
+    assert not probe.should_arm_before_next_fine(
+        513,
         None,
     )
     assert not probe.should_arm_before_next_fine(
