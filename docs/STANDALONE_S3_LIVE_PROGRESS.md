@@ -243,3 +243,27 @@ This is classified as an operator/runtime-environment mismatch rather than a
 candidate runtime failure. Keep `standalone-dev` frozen and rerun the Desktop
 gate with `.venv/bin/python`. No candidate SHA change is required for this
 attempt.
+
+
+### Desktop E2E operator steps completed, verification pending
+
+On exact candidate `4adeb956b1f31255a86c56354e3a06eead458b61`,
+the operator completed the three required real Codex Desktop prompts.
+
+Observed Desktop results:
+
+```text
+context step 1: CONTEXT_READY
+context step 2: real client exec_command used, final CONTEXT_PASS
+multi-file step: files read/modified, unit tests executed, 3 tests passed
+```
+
+The first two context prompts were run in the same Desktop thread. The
+multi-file prompt was run in a separate Desktop thread, matching the release
+gate procedure.
+
+Candidate-bound verification has not yet been recorded. Next action:
+
+```text
+.venv/bin/python tools/standalone_desktop_e2e_gate.py verify
+```
