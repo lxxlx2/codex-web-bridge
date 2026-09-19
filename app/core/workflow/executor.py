@@ -993,6 +993,13 @@ class WorkflowExecutor(
                     context=context,
                 ):
                     return
+                # ChatGPT accepts typing while a previous answer is still
+                # generating. Guard before mutating the shared composer so a
+                # blocked send cannot strand the next prompt in the UI.
+                if not self._wait_for_chatgpt_idle_before_fill(
+                    target_key
+                ):
+                    return
                 self._execute_fill(selector, prompt, target_key, optional)
 
             elif action in ("STREAM_WAIT", "STREAM_OUTPUT"):
