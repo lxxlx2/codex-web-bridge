@@ -16,7 +16,7 @@ Private runtime and diagnostic state should remain under `~/.uwa` or another use
 
 ## Network defaults
 
-The release candidate must keep loopback-only control surfaces and conservative defaults unless a user explicitly opts into remote access. CORS, unsafe Python execution and remote exposure must not silently enable themselves.
+The release candidate must bind its local control API to `127.0.0.1` by default and keep other control surfaces loopback-only unless a user explicitly opts into remote access. CORS, unsafe Python execution and remote exposure must not silently enable themselves.
 
 ## Tool authority
 
