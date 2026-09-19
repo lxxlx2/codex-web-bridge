@@ -732,6 +732,38 @@ the wrapped method unchanged.
 No release evidence from this failed SHA is reusable. Exact-SHA S3 and all
 downstream release gates must be regenerated after validation.
 
+
+## 2026-09-19 Release-metadata CI dependency closure
+
+The exact S3 candidate `6e16543df85568b6fe2ce4fcd44012bd1eaae679`
+closed the full live S3 gate:
+
+```text
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+Before collecting downstream Desktop/install/S4 evidence, the exact-SHA GitHub
+Actions result was checked. `scaffold-static`, `runtime-import`, and
+`codex-regression` were green, but `release-metadata` failed during test
+collection with:
+
+```text
+ModuleNotFoundError: No module named 'DrissionPage'
+```
+
+The release-metadata job installed only `pytest`, while the current Desktop
+release-gate test import graph reaches the standalone ChatGPT browser surface
+modules and therefore requires the normal runtime dependencies. Other runtime
+jobs already install `requirements.txt`.
+
+The release-metadata job now installs `requirements.txt` before its focused
+release-gate tests. This is CI dependency closure only; runtime behavior is
+unchanged.
+
+Because the workflow commit changes the candidate SHA, the successful S3 result
+on `6e16543...` remains historical evidence and must be regenerated on the new
+exact candidate before Desktop E2E, install smoke, S4, merge, or tagging.
+
 ## Gate state
 
 ```text
