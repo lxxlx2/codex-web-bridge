@@ -279,5 +279,100 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             self.assertIn("candidate_commit=" + "b" * 40, text)
 
 
+    def test_rate_limit_cooldown_waits_then_rechecks_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+
+            with (
+                patch.object(s3.time, "sleep") as sleep_mock,
+                patch.object(
+                    s3,
+                    "_passive_surface_recheck",
+                    return_value={"blocking_reason": "none"},
+                ) as recheck_mock,
+                patch.object(
+                    s3.time,
+                    "monotonic",
+                    side_effect=[100.0, 103.0],
+                ),
+            ):
+                s3._cooldown_after_rate_limit_notice(
+                    private_dir,
+                    seconds=3,
+                )
+
+            sleep_mock.assert_called_once_with(3)
+            recheck_mock.assert_called_once_with(private_dir)
+            payload = json.loads(
+                (private_dir / "rate-limit-cooldown.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(payload["configured_seconds"], 3)
+            self.assertEqual(payload["surface_recheck"], "pass")
+
+    def test_live_gate_cools_down_when_preflight_dismissed_rate_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw) / "private"
+            acceptance_root = Path(raw) / "acceptance"
+
+            with (
+                patch.object(s3.core, "_preflight_repo"),
+                patch.object(s3, "_candidate_commit", return_value="c" * 40),
+                patch.object(s3.core, "_configure_uwa_route"),
+                patch.object(
+                    s3.core,
+                    "_start_standalone_listener",
+                    return_value="STARTED",
+                ),
+                patch.object(s3.core, "_health_ready", return_value={}),
+                patch.object(
+                    s3.core,
+                    "_validation_python",
+                    return_value=sys.executable,
+                ),
+                patch.object(
+                    s3,
+                    "_quiet_codex_desktop",
+                    return_value=False,
+                ),
+                patch.object(s3.core, "_wait_request_cleanup"),
+                patch.object(s3, "_reset_acceptance_chatgpt_target"),
+                patch.object(
+                    s3,
+                    "_run_surface_preflight",
+                    return_value={
+                        "ok": True,
+                        "actions": [
+                            "dismiss_rate_limit_notice",
+                            "new_chat",
+                        ],
+                    },
+                ),
+                patch.object(
+                    s3,
+                    "_cooldown_after_rate_limit_notice",
+                ) as cooldown_mock,
+                patch.object(s3.core, "_restart_standalone_listener"),
+                patch.object(
+                    s3,
+                    "_passive_surface_recheck",
+                    return_value={"blocking_reason": "none"},
+                ),
+                patch.object(s3.core, "run", return_value=0),
+                patch.object(s3, "_promote_core_result"),
+                patch.object(s3, "_restore_codex_desktop"),
+            ):
+                rc = s3.run(
+                    acceptance_root=acceptance_root,
+                    private_root=private_root,
+                    turn_timeout_sec=60,
+                    compaction_timeout_sec=60,
+                )
+
+            self.assertEqual(rc, 0)
+            cooldown_mock.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
