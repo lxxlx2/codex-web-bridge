@@ -463,5 +463,98 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             )
 
 
+    def test_recent_rate_limit_marker_waits_remaining_window(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            with (
+                patch.object(s3.time, "time", return_value=1060.0),
+                patch.object(s3.time, "sleep") as sleep_mock,
+            ):
+                remaining = s3._recent_rate_limit_remaining_seconds(
+                    private_root,
+                    cooldown_seconds=180,
+                )
+                self.assertEqual(remaining, 120.0)
+                with patch.object(
+                    s3,
+                    "_recent_rate_limit_remaining_seconds",
+                    return_value=remaining,
+                ):
+                    s3._wait_for_recent_rate_limit_window(
+                        private_root,
+                    )
+
+            sleep_mock.assert_called_once_with(120.0)
+
+    def test_expired_recent_rate_limit_marker_does_not_wait(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            with (
+                patch.object(s3.time, "time", return_value=1300.0),
+                patch.object(s3.time, "sleep") as sleep_mock,
+            ):
+                remaining = s3._recent_rate_limit_remaining_seconds(
+                    private_root,
+                    cooldown_seconds=180,
+                )
+
+            self.assertEqual(remaining, 0.0)
+            sleep_mock.assert_not_called()
+
+    def test_live_turn_pacer_waits_for_minimum_gap(self) -> None:
+        previous = s3.core._LAST_LIVE_TURN_FINISHED_AT
+        try:
+            s3.core._LAST_LIVE_TURN_FINISHED_AT = 100.0
+            with (
+                patch.object(
+                    s3.core.time,
+                    "monotonic",
+                    return_value=110.0,
+                ),
+                patch.object(
+                    s3.core.time,
+                    "sleep",
+                ) as sleep_mock,
+            ):
+                s3.core._pace_before_live_turn(
+                    gap_seconds=30,
+                )
+
+            sleep_mock.assert_called_once_with(20.0)
+        finally:
+            s3.core._LAST_LIVE_TURN_FINISHED_AT = previous
+
+    def test_live_turn_pacer_skips_when_gap_already_elapsed(self) -> None:
+        previous = s3.core._LAST_LIVE_TURN_FINISHED_AT
+        try:
+            s3.core._LAST_LIVE_TURN_FINISHED_AT = 100.0
+            with (
+                patch.object(
+                    s3.core.time,
+                    "monotonic",
+                    return_value=140.0,
+                ),
+                patch.object(
+                    s3.core.time,
+                    "sleep",
+                ) as sleep_mock,
+            ):
+                s3.core._pace_before_live_turn(
+                    gap_seconds=30,
+                )
+
+            sleep_mock.assert_not_called()
+        finally:
+            s3.core._LAST_LIVE_TURN_FINISHED_AT = previous
+
+
 if __name__ == "__main__":
     unittest.main()
