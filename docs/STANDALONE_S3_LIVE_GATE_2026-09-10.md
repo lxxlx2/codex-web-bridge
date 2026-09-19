@@ -462,6 +462,41 @@ request inside the same account-side rate-limit window.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Burst limiter after first restart seed
+
+The S3 run on `778544286eb0b3ed6e767a2ec2f0ac23b9b82a39`
+started from a clean surface and reached the first restart seed response:
+
+```text
+CONTEXT_READY
+```
+
+The next resume request was then blocked almost immediately by a fresh ChatGPT
+Web "requests too frequent" dialog, and the outer gate reported
+`chatgpt_web_rate_limited`.
+
+This establishes two separate limiter behaviors:
+
+1. A fresh target can hide a limiter that was triggered by a prior S3 run, so
+   stale-dialog detection alone is insufficient across runs.
+2. Even inside one clean run, back-to-back live acceptance turns can form a
+   burst that triggers the account-side limiter.
+
+The S3 wrapper now persists only a timestamp/class marker for the latest
+`chatgpt_web_rate_limited` failure. A subsequent run honors the remaining
+180-second quiet window even if target reset removed the old dialog. The S3
+core also enforces a default 30-second minimum gap between completed live Codex
+turns, including restart seed/resume and every compaction-probe round. This is
+acceptance-only pacing; runtime request behavior is unchanged.
+
+The cross-run quiet window is configurable with
+`UWA_S3_RECENT_RATE_LIMIT_COOLDOWN_SEC` (0-900 seconds). Per-turn pacing is
+configurable with `UWA_S3_MIN_LIVE_TURN_GAP_SEC` (0-120 seconds).
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
