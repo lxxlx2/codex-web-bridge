@@ -339,3 +339,30 @@ is the explicit `127.0.0.1` security-default marker.
 This requires a documentation commit on `standalone-dev`, which moves the
 candidate SHA. Existing S3/Desktop/install results remain valid historical
 evidence but must be regenerated on the final frozen SHA before release.
+
+
+### Final security documentation fix landed
+
+The only remaining static S4 documentation gap was fixed on `standalone-dev`
+by explicitly documenting the default loopback bind:
+
+```text
+127.0.0.1
+```
+
+New exact candidate SHA:
+
+```text
+131abfd9cfe6d68ede3e3b34f195ad56ea8aa20f
+```
+
+Commit:
+
+```text
+131abfd  Document loopback security default
+```
+
+No runtime code changed in this candidate transition. Because the release policy
+requires exact-SHA evidence, the previous S3, Desktop E2E, and install-smoke
+PASS results on `4adeb956...` are historical and must be regenerated on
+`131abfd...` before the final S4 candidate-match gate can pass.
