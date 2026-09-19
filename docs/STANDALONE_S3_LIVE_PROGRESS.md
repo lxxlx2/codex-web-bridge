@@ -149,3 +149,51 @@ termination. Existing image/recovery branches remain separate.
 
 Local validation is now the next step. Do not run full live S3 until the focused
 test and repository full pytest suite pass on this exact head.
+
+
+### 2026-09-19 exact candidate S3 closed
+
+Candidate:
+
+```text
+4adeb956b1f31255a86c56354e3a06eead458b61
+```
+
+Local validation on the exact candidate:
+
+```text
+tests/test_stream_monitor_terminal_state.py
+6 passed
+
+related browser/send regressions
+31 passed
+
+full suite
+501 passed, 22 warnings
+```
+
+Candidate-bound live S3 then completed successfully:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+S3_PHASE=COMPACTION_RECOVERY_PASS
+S3_REPO_PREFLIGHT=PASS
+S3_LISTENER_TRANSITION=RESTARTED
+S3_LOCAL_SAFETY_REGRESSION=PASS
+S3_UWA_HEALTH=PASS
+S3_REAL_CLIENT_TOOL=PASS
+S3_SAME_THREAD_RESTART_RECOVERY=PASS
+S3_NATIVE_AUTO_COMPACTION=PASS
+S3_REMOTE_V2_COMPACTION=PASS
+S3_POST_COMPACTION_RECOVERY=PASS
+S3_ROUTE_UWA_CHATGPT_HIGH=PASS
+S3_REQUEST_MANAGER_CLEAN=PASS
+S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+This closes the active S3 live blocker on the exact candidate SHA. Do not move
+`standalone-dev` before collecting the remaining candidate-bound release
+evidence. The next release work is Desktop E2E, clean-checkout install smoke,
+CI verification, and S4 release-gate evidence on the same exact SHA.
