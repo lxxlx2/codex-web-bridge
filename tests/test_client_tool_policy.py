@@ -1100,3 +1100,153 @@ def test_missing_task_clarification_without_compacted_workspace_state_is_not_for
         parsed=parsed,
     ) is False
 
+def _successful_acceptance_workspace_validation_history():
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "ORBIT-5921\n\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "The exact workspace validation command must run first. "
+                "If it succeeds, write ORBIT-5921 plus one newline to "
+                "large_context/result.txt, then read it back with exec_command, "
+                "and only then reply LARGE_CONTEXT_PASS."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_validate",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && test -f .uwa_codex_acceptance '
+                            '&& test -d large_context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_validate",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "/Users/jerson/uwa-codex-acceptance\n"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_inspect",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"pwd && ls -la large_context"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_inspect",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "/Users/jerson/uwa-codex-acceptance\n"
+                "total 0\n"
+            ),
+        },
+    ]
+
+
+def test_repairs_false_acceptance_workspace_mismatch_after_successful_validation(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_WORKSPACE_MISMATCH",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_successful_acceptance_workspace_validation_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is True
+
+
+def test_false_acceptance_workspace_mismatch_repairs_into_pending_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            "ACCEPTANCE_WORKSPACE_MISMATCH",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt '
+                '&& cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=_successful_acceptance_workspace_validation_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages)
+            or next(replies)
+        ),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 2
+    assert "completed with exit code 0" in seen[1][1]["content"]
+    assert "ORBIT-5921" in seen[1][1]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+
+
+def test_real_failed_acceptance_workspace_validation_keeps_mismatch_sentinel(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = _successful_acceptance_workspace_validation_history()
+    messages[2] = {
+        "role": "tool",
+        "tool_call_id": "call_validate",
+        "name": "exec_command",
+        "content": "Process exited with code 1\nFinal output:\n",
+    }
+
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_WORKSPACE_MISMATCH",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is False
+
