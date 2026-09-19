@@ -527,6 +527,36 @@ cooldown window rather than continuing with "harmless" setup traffic.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Adaptive Web rate-limit circuit breaker
+
+The first S3 run on `b0917e5024f85ab0ddc035b59dc82948fb03ae58`
+still hit a fresh Web limiter immediately after `CONTEXT_READY`, even though
+the second live turn was delayed by about 28 seconds. The prior run that had
+triggered the limiter predated persistent rate-limit markers, so this first
+post-change run had no cross-run cooldown state to honor.
+
+The fixed-delay approach was also too weak as a general strategy. OpenAI's
+published guidance for temporary rate limits recommends honoring an explicit
+retry delay when available and otherwise using exponential backoff rather than
+repeated fixed-delay retries. The S3 wrapper now follows that pattern as closely
+as the Web UI permits:
+
+- rate-limit state is honored before any ChatGPT target reset/navigation;
+- repeated rate-limit failures within one hour increment a small persistent
+  streak counter;
+- cross-run cooldown grows exponentially from 180 seconds and is capped at
+  900 seconds;
+- after any recent rate-limit marker, the next recovery run raises the
+  acceptance-only minimum live-turn gap to at least 60 seconds;
+- the existing post-compaction 180-second quiet window remains in place.
+
+The marker stores only timestamp, failure class, and streak count. No
+conversation content is persisted.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
