@@ -704,6 +704,34 @@ of the secondary `*_usage_missing` symptom.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Rate-limit guard wrapper signature regression
+
+The S3 run on `c434e160fabe5be0c4e747f4c430819aa666eafe`
+failed immediately in `restart_seed` before a message was sent. The private
+trace recorded:
+
+```text
+stream disconnected before completion:
+install_chatgpt_web_rate_limit_guard.<locals>.guarded_wait()
+got an unexpected keyword argument 'wait_timeout_override'
+```
+
+The previous pre-fill lifecycle fix extended
+`_wait_for_send_idle_before_action` with the optional
+`wait_timeout_override` keyword. The ChatGPT Web rate-limit guard monkeypatch
+still wrapped the old two-argument signature
+`guarded_wait(self, send_selector)`, so the new S3 pre-fill call failed in the
+wrapper before reaching the executor wait implementation.
+
+The wrapper now forwards `*args, **kwargs` transparently after applying the
+initial-send guard. Regression coverage installs the real wrapper around a fake
+extended wait method and verifies that `wait_timeout_override=300.0` reaches
+the wrapped method unchanged.
+
+No release evidence from this failed SHA is reusable. Exact-SHA S3 and all
+downstream release gates must be regenerated after validation.
+
 ## Gate state
 
 ```text
