@@ -557,6 +557,44 @@ conversation content is persisted.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 False restart-continuity workspace mismatch
+
+The S3 run on `634b3dbba1255a5d078fed60e252a037f44f307c`
+reached restart continuity without a rate-limit failure. The restart resume trace
+showed the exact required validation command completed successfully:
+
+```text
+pwd && test -f .uwa_codex_acceptance && test -d context
+EXIT_CODE=0
+OUTPUT=/Users/jerson/uwa-codex-acceptance
+```
+
+The acceptance workspace independently confirmed both the marker and `context`
+directory were present and the same command returned 0. Nevertheless the Web
+reply was:
+
+```text
+ACCEPTANCE_WORKSPACE_MISMATCH
+```
+
+and `context/result.txt` was never created.
+
+The existing false-mismatch repair was intentionally narrow but only recognized
+the post-compaction `large_context` validation command. The restart-continuity
+gate uses the same acceptance sentinel contract with `context`, so the repair
+did not fire.
+
+The detector now recognizes either canonical acceptance workspace validation:
+`large_context` for post-compaction recovery or `context` for restart
+continuity, while still requiring the acceptance marker and an authoritative
+exit-code-0 client tool result. Real nonzero validation results remain untouched.
+The repair instruction now refers to the current acceptance request or compacted
+continuation state so it is correct for both paths.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
