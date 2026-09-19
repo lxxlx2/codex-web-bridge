@@ -145,6 +145,18 @@ _POST_TOOL_UNAVAILABLE_PATTERNS = (
         r".{0,80}(?:没有|不存在|不包含|不含).{0,50}(?:这个|该|对应的)?(?:客户端)?工具",
         re.IGNORECASE | re.DOTALL,
     ),
+    # post_tool_this_round_no_callable_client_tool:
+    # Live restart-resume wording after prior successful exec_command calls:
+    # "当前这一轮没有可调用的客户端 exec_command ... 缺少 ... 最终读取确认"
+    re.compile(
+        r"(?:当前(?:这)?一轮|这一轮|本轮|这轮)"
+        r".{0,50}(?:没有|不存在|不具备|缺少)"
+        r".{0,40}(?:可调用的?|可用的?)"
+        r".{0,30}(?:客户端)?"
+        r"(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)"
+        r".{0,180}(?:读取|回读|确认|验证|read|read back|verify|confirm)",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 _ROOT_WORKDIR_EXPLICIT_PATTERNS = (
