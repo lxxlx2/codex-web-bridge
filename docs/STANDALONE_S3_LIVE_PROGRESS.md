@@ -67,3 +67,38 @@ ChatGPT composer was filled before an older generation had become idle. That
 incident led to the pre-fill idle guard and extended S3 pre-fill timeout. The
 current failure must be compared against its private trace before deciding
 whether this is the same lifecycle class or a new failure.
+
+
+### Direct failure classification
+
+The private coarse-turn trace confirms the direct failure:
+
+```text
+stream disconnected before completion: send_blocked_by_preexisting_generation
+turn.failed
+```
+
+The matching UWA log shows the first coarse request entered the ChatGPT
+composer pre-fill idle guard at 21:24:17, detected an existing generation/stop
+state, waited the full S3 override of 300 seconds, and failed at 21:29:17 before
+mutating the input box:
+
+```text
+[SEND] 发送前检测到页面仍处于旧生成/停止态，等待其结束后再提交本次消息 (timeout=300.0s)
+[SEND] 等待旧生成态结束超时，本次发送动作尚未执行
+send_blocked_by_preexisting_generation
+```
+
+This proves the newer pre-fill ordering fix is working as intended: the coarse
+prompt was not stranded in the composer. The remaining blocker is that the
+previous seed turn can leave the ChatGPT surface in a generation/stop state for
+more than five minutes even after the visible exact reply
+`LARGE_CONTEXT_READY` has already appeared.
+
+The next implementation investigation should focus on terminal-state
+reconciliation after a Web response becomes stable/exact. The bridge must not
+start a new composer mutation while the old generation state remains live, but
+the S3 path needs a safe way to distinguish a genuinely still-running response
+from a stale UI generation state after the expected response is already stable.
+No full S3 rerun should be performed until this lifecycle condition is handled
+or a focused reproduction proves the state clears on its own.
