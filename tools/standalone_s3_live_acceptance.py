@@ -326,7 +326,8 @@ def _rate_limit_recovery_turn_gap_seconds() -> int:
 def _apply_rate_limit_recovery_pacing(
     private_root: Path,
 ) -> None:
-    if _rate_limit_streak(private_root) <= 0:
+    streak = _rate_limit_streak(private_root)
+    if streak <= 0:
         return
 
     recovery_gap = _rate_limit_recovery_turn_gap_seconds()
@@ -342,10 +343,16 @@ def _apply_rate_limit_recovery_pacing(
     except ValueError:
         current = 0
 
-    effective = max(current, recovery_gap)
+    # One prior limiter raises the normal live-turn gap to the configured
+    # recovery floor. Repeated limiter hits mean that floor was insufficient,
+    # so increase pacing proportionally while preserving the global 120-second
+    # safety cap used by the live turn pacer.
+    adaptive_gap = min(120, recovery_gap * streak)
+    effective = max(current, adaptive_gap)
     os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"] = str(
         effective
     )
+    _emit(f"S3_RATE_LIMIT_STREAK={streak}")
     _emit(
         f"S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC={effective}"
     )
@@ -596,6 +603,10 @@ def _external_surface_failure_after_core_failure(private_dir: Path) -> GateFailu
                     indent=2,
                 )
                 + "\n",
+            )
+            _emit(
+                "S3_RATE_LIMIT_ACK_DISMISSED="
+                + ("YES" if cleanup.get("dismissed") else "NO")
             )
             return exc
 
