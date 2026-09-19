@@ -1374,3 +1374,104 @@ def test_real_failed_restart_workspace_validation_keeps_mismatch_sentinel(monkey
         parsed=parsed,
     ) is False
 
+LIVE_POST_TOOL_TOOLSET_REFUSAL = (
+    "无法执行该 exec_command 调用，因为当前实际可用工具集中没有这个客户端工具。"
+    "我不能伪造 <adapter_calls> 并将其当作已执行结果。"
+)
+
+
+def _post_compaction_write_completed_history():
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "ORBIT-5921\n\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Workspace validation succeeded. "
+                "large_context/result.txt has been written with ORBIT-5921. "
+                "One real exec_command readback remains; verify the exact file "
+                "content and only then reply LARGE_CONTEXT_PASS."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_write_result",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"echo ORBIT-5921 > large_context/result.txt"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_write_result",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+            ),
+        },
+    ]
+
+
+def test_detects_live_post_tool_current_toolset_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_POST_TOOL_TOOLSET_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_post_compaction_write_completed_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is True
+
+
+def test_live_post_tool_current_toolset_refusal_repairs_into_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            LIVE_POST_TOOL_TOOLSET_REFUSAL,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=_post_compaction_write_completed_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages)
+            or next(replies)
+        ),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 2
+    assert "prior workspace client tool call/result" in seen[1][0]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+
