@@ -1016,3 +1016,87 @@ def test_specific_required_exec_gets_one_extra_repair_attempt(monkeypatch):
     assert "Attempt: 2/3" in seen[2][1]["content"]
     assert "next response must be one executable client-tool call" in seen[2][1]["content"]
 
+LIVE_POST_COMPACTION_MISSING_TASK_REPLY = (
+    "请继续发送这一轮需要我执行的具体任务或验证步骤。"
+)
+
+
+def test_detects_live_post_compaction_missing_task_clarification(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_POST_COMPACTION_MISSING_TASK_REPLY,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_POST_COMPACTION_MISSING_TASK_REPLY,
+        parsed=parsed,
+    ) is True
+
+
+def test_live_missing_task_clarification_repairs_into_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            LIVE_POST_COMPACTION_MISSING_TASK_REPLY,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
+                '&& cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+
+    result = complete_tool_calling_roundtrip(
+        messages=_compacted_workspace_messages(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages)
+            or next(replies)
+        ),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 2
+    assert "already recorded in the compacted continuation state" in seen[1][1]["content"]
+    assert "ORBIT-5921" in seen[1][1]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+    assert "Do not ask" not in seen[1][1]["content"] or "task" in seen[1][1]["content"]
+
+
+def test_missing_task_clarification_without_compacted_workspace_state_is_not_forced(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_POST_COMPACTION_MISSING_TASK_REPLY,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[
+            {
+                "role": "user",
+                "content": "我们先聊一下后续计划。",
+            }
+        ],
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=LIVE_POST_COMPACTION_MISSING_TASK_REPLY,
+        parsed=parsed,
+    ) is False
+
