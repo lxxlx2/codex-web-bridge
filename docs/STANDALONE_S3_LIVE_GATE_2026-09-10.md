@@ -626,6 +626,35 @@ recovery into a real `exec_command` readback of
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Premature durable-state-only completion
+
+The S3 run on `a950830b76d4fc7d3794e2e8c816e32d92deac36`
+again passed restart continuity and compaction cooldown, then reached
+post-compaction recovery. The Web model recovered the durable token correctly
+but stopped with:
+
+```text
+当前上下文已恢复。需要继续保留的精确值是：ORBIT-5921。
+```
+
+This is a different continuation failure from tool unavailability. The model
+successfully recovered durable exact state but treated that acknowledgement as
+task completion even though `[ACTIVE CONTINUATION STATE]` still contained
+unfinished client-workspace actions.
+
+The workspace repair policy now recognizes this narrow state-only completion
+shape only when a compacted workspace continuation is present. It directs the
+model to execute the next unfinished workspace step instead of restating the
+recovered token. Ordinary requests that merely ask whether a value was
+remembered remain unaffected.
+
+Regression coverage uses the exact live Chinese reply, verifies conversion into
+an `exec_command` continuation, and includes a non-compacted negative case.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
