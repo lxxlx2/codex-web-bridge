@@ -33,6 +33,8 @@ DEFAULT_COARSE_BYTES = 46_000
 DEFAULT_FINE_BYTES = 2_048
 DEFAULT_COARSE_GUARD_TOKENS = 8_000
 DEFAULT_ARM_GUARD_TOKENS = 512
+DEFAULT_TRANSITION_RESERVE_TOKENS = 256
+DEFAULT_TRANSITION_MIN_BYTES = 1024
 DEFAULT_MAX_COARSE_ROUNDS = 14
 DEFAULT_MAX_FINE_ROUNDS = 12
 DEFAULT_MAX_ARM_ROUNDS = 8
@@ -156,6 +158,77 @@ def should_arm_before_next_fine(
         <= previous_fine_step + DEFAULT_ARM_GUARD_TOKENS
     )
 
+
+
+def transition_target_bytes(
+    *,
+    margin_to_trigger: int,
+    previous_fine_step: int | None,
+    fine_bytes: int,
+    reserve_tokens: int = DEFAULT_TRANSITION_RESERVE_TOKENS,
+) -> int | None:
+    """Choose one medium filler before tiny arm turns.
+
+    The live probe observed a ~858-token step from a 2048-byte fine filler and
+    only ~48 tokens from each tiny arm turn. When the remaining margin is still
+    hundreds of tokens, jumping directly to tiny arm turns can consume many web
+    requests and hit account-side rate limits.
+
+    Estimate a medium filler from the last measured fine-step slope while
+    reserving a fixed token cushion before the trigger boundary. Return None
+    when the safe estimate would be smaller than the minimum dense filler.
+    """
+
+    if (
+        margin_to_trigger <= reserve_tokens
+        or previous_fine_step is None
+        or previous_fine_step <= 0
+        or fine_bytes < DEFAULT_TRANSITION_MIN_BYTES
+    ):
+        return None
+
+    desired_step = margin_to_trigger - reserve_tokens
+    target = int(
+        fine_bytes
+        * desired_step
+        / previous_fine_step
+    )
+
+    target = min(
+        target,
+        fine_bytes - 1,
+    )
+
+    if target < DEFAULT_TRANSITION_MIN_BYTES:
+        return None
+
+    return target
+
+
+def build_transition_prompt(
+    round_index: int,
+    target_bytes: int,
+) -> str:
+    expected = f"AUTO_COMPACT_TRANSITION_ACK_{round_index:02d}"
+    payload = _dense_deterministic_payload(
+        round_index,
+        target_bytes,
+    )
+    prompt = (
+        "P1.2 auto-compaction transition filler.\n"
+        "Do not call tools. Do not search files, logs, memory stores, or local "
+        "session history. Treat the following deterministic material as context "
+        "that must pass through the same Codex thread.\n"
+        "--- BEGIN TRANSITION FILLER ---\n"
+        + payload
+        + "\n--- END TRANSITION FILLER ---\n"
+        + f"Reply with exactly {expected} and nothing else."
+    )
+    if base.TOKEN in prompt:
+        raise AssertionError(
+            "transition prompt leaked the context token"
+        )
+    return prompt
 
 
 def _dense_deterministic_payload(
@@ -543,6 +616,71 @@ def run(
 
         if not exact:
             print(f"RUN_FAIL fine_contract round={round_index}")
+            return 1
+
+    transition_margin = trigger_limit - active_tokens
+    transition_bytes = transition_target_bytes(
+        margin_to_trigger=transition_margin,
+        previous_fine_step=previous_fine_step,
+        fine_bytes=fine_bytes,
+    )
+
+    if transition_bytes is not None and active_tokens < trigger_limit:
+        round_index += 1
+        expected = f"AUTO_COMPACT_TRANSITION_ACK_{round_index:02d}"
+        previous_active_tokens = active_tokens
+
+        observation = _run_turn_preserving_failure(
+            codex=codex_path,
+            root=root,
+            prompt=build_transition_prompt(
+                round_index,
+                transition_bytes,
+            ),
+            trace_path=trace_dir / f"trigger-probe-{round_index:02d}-transition.jsonl",
+            thread_id=thread_id,
+            timeout_sec=timeout_sec,
+        )
+
+        current_cumulative = cumulative_tokens(observation)
+
+        if current_cumulative is None:
+            print(
+                f"RUN_FAIL transition_usage_missing round={round_index}"
+            )
+            return 1
+
+        active_tokens = active_response_tokens(
+            previous_cumulative,
+            current_cumulative,
+        )
+        previous_cumulative = current_cumulative
+
+        transition_step_tokens = max(
+            0,
+            active_tokens - previous_active_tokens,
+        )
+
+        exact = _turn_ok(
+            observation,
+            thread_id=thread_id,
+            expected_reply=expected,
+        )
+
+        print(
+            f"PHASE=TRANSITION ROUND={round_index:02d} "
+            f"ACK_EXACT={'YES' if exact else 'NO'} "
+            f"TARGET_BYTES={transition_bytes} "
+            f"ACTIVE_LAST_TOKENS={active_tokens} "
+            f"STEP_TOKENS={transition_step_tokens} "
+            f"MARGIN_TO_TRIGGER={trigger_limit - active_tokens} "
+            f"TOOL_EFFECTS={observation.tool_effect_count}"
+        )
+
+        if not exact:
+            print(
+                f"RUN_FAIL transition_contract round={round_index}"
+            )
             return 1
 
     arm_rounds = 0
