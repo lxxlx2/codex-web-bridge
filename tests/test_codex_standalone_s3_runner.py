@@ -620,5 +620,102 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             self.assertEqual(events[:2], ["wait", "reset"])
 
 
+    def test_repeated_rate_limits_use_exponential_cross_run_backoff(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            first = json.loads(
+                s3._rate_limit_marker_path(private_root).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(first["streak"], 1)
+
+            with patch.object(s3.time, "time", return_value=1100.0):
+                s3._record_rate_limit_marker(private_root)
+
+            second = json.loads(
+                s3._rate_limit_marker_path(private_root).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(second["streak"], 2)
+
+            with patch.object(s3.time, "time", return_value=1100.0):
+                remaining = s3._recent_rate_limit_remaining_seconds(
+                    private_root
+                )
+
+            self.assertEqual(remaining, 360.0)
+
+    def test_old_rate_limit_marker_resets_streak(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            with patch.object(s3.time, "time", return_value=5000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            payload = json.loads(
+                s3._rate_limit_marker_path(private_root).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(payload["streak"], 1)
+
+    def test_recent_rate_limit_raises_recovery_turn_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+
+            old = os.environ.get(
+                "UWA_S3_MIN_LIVE_TURN_GAP_SEC"
+            )
+            old_recovery = os.environ.get(
+                "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+            )
+            try:
+                os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"] = "30"
+                os.environ[
+                    "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+                ] = "60"
+
+                s3._apply_rate_limit_recovery_pacing(
+                    private_root
+                )
+
+                self.assertEqual(
+                    os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"],
+                    "60",
+                )
+            finally:
+                if old is None:
+                    os.environ.pop(
+                        "UWA_S3_MIN_LIVE_TURN_GAP_SEC",
+                        None,
+                    )
+                else:
+                    os.environ[
+                        "UWA_S3_MIN_LIVE_TURN_GAP_SEC"
+                    ] = old
+
+                if old_recovery is None:
+                    os.environ.pop(
+                        "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC",
+                        None,
+                    )
+                else:
+                    os.environ[
+                        "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+                    ] = old_recovery
+
+
 if __name__ == "__main__":
     unittest.main()
