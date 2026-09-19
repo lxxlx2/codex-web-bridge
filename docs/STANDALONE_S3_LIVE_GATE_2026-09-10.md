@@ -263,6 +263,39 @@ Runtime compaction behavior is unchanged; this is acceptance-probe calibration o
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Full-history resume affinity / HTTP 413
+
+The S3 run on `8763aaba444a90acff8fce268682eeac3e7b580d` validated the adaptive transition calibration:
+
+```text
+PHASE=FINE ARM_SWITCH=YES MARGIN_TO_TRIGGER=929 PREVIOUS_FINE_STEP=858
+PHASE=TRANSITION ROUND=09 ACK_EXACT=YES TARGET_BYTES=1606
+ACTIVE_LAST_TOKENS=72908 STEP_TOKENS=687 MARGIN_TO_TRIGGER=242
+PHASE=ARM ROUND=12 ... MARGIN_TO_TRIGGER=99
+```
+
+The next arm turn failed before usage was emitted:
+
+```text
+RUN_FAIL arm_usage_missing round=13
+turn.failed: ChatGPT Web completed without an assistant message or client function call
+```
+
+The browser log exposed the real backing failure as HTTP 413, "message too long". The same evidence also showed that ordinary `codex exec resume` probe turns were repeatedly sent with:
+
+```text
+web_session_reused=False browser_input=full
+```
+
+The Codex CLI full-history resume shape does not necessarily carry a `previous_response_id`, so response-id-only affinity could not recognize that each request strictly extended the already-open ChatGPT conversation. The bridge therefore created/replayed full reconstructed history on every probe turn until the Web message-size limit was reached.
+
+The bridge now maintains a second, hash-only history-lineage affinity. After a successful browser round it stores only a SHA-256 digest, message count, validated ChatGPT pathname, model/reasoning identity, and timestamp. When a later no-`previous_response_id` request strictly extends that exact history prefix, the bridge restores the same ChatGPT conversation and sends only the unrepresented suffix. No conversation text is retained by the affinity table. Compacted histories that no longer extend the prior lineage fail closed to the existing fresh-chat/full-history path, allowing a new compacted lineage to be established.
+
+Regression coverage verifies strict-prefix matching, unrelated-history rejection, hash-only storage, suffix construction, and no-`previous_response_id` preparation reuse.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
