@@ -642,3 +642,54 @@ The operator did not manually dismiss the old ChatGPT rate-limit acknowledgement
 modal. Before the next live S3, use the repository helper to dismiss only the
 unique acknowledgement-only rate-limit control in place; this does not send a
 message or retry a failed request.
+
+
+### Repeated rate-limit blocker converted to adaptive acceptance pacing
+
+On exact candidate `32616917489c41963ee2122133d0e0e56dc29541`,
+startup acknowledgement cleanup was explicitly verified:
+
+```text
+ok=True
+dismissed=True
+surface_kind=chat
+composer_empty=True
+blocking_reason=none
+```
+
+The subsequent S3 again passed restart continuity and then hit genuine
+account-side rate limiting during the remote compaction probe. This confirms the
+remaining blocker is request-heavy acceptance pacing rather than the previously
+fixed restart/readback or browser lifecycle defects.
+
+The prior recovery logic already increased cross-run cooldown exponentially but
+kept the per-turn live gap at a fixed 60 seconds for every rate-limit streak.
+That proved insufficient twice.
+
+Current `standalone-dev` head:
+
+```text
+673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa
+```
+
+New acceptance behavior:
+
+```text
+rate-limit streak 1: 60s minimum live-turn gap
+rate-limit streak 2+: 120s minimum live-turn gap
+terminal cleanup prints S3_RATE_LIMIT_ACK_DISMISSED=YES|NO
+```
+
+This changes only release-acceptance pacing and observability. It does not
+change product runtime semantics, reduce compaction proof requirements, retry a
+failed turn, or bypass account-side limits.
+
+Commits:
+
+```text
+26bbfb0  Adapt S3 pacing after repeated rate limits
+176cbde  Cover adaptive S3 rate-limit pacing
+673ca45  Record adaptive rate-limit pacing
+```
+
+Local focused/full validation and CI must pass before the next live S3.
