@@ -132,6 +132,19 @@ _POST_TOOL_UNAVAILABLE_PATTERNS = (
         r".{0,140}(?:exec_command|shell_command|local_shell|客户端工具|执行工具|本地执行工具)",
         re.IGNORECASE | re.DOTALL,
     ),
+    # post_tool_current_toolset_absent:
+    # Live post-compaction wording after a successful write call:
+    # "无法执行该 exec_command 调用，因为当前实际可用工具集中没有这个客户端工具。"
+    # The call name appears before the "toolset has no such client tool"
+    # clause, so older availability patterns did not match it.
+    re.compile(
+        r"(?:无法|不能).{0,40}"
+        r"(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)"
+        r".{0,80}(?:调用|执行)?"
+        r".{0,100}(?:当前|这轮|现在).{0,40}(?:实际)?(?:可用|可调用)?工具(?:集|集合|列表|toolset|tool list)?"
+        r".{0,80}(?:没有|不存在|不包含|不含).{0,50}(?:这个|该|对应的)?(?:客户端)?工具",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 _ROOT_WORKDIR_EXPLICIT_PATTERNS = (
