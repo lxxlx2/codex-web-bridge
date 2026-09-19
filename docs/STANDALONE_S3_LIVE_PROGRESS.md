@@ -221,3 +221,25 @@ Desktop E2E                     PENDING
 clean-checkout install smoke    PENDING
 S4 local release gate           PENDING
 ```
+
+
+### Desktop E2E prepare environment mismatch
+
+The first Desktop E2E prepare attempt on exact candidate
+`4adeb956b1f31255a86c56354e3a06eead458b61` failed during Python import before
+the gate mutated listener, workspace, or Desktop state:
+
+```text
+ModuleNotFoundError: No module named 'DrissionPage'
+```
+
+The operator invoked the documented `python3 tools/standalone_desktop_e2e_gate.py
+prepare` command with the system Python. The repository dependency is declared
+in `requirements.txt` as `DrissionPage>=4.0.0,<5.0.0`, while the already
+validated project virtual environment contains the runtime dependencies and was
+used for S3/local validation.
+
+This is classified as an operator/runtime-environment mismatch rather than a
+candidate runtime failure. Keep `standalone-dev` frozen and rerun the Desktop
+gate with `.venv/bin/python`. No candidate SHA change is required for this
+attempt.
