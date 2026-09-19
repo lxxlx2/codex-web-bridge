@@ -366,3 +366,27 @@ No runtime code changed in this candidate transition. Because the release policy
 requires exact-SHA evidence, the previous S3, Desktop E2E, and install-smoke
 PASS results on `4adeb956...` are historical and must be regenerated on
 `131abfd...` before the final S4 candidate-match gate can pass.
+
+
+### Final candidate static S4 predicates pass
+
+The operator synced `standalone-dev` to:
+
+```text
+131abfd9cfe6d68ede3e3b34f195ad56ea8aa20f
+```
+
+and ran the static S4 predicates directly. All passed:
+
+```text
+S4_DOCS_SYNC=PASS
+S4_VERSION_SYNC=PASS
+S4_SECURITY_CHECK=PASS
+S4_PROVENANCE_CHECK=PASS
+```
+
+This confirms the security-document correction closed the only known static S4
+gap. Treat `131abfd...` as the frozen final candidate unless a release-blocking
+product or release-gate defect is found. Next required evidence is final
+candidate-bound S3 Gate B, then Desktop E2E, install smoke, and the complete S4
+candidate-match gate on this exact SHA.
