@@ -428,6 +428,34 @@ def looks_like_missing_task_clarification(text: str) -> bool:
     )
 
 
+_COMPACTED_STATE_ONLY_ACK_PATTERNS = (
+    re.compile(
+        r"(?:当前)?上下文.{0,20}(?:已|已经)?恢复"
+        r".{0,80}(?:精确值|精确令牌|需要保留|继续保留|remember|retained)"
+        r".{0,80}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:context|state).{0,30}(?:restored|recovered)"
+        r".{0,100}(?:exact|durable).{0,40}(?:value|token|state)"
+        r".{0,100}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+
+
+def looks_like_compacted_state_only_acknowledgement(text: str) -> bool:
+    """Detect a final that merely echoes recovered durable state and stops."""
+
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return any(
+        pattern.search(value)
+        for pattern in _COMPACTED_STATE_ONLY_ACK_PATTERNS
+    )
+
+
 def looks_like_post_tool_unavailable_claim(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
@@ -637,8 +665,13 @@ def should_repair_client_workspace_refusal(
         # action is already present in ACTIVE CONTINUATION STATE.
         return bool(
             compacted_workspace_request
-            and looks_like_missing_task_clarification(
-                assistant_text
+            and (
+                looks_like_missing_task_clarification(
+                    assistant_text
+                )
+                or looks_like_compacted_state_only_acknowledgement(
+                    assistant_text
+                )
             )
         )
 
@@ -663,8 +696,13 @@ def should_repair_client_workspace_refusal(
 
     return bool(
         compacted_workspace_request
-        and looks_like_missing_task_clarification(
-            assistant_text
+        and (
+            looks_like_missing_task_clarification(
+                assistant_text
+            )
+            or looks_like_compacted_state_only_acknowledgement(
+                assistant_text
+            )
         )
     )
 
@@ -795,6 +833,25 @@ def build_client_workspace_repair_messages(
         )
     elif (
         compacted_context
+        and looks_like_compacted_state_only_acknowledgement(
+            assistant_text
+        )
+    ):
+        correction = (
+            "The previous reply stopped after acknowledging that the compacted context and durable exact value were restored. "
+            "That acknowledgement is not task completion. The ACTIVE CONTINUATION STATE below still contains unresolved "
+            "workspace actions that must be executed with the declared client tool."
+        )
+        if repeated:
+            correction += (
+                " This premature state-only completion has already repeated. Do not restate the recovered token or context again."
+            )
+        action = (
+            f"Call {preferred_name} now to execute the next unfinished workspace step from the compacted continuation state. "
+            "Return only the corrected tool-call output."
+        )
+    elif (
+        compacted_context
         and looks_like_missing_task_clarification(
             assistant_text
         )
@@ -869,6 +926,7 @@ __all__ = [
     "looks_like_client_access_refusal",
     "looks_like_local_workspace_request",
     "looks_like_missing_task_clarification",
+    "looks_like_compacted_state_only_acknowledgement",
     "looks_like_post_tool_unavailable_claim",
     "looks_like_false_acceptance_workspace_mismatch",
     "should_repair_client_workspace_refusal",
