@@ -102,3 +102,24 @@ the S3 path needs a safe way to distinguish a genuinely still-running response
 from a stale UI generation state after the expected response is already stable.
 No full S3 rerun should be performed until this lifecycle condition is handled
 or a focused reproduction proves the state clears on its own.
+
+
+### Source-level diagnosis
+
+Inspection of `app/core/stream_monitor.py` found a matching completion hazard in
+the text DOM monitor. When `ctx.content_ever_changed` is true, the ordinary
+stable-text completion paths can break on stable-count/silence or fallback
+silence without requiring `not still_generating`. The code only uses
+`not still_generating` to tighten thresholds; it does not gate those normal
+text exits.
+
+That allows one browser-backed Codex turn to return a stable visible final text
+while ChatGPT still exposes an active stop/generating state. The following turn
+then correctly hits the pre-fill guard and fails after its bounded wait. This
+matches the current live sequence exactly.
+
+The next change should close that lifecycle gap with regression coverage. At a
+minimum, ordinary text completion must not report the turn terminal while the
+same active-turn generation indicator is still live. Any stale-generation
+recovery/interrupt behavior must be separately bounded and proven safe, rather
+than solved by simply extending the next-turn pre-fill timeout.
