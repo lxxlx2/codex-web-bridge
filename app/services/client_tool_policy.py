@@ -482,12 +482,24 @@ def _successful_acceptance_workspace_validation_observed(
         if not command or not _tool_result_exit_zero(message):
             continue
 
-        required = (
+        common_required = (
             "pwd",
             "test -f .uwa_codex_acceptance",
-            "test -d large_context",
         )
-        if all(fragment in command for fragment in required):
+        acceptance_dirs = (
+            "test -d large_context",
+            "test -d context",
+        )
+        if (
+            all(
+                fragment in command
+                for fragment in common_required
+            )
+            and any(
+                fragment in command
+                for fragment in acceptance_dirs
+            )
+        ):
             return True
 
     return False
@@ -765,8 +777,8 @@ def build_client_workspace_repair_messages(
                 "workspace validation as a failure."
             )
         action = (
-            f"Call {preferred_name} now to execute the next unfinished workspace step from the compacted continuation "
-            "state. Return only the corrected tool-call output."
+            f"Call {preferred_name} now to execute the next unfinished workspace step from the current acceptance "
+            "request or compacted continuation state. Return only the corrected tool-call output."
         )
     elif (
         compacted_context
