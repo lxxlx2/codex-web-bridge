@@ -497,6 +497,36 @@ configurable with `UWA_S3_MIN_LIVE_TURN_GAP_SEC` (0-120 seconds).
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Wait before target reset while rate-limited
+
+The S3 run on `b0917e5024f85ab0ddc035b59dc82948fb03ae58`
+still hit a fresh Web rate-limit immediately after the first restart seed even
+with a 30-second inter-turn gap:
+
+```text
+CONTEXT_READY
+S3_INTER_TURN_COOLDOWN_SEC=28.4
+FAILURE_CLASS=restart_resume
+FAILURE_CLASS=chatgpt_web_rate_limited
+```
+
+The visible limiter text refers to temporary access to conversation history,
+not only model-generation quota. This means browser target reset/navigation can
+also be part of the pressure while an account is still inside a recent limiter
+window.
+
+The cross-run rate-limit wait therefore now happens before the runner closes,
+opens, or navigates any ChatGPT Web target. A recent limiter marker acts as a
+circuit breaker around all acceptance browser activity, not just model turns.
+After that quiet window expires, normal fresh-target normalization proceeds.
+
+This matches standard rate-limit practice: stop issuing requests during the
+cooldown window rather than continuing with "harmless" setup traffic.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
