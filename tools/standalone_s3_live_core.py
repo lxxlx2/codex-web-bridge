@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import chatgpt_surface_preflight as surface_preflight
 import codex_auto_compact_trigger_probe as trigger_probe
 import codex_desktop_acceptance as desktop
 import codex_large_context_acceptance as large_context
@@ -55,6 +56,7 @@ DEFAULT_PRIVATE_ROOT = Path.home() / ".uwa" / "standalone-s3"
 DEFAULT_TURN_TIMEOUT_SEC = 600
 DEFAULT_COMPACTION_TIMEOUT_SEC = 900
 DEFAULT_CLEANUP_TIMEOUT_SEC = 30.0
+DEFAULT_COMPACTION_COOLDOWN_SEC = 180
 KNOWN_INTEGRATED_REPO = "lxxlx2/universal-web-api"
 
 
@@ -501,6 +503,101 @@ def _probe_trigger_reply_acceptable(
     )
 
 
+def _compaction_cooldown_seconds() -> int:
+    raw = str(
+        os.getenv(
+            "UWA_S3_COMPACTION_COOLDOWN_SEC",
+            DEFAULT_COMPACTION_COOLDOWN_SEC,
+        )
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_COMPACTION_COOLDOWN_SEC
+    return max(0, min(value, 900))
+
+
+def _cooldown_after_compaction_probe(
+    private_dir: Path,
+    *,
+    seconds: int | None = None,
+) -> None:
+    """Pause after the request-heavy compaction probe before recovery.
+
+    The auto-compaction probe intentionally drives many sequential Web turns.
+    Live evidence showed the account-side rate limiter can fire immediately
+    after AUTO_COMPACT_TRIGGER_OK, just before the single post-compaction
+    recovery turn. Wait quietly, then dismiss only a stale acknowledgement
+    notice in place so the same ChatGPT conversation remains intact.
+    """
+
+    delay = (
+        _compaction_cooldown_seconds()
+        if seconds is None
+        else max(0, min(int(seconds), 900))
+    )
+    print(
+        f"S3_COMPACTION_COOLDOWN_SEC={delay}",
+        flush=True,
+    )
+
+    started = time.monotonic()
+    if delay > 0:
+        time.sleep(delay)
+
+    surface = surface_preflight.dismiss_rate_limit_notice_in_place(
+        timeout_seconds=12.0,
+    )
+    _write_private(
+        private_dir / "compaction-cooldown.json",
+        json.dumps(
+            {
+                "configured_seconds": delay,
+                "elapsed_seconds": round(
+                    max(
+                        0.0,
+                        time.monotonic() - started,
+                    ),
+                    3,
+                ),
+                "dismissed_rate_limit_notice": bool(
+                    surface.get("dismissed")
+                ),
+                "surface_kind": str(
+                    surface.get("surface_kind")
+                    or "unknown"
+                ),
+                "composer_empty": bool(
+                    surface.get("composer_empty")
+                ),
+                "blocking_reason": str(
+                    surface.get("blocking_reason")
+                    or ""
+                ),
+                "ok": bool(surface.get("ok")),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+    )
+
+    if surface.get("ok") is not True:
+        raise GateFailure(
+            "compaction_cooldown",
+            str(
+                surface.get("blocking_reason")
+                or "surface_not_ready"
+            ),
+        )
+
+    print(
+        "S3_PHASE=COMPACTION_COOLDOWN_PASS",
+        flush=True,
+    )
+
+
 def _run_remote_compaction_recovery(
     *,
     codex: str,
@@ -576,6 +673,10 @@ def _run_remote_compaction_recovery(
     thread_id = captured_thread.get("id", "")
     if not thread_id:
         raise GateFailure("remote_compaction_probe", "private_thread_not_captured")
+
+    _cooldown_after_compaction_probe(
+        private_dir,
+    )
 
     try:
         recovery = large_context._run_codex_turn(
