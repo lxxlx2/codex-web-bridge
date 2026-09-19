@@ -6,6 +6,8 @@ from app.api.chat import ChatRequest, ResponsesRequest
 from app.api.codex_responses_v2 import (
     _browser_delta_chat_request,
     _browser_delta_request,
+    _browser_history_suffix_chat_request,
+    _prepare_codex_web_turn_with_history_affinity,
     _clone_for_required_tool_retry,
     _response_id_from_sse,
 )
@@ -16,6 +18,7 @@ from app.services import codex_web_session_affinity as affinity
 def _clear_bindings():
     with affinity._BINDINGS_LOCK:
         affinity._BINDINGS.clear()
+        affinity._HISTORY_BINDINGS.clear()
 
 
 def test_affinity_binding_matches_model_and_reasoning(monkeypatch):
@@ -307,3 +310,144 @@ def test_affinity_tool_result_delta_enables_post_tool_workspace_repair():
         assistant_text=refusal,
         parsed=parsed,
     ) is True
+
+def test_history_affinity_matches_strict_full_history_extension(monkeypatch):
+    _clear_bindings()
+    monkeypatch.setenv("UWA_CODEX_WEB_SESSION_AFFINITY", "true")
+
+    completed_history = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "seed"},
+        {"role": "assistant", "content": "ready"},
+    ]
+
+    assert affinity.bind_history_to_conversation(
+        completed_history,
+        "/c/WEB:history-12345678",
+        model="GPT-5.6 Sol",
+        reasoning="high",
+    )
+
+    extended = completed_history + [
+        {"role": "user", "content": "next"},
+    ]
+
+    binding = affinity.resolve_history_conversation_binding(
+        extended,
+        model="GPT-5.6 Sol",
+        reasoning="high",
+    )
+
+    assert binding is not None
+    assert binding.pathname == "/c/WEB:history-12345678"
+    assert binding.message_count == len(completed_history)
+    assert not hasattr(binding, "messages")
+
+    unrelated = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "different seed"},
+        {"role": "assistant", "content": "ready"},
+        {"role": "user", "content": "next"},
+    ]
+
+    assert affinity.resolve_history_conversation_binding(
+        unrelated,
+        model="GPT-5.6 Sol",
+        reasoning="high",
+    ) is None
+
+
+def test_browser_history_suffix_sends_only_unrepresented_messages():
+    body = ChatRequest(
+        model="chatgpt",
+        messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "seed"},
+            {"role": "assistant", "content": "ready"},
+            {"role": "user", "content": "next"},
+        ],
+        stream=False,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+    )
+
+    delta = _browser_history_suffix_chat_request(
+        body,
+        3,
+    )
+
+    assert delta.messages == [
+        {"role": "user", "content": "next"},
+    ]
+    assert delta.tools == body.tools
+
+
+def test_prepare_reuses_hash_matched_full_history_without_previous_response_id(monkeypatch):
+    _clear_bindings()
+    monkeypatch.setenv("UWA_CODEX_WEB_SESSION_AFFINITY", "true")
+
+    completed_history = [
+        {"role": "user", "content": "seed"},
+        {"role": "assistant", "content": "ready"},
+    ]
+
+    assert affinity.bind_history_to_conversation(
+        completed_history,
+        "/c/WEB:history-87654321",
+        model="GPT-5.6 Sol",
+        reasoning="high",
+    )
+
+    incoming = ResponsesRequest(
+        model="chatgpt",
+        input=completed_history + [
+            {"role": "user", "content": "next"},
+        ],
+        stream=True,
+        reasoning={"effort": "high"},
+    )
+
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.target_web_model",
+        lambda: "GPT-5.6 Sol",
+    )
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.normalize_codex_reasoning",
+        lambda reasoning: "high",
+    )
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.ensure_chatgpt_conversation",
+        lambda pathname: pathname == "/c/WEB:history-87654321",
+    )
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.inspect_codex_web_mode_status",
+        lambda reasoning: {"verified": True},
+    )
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.install_codex_chatgpt_network_tuning",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "app.api.codex_responses_v2.prepare_and_verify_codex_web_mode",
+        lambda reasoning: (_ for _ in ()).throw(
+            AssertionError("fresh chat fallback should not run")
+        ),
+    )
+
+    hydrated, reused, path, reasoning, prefix_count = (
+        _prepare_codex_web_turn_with_history_affinity(incoming)
+    )
+
+    assert hydrated.previous_response_id is None
+    assert reused is True
+    assert path == "/c/WEB:history-87654321"
+    assert reasoning == "high"
+    assert prefix_count == len(completed_history)
+
