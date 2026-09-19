@@ -92,3 +92,53 @@ def test_roundtrip_repairs_post_tool_mount_claim_into_next_exec(monkeypatch):
 
     assert result["mode"] == "tool_calls"
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+
+
+def test_repairs_live_gate_b_readback_refusal_ordering(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _successful_read_history()
+    refusal = (
+        "无法完成所要求的本地 `exec_command` 读取校验，"
+        "因此不能据实回复 `CONTEXT_PASS`。"
+    )
+    parsed = {"mode": "final", "content": refusal, "tool_calls": []}
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_gate_b_readback_refusal_into_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    refusal = (
+        "无法完成所要求的本地 `exec_command` 读取校验，"
+        "因此不能据实回复 `CONTEXT_PASS`。"
+    )
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"cat context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    result = complete_tool_calling_roundtrip(
+        messages=_successful_read_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _messages: next(replies),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
