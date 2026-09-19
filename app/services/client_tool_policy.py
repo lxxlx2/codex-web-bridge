@@ -132,6 +132,18 @@ _POST_TOOL_UNAVAILABLE_PATTERNS = (
         r".{0,140}(?:exec_command|shell_command|local_shell|客户端工具|执行工具|本地执行工具)",
         re.IGNORECASE | re.DOTALL,
     ),
+    # post_tool_readback_refusal_prefix_tool_readback:
+    # Live Gate B wording after successful workspace validation + write:
+    # "无法完成所要求的本地 exec_command 读取校验，因此不能据实回复 CONTEXT_PASS。"
+    # The inability clause precedes the tool name, which in turn precedes the
+    # readback verb, so the two historical readback orderings do not match.
+    re.compile(
+        r"(?:无法|不能|不可|不能够|cannot|can't|unable)"
+        r".{0,100}(?:完成|执行|进行|perform|complete)?"
+        r".{0,100}(?:exec_command|shell_command|local_shell|客户端工具|执行工具|本地执行工具)"
+        r".{0,100}(?:读取|回读|确认|验证|检查|read|read back|verify|confirm|check)",
+        re.IGNORECASE | re.DOTALL,
+    ),
     # post_tool_current_toolset_absent:
     # Live post-compaction wording after a successful write call:
     # "无法执行该 exec_command 调用，因为当前实际可用工具集中没有这个客户端工具。"
