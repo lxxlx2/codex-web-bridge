@@ -311,9 +311,12 @@ def install_chatgpt_web_rate_limit_guard() -> None:
     current_retry = getattr(WorkflowExecutorSendMixin, retry_name)
 
     if not getattr(current_wait, wait_marker, False):
-        def guarded_wait(self: Any, send_selector: str):
+        def guarded_wait(self: Any, *args: Any, **kwargs: Any):
+            # Forward the wrapped wait method transparently. The executor may
+            # add call-site-specific options such as the S3 pre-fill idle
+            # timeout; the transport guard must not narrow that signature.
             guard_before_initial_send(self)
-            return current_wait(self, send_selector)
+            return current_wait(self, *args, **kwargs)
 
         setattr(guarded_wait, wait_marker, True)
         setattr(WorkflowExecutorSendMixin, wait_name, guarded_wait)
