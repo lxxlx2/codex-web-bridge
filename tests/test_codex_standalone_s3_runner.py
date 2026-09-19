@@ -374,5 +374,94 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             cooldown_mock.assert_called_once()
 
 
+    def test_compaction_cooldown_waits_then_preserves_thread_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+
+            with (
+                patch.object(
+                    s3.core.time,
+                    "sleep",
+                ) as sleep_mock,
+                patch.object(
+                    s3.core.time,
+                    "monotonic",
+                    side_effect=[200.0, 203.0],
+                ),
+                patch.object(
+                    s3.core.surface_preflight,
+                    "dismiss_rate_limit_notice_in_place",
+                    return_value={
+                        "ok": True,
+                        "dismissed": True,
+                        "target_count": 1,
+                        "surface_kind": "chat",
+                        "composer_empty": True,
+                        "blocking_reason": "none",
+                    },
+                ) as cleanup_mock,
+            ):
+                s3.core._cooldown_after_compaction_probe(
+                    private_dir,
+                    seconds=3,
+                )
+
+            sleep_mock.assert_called_once_with(3)
+            cleanup_mock.assert_called_once_with(
+                timeout_seconds=12.0,
+            )
+            payload = json.loads(
+                (private_dir / "compaction-cooldown.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(payload["configured_seconds"], 3)
+            self.assertTrue(payload["dismissed_rate_limit_notice"])
+            self.assertEqual(payload["blocking_reason"], "none")
+            self.assertTrue(payload["ok"])
+
+    def test_compaction_cooldown_fails_closed_when_surface_still_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+
+            with (
+                patch.object(
+                    s3.core.time,
+                    "sleep",
+                ),
+                patch.object(
+                    s3.core.time,
+                    "monotonic",
+                    side_effect=[300.0, 303.0],
+                ),
+                patch.object(
+                    s3.core.surface_preflight,
+                    "dismiss_rate_limit_notice_in_place",
+                    return_value={
+                        "ok": False,
+                        "dismissed": True,
+                        "target_count": 1,
+                        "surface_kind": "chat",
+                        "composer_empty": True,
+                        "blocking_reason": "rate_limited",
+                    },
+                ),
+            ):
+                with self.assertRaises(s3.GateFailure) as ctx:
+                    s3.core._cooldown_after_compaction_probe(
+                        private_dir,
+                        seconds=3,
+                    )
+
+            self.assertEqual(
+                ctx.exception.gate,
+                "compaction_cooldown",
+            )
+            self.assertEqual(
+                ctx.exception.detail,
+                "rate_limited",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
