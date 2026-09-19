@@ -37,6 +37,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CDP_BASE = "http://127.0.0.1:9222"
 DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 180
 DEFAULT_RECENT_RATE_LIMIT_COOLDOWN_SEC = 180
+DEFAULT_RECENT_RATE_LIMIT_STREAK_WINDOW_SEC = 3600
+DEFAULT_RATE_LIMIT_RECOVERY_TURN_GAP_SEC = 60
 _RATE_LIMIT_MARKER_NAME = ".last-rate-limit.json"
 _EXTERNAL_SURFACE_FAILURES = {
     "chatgpt_work_surface",
@@ -280,18 +282,112 @@ def _rate_limit_marker_path(private_root: Path) -> Path:
     return private_root.expanduser() / _RATE_LIMIT_MARKER_NAME
 
 
+def _read_rate_limit_marker(private_root: Path) -> dict[str, Any]:
+    path = _rate_limit_marker_path(private_root)
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _rate_limit_streak(private_root: Path) -> int:
+    payload = _read_rate_limit_marker(private_root)
+    try:
+        value = int(payload.get("streak") or 1)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, min(value, 8)) if payload else 0
+
+
+def _rate_limit_recovery_turn_gap_seconds() -> int:
+    raw = str(
+        os.getenv(
+            "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC",
+            DEFAULT_RATE_LIMIT_RECOVERY_TURN_GAP_SEC,
+        )
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_RATE_LIMIT_RECOVERY_TURN_GAP_SEC
+    return max(0, min(value, 120))
+
+
+def _apply_rate_limit_recovery_pacing(
+    private_root: Path,
+) -> None:
+    if _rate_limit_streak(private_root) <= 0:
+        return
+
+    recovery_gap = _rate_limit_recovery_turn_gap_seconds()
+    if recovery_gap <= 0:
+        return
+
+    current_raw = str(
+        os.getenv("UWA_S3_MIN_LIVE_TURN_GAP_SEC", "")
+        or ""
+    ).strip()
+    try:
+        current = int(current_raw) if current_raw else 0
+    except ValueError:
+        current = 0
+
+    effective = max(current, recovery_gap)
+    os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"] = str(
+        effective
+    )
+    _emit(
+        f"S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC={effective}"
+    )
+
+
 def _record_rate_limit_marker(private_root: Path) -> None:
     path = _rate_limit_marker_path(private_root)
     path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
+
+    now = time.time()
+    previous = _read_rate_limit_marker(private_root)
+    try:
+        previous_at = float(
+            previous.get("recorded_at_unix")
+            or 0.0
+        )
+    except (TypeError, ValueError):
+        previous_at = 0.0
+    try:
+        previous_streak = int(
+            previous.get("streak")
+            or (1 if previous else 0)
+        )
+    except (TypeError, ValueError):
+        previous_streak = 1 if previous else 0
+
+    if (
+        previous_at > 0
+        and 0 <= now - previous_at <= DEFAULT_RECENT_RATE_LIMIT_STREAK_WINDOW_SEC
+    ):
+        streak = min(max(1, previous_streak) + 1, 8)
+    else:
+        streak = 1
+
     core._write_private(
         path,
         json.dumps(
             {
-                "recorded_at_unix": time.time(),
+                "recorded_at_unix": now,
                 "failure_class": "chatgpt_web_rate_limited",
+                "streak": streak,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -306,29 +402,28 @@ def _recent_rate_limit_remaining_seconds(
     *,
     cooldown_seconds: int | None = None,
 ) -> float:
-    cooldown = (
-        _recent_rate_limit_cooldown_seconds()
-        if cooldown_seconds is None
-        else max(0, min(int(cooldown_seconds), 900))
-    )
+    if cooldown_seconds is None:
+        base = _recent_rate_limit_cooldown_seconds()
+        streak = max(1, _rate_limit_streak(private_root))
+        cooldown = min(
+            900,
+            base * (2 ** max(0, streak - 1)),
+        )
+    else:
+        cooldown = max(
+            0,
+            min(int(cooldown_seconds), 900),
+        )
     if cooldown <= 0:
         return 0.0
 
-    path = _rate_limit_marker_path(private_root)
+    payload = _read_rate_limit_marker(private_root)
     try:
-        payload = json.loads(
-            path.read_text(encoding="utf-8")
-        )
         recorded = float(
             payload.get("recorded_at_unix")
             or 0.0
         )
-    except (
-        OSError,
-        ValueError,
-        TypeError,
-        json.JSONDecodeError,
-    ):
+    except (TypeError, ValueError):
         return 0.0
 
     age = max(0.0, time.time() - recorded)
@@ -507,6 +602,9 @@ def run(
         # conversation/history access itself, so target reset is not a
         # "free" operation while the account is still hot.
         _wait_for_recent_rate_limit_window(
+            private_root,
+        )
+        _apply_rate_limit_recovery_pacing(
             private_root,
         )
 
