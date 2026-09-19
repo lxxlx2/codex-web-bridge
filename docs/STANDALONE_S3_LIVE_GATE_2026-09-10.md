@@ -237,6 +237,32 @@ Regression coverage reproduces the restart workspace-guard command and verifies 
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Adaptive fine-to-arm transition
+
+The S3 run on `9c733f79be70f7754d6b164c26fd9421d9ab64f0` confirmed the earlier fine-to-arm safety fix but exposed a request-efficiency problem. The probe switched safely with:
+
+```text
+MARGIN_TO_TRIGGER=871
+PREVIOUS_FINE_STEP=858
+```
+
+and then completed eight tiny arm turns. Each arm turn advanced only 47-48 tokens, leaving:
+
+```text
+PHASE=ARM ROUND=16 ... MARGIN_TO_TRIGGER=489
+THRESHOLD_CROSSED=NO
+RUN_FAIL threshold_not_reached
+```
+
+A prior run also reached account-side rate limiting while consuming many tiny arm turns. Increasing the arm-round cap would therefore increase web-request pressure without addressing the underlying calibration.
+
+The probe now performs at most one adaptive medium transition filler before tiny arm turns. It estimates the filler size from the last measured fine-step slope and preserves a 256-token cushion before the trigger boundary. For the observed 871/858 case, this selects roughly 1.4 KiB instead of another 2 KiB fine filler, after which only a small number of arm turns should remain.
+
+Runtime compaction behavior is unchanged; this is acceptance-probe calibration only. Regression coverage includes the exact 871/858 live boundary, the small-margin skip case, and transition prompt bounds.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
