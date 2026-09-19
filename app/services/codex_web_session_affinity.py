@@ -12,6 +12,8 @@ cookies, local storage, prompts and tool output are never stored here.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import threading
@@ -29,6 +31,7 @@ from app.services.chatgpt_web_mode import ChatGPTWebModeError, _find_chatgpt_tab
 logger = get_logger("CODEX_WEB_AFFINITY")
 _CHAT_PATH_RE = re.compile(r"^/c/[A-Za-z0-9:_-]{8,192}$")
 _BINDINGS: "OrderedDict[str, WebConversationBinding]" = OrderedDict()
+_HISTORY_BINDINGS: "OrderedDict[str, HistoryConversationBinding]" = OrderedDict()
 _BINDINGS_LOCK = threading.RLock()
 _PATCH_LOCK = threading.Lock()
 _PATCH_INSTALLED = False
@@ -40,6 +43,16 @@ _REUSE_TAB_IDS_LOCK = threading.RLock()
 @dataclass(frozen=True)
 class WebConversationBinding:
     response_id: str
+    pathname: str
+    model: str
+    reasoning: str
+    bound_at: float
+
+
+@dataclass(frozen=True)
+class HistoryConversationBinding:
+    history_digest: str
+    message_count: int
     pathname: str
     model: str
     reasoning: str
@@ -89,8 +102,17 @@ def _prune_locked(now: Optional[float] = None) -> None:
     expired = [key for key, item in _BINDINGS.items() if item.bound_at < cutoff]
     for key in expired:
         _BINDINGS.pop(key, None)
+    history_expired = [
+        key
+        for key, item in _HISTORY_BINDINGS.items()
+        if item.bound_at < cutoff
+    ]
+    for key in history_expired:
+        _HISTORY_BINDINGS.pop(key, None)
     while len(_BINDINGS) > affinity_max_entries():
         _BINDINGS.popitem(last=False)
+    while len(_HISTORY_BINDINGS) > affinity_max_entries():
+        _HISTORY_BINDINGS.popitem(last=False)
 
 
 def bind_response_to_conversation(
@@ -164,15 +186,125 @@ def resolve_conversation_binding(
         return binding
 
 
+def _history_digest(messages: Any) -> str:
+    if not isinstance(messages, list) or not messages:
+        return ""
+    try:
+        encoded = json.dumps(
+            messages,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def bind_history_to_conversation(
+    messages: Any,
+    pathname: str,
+    *,
+    model: Any,
+    reasoning: Any,
+) -> bool:
+    """Bind a completed full-history transcript to its ChatGPT conversation.
+
+    Only a SHA-256 digest, message count, and validated pathname are retained.
+    Conversation content is never stored in this affinity table.
+    """
+
+    if not affinity_enabled() or not isinstance(messages, list) or not messages:
+        return False
+
+    safe_path = _valid_pathname(pathname)
+    digest = _history_digest(messages)
+    if not safe_path or not digest:
+        return False
+
+    now = time.time()
+    binding = HistoryConversationBinding(
+        history_digest=digest,
+        message_count=len(messages),
+        pathname=safe_path,
+        model=_normalize_model(model),
+        reasoning=_normalize_reasoning(reasoning),
+        bound_at=now,
+    )
+
+    with _BINDINGS_LOCK:
+        _prune_locked(now)
+        _HISTORY_BINDINGS[digest] = binding
+        _HISTORY_BINDINGS.move_to_end(digest)
+        _prune_locked(now)
+
+    logger.info(
+        "[CODEX_WEB_AFFINITY] bound hash-only Codex history lineage "
+        f"messages={binding.message_count} (path redacted)"
+    )
+    return True
+
+
+def resolve_history_conversation_binding(
+    messages: Any,
+    *,
+    model: Any,
+    reasoning: Any,
+) -> Optional[HistoryConversationBinding]:
+    """Resolve a full-history request that strictly extends a bound lineage."""
+
+    if not affinity_enabled() or not isinstance(messages, list) or not messages:
+        return None
+
+    normalized_model = _normalize_model(model)
+    normalized_reasoning = _normalize_reasoning(reasoning)
+
+    with _BINDINGS_LOCK:
+        _prune_locked()
+        candidates = list(reversed(_HISTORY_BINDINGS.items()))
+
+    prefix_digests: Dict[int, str] = {}
+
+    for key, binding in candidates:
+        if binding.model != normalized_model:
+            continue
+        if (
+            normalized_reasoning
+            and binding.reasoning
+            and binding.reasoning != normalized_reasoning
+        ):
+            continue
+        if binding.message_count >= len(messages):
+            continue
+
+        count = binding.message_count
+        digest = prefix_digests.get(count)
+        if digest is None:
+            digest = _history_digest(messages[:count])
+            prefix_digests[count] = digest
+
+        if digest != binding.history_digest:
+            continue
+
+        with _BINDINGS_LOCK:
+            if key in _HISTORY_BINDINGS:
+                _HISTORY_BINDINGS.move_to_end(key)
+        return binding
+
+    return None
+
+
 def affinity_status() -> Dict[str, Any]:
     with _BINDINGS_LOCK:
         _prune_locked()
         count = len(_BINDINGS)
+        history_count = len(_HISTORY_BINDINGS)
     with _REUSE_TAB_IDS_LOCK:
         active_reuse_tabs = len(_REUSE_TAB_IDS)
     return {
         "enabled": affinity_enabled(),
         "binding_count": count,
+        "history_binding_count": history_count,
         "active_reuse_tabs": active_reuse_tabs,
         "ttl_sec": affinity_ttl_sec(),
         "max_entries": affinity_max_entries(),
@@ -308,13 +440,16 @@ def set_codex_workflow_reuse_hint(enabled: bool) -> None:
 
 
 __all__ = [
+    "HistoryConversationBinding",
     "WebConversationBinding",
     "affinity_enabled",
     "affinity_status",
+    "bind_history_to_conversation",
     "bind_response_to_conversation",
     "current_chatgpt_conversation_path",
     "ensure_chatgpt_conversation",
     "install_codex_workflow_reuse_policy",
     "resolve_conversation_binding",
+    "resolve_history_conversation_binding",
     "set_codex_workflow_reuse_hint",
 ]
