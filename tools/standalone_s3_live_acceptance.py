@@ -36,6 +36,8 @@ import standalone_s3_live_core as core
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CDP_BASE = "http://127.0.0.1:9222"
 DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 180
+DEFAULT_RECENT_RATE_LIMIT_COOLDOWN_SEC = 180
+_RATE_LIMIT_MARKER_NAME = ".last-rate-limit.json"
 _EXTERNAL_SURFACE_FAILURES = {
     "chatgpt_work_surface",
     "chatgpt_work_quota_exhausted",
@@ -260,6 +262,97 @@ def _run_surface_preflight(*, python: str, private_dir: Path) -> dict[str, Any]:
     return sanitized
 
 
+def _recent_rate_limit_cooldown_seconds() -> int:
+    raw = str(
+        os.getenv(
+            "UWA_S3_RECENT_RATE_LIMIT_COOLDOWN_SEC",
+            DEFAULT_RECENT_RATE_LIMIT_COOLDOWN_SEC,
+        )
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_RECENT_RATE_LIMIT_COOLDOWN_SEC
+    return max(0, min(value, 900))
+
+
+def _rate_limit_marker_path(private_root: Path) -> Path:
+    return private_root.expanduser() / _RATE_LIMIT_MARKER_NAME
+
+
+def _record_rate_limit_marker(private_root: Path) -> None:
+    path = _rate_limit_marker_path(private_root)
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    core._write_private(
+        path,
+        json.dumps(
+            {
+                "recorded_at_unix": time.time(),
+                "failure_class": "chatgpt_web_rate_limited",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+    )
+
+
+def _recent_rate_limit_remaining_seconds(
+    private_root: Path,
+    *,
+    cooldown_seconds: int | None = None,
+) -> float:
+    cooldown = (
+        _recent_rate_limit_cooldown_seconds()
+        if cooldown_seconds is None
+        else max(0, min(int(cooldown_seconds), 900))
+    )
+    if cooldown <= 0:
+        return 0.0
+
+    path = _rate_limit_marker_path(private_root)
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+        recorded = float(
+            payload.get("recorded_at_unix")
+            or 0.0
+        )
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ):
+        return 0.0
+
+    age = max(0.0, time.time() - recorded)
+    return max(0.0, float(cooldown) - age)
+
+
+def _wait_for_recent_rate_limit_window(
+    private_root: Path,
+) -> None:
+    """Honor a recent account-side limiter even if a fresh tab hides its modal."""
+
+    remaining = _recent_rate_limit_remaining_seconds(
+        private_root
+    )
+    if remaining <= 0:
+        return
+
+    _emit(
+        f"S3_RECENT_RATE_LIMIT_COOLDOWN_SEC={remaining:.1f}"
+    )
+    time.sleep(remaining)
+    _emit("S3_PHASE=RECENT_RATE_LIMIT_COOLDOWN_PASS")
+
+
 def _rate_limit_cooldown_seconds() -> int:
     raw = str(
         os.getenv(
@@ -435,6 +528,10 @@ def run(
         _emit("S3_PHASE=BROWSER_SURFACE_PREFLIGHT_PASS")
         _emit("S3_CHATGPT_SURFACE_PREFLIGHT=PASS")
 
+        _wait_for_recent_rate_limit_window(
+            private_root,
+        )
+
         core_rc = core.run(
             acceptance_root=acceptance_root,
             private_root=outer_private_dir,
@@ -454,6 +551,10 @@ def run(
         )
         return core_rc
     except GateFailure as exc:
+        if exc.gate == "chatgpt_web_rate_limited":
+            _record_rate_limit_marker(
+                private_root,
+            )
         core._write_private(
             outer_private_dir / "result.txt",
             "STANDALONE_S3=FAIL\n"
