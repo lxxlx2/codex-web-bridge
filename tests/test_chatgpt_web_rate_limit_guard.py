@@ -208,3 +208,47 @@ def test_rate_limit_status_is_sanitized(tmp_path, monkeypatch):
         "cooldown_remaining_seconds": 15.0,
         "hits": 1,
     }
+
+def test_installed_wait_guard_forwards_extended_wait_kwargs(monkeypatch):
+    from app.core.workflow.executor_send import WorkflowExecutorSendMixin
+
+    calls = []
+
+    def fake_wait(self, send_selector, *, wait_timeout_override=None):
+        calls.append(
+            {
+                "selector": send_selector,
+                "wait_timeout_override": wait_timeout_override,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(
+        WorkflowExecutorSendMixin,
+        "_wait_for_send_idle_before_action",
+        fake_wait,
+    )
+    monkeypatch.setattr(guard, "_INSTALLED", False)
+    monkeypatch.setattr(
+        guard,
+        "guard_before_initial_send",
+        lambda executor: calls.append({"guarded": executor}),
+    )
+
+    guard.install_chatgpt_web_rate_limit_guard()
+
+    executor = WorkflowExecutorSendMixin.__new__(
+        WorkflowExecutorSendMixin
+    )
+    result = executor._wait_for_send_idle_before_action(
+        "css:[data-testid='send-button']",
+        wait_timeout_override=300.0,
+    )
+
+    assert result is True
+    assert calls[0] == {"guarded": executor}
+    assert calls[1] == {
+        "selector": "css:[data-testid='send-button']",
+        "wait_timeout_override": 300.0,
+    }
+
