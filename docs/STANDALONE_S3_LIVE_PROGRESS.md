@@ -717,3 +717,43 @@ The warnings remain the known FastAPI/Python 3.14
 The next action is one candidate-bound live S3 run. Do not manually clear the
 persisted rate-limit marker; the runner should consume it and print the
 persisted streak plus the adaptive recovery gap before any request-heavy work.
+
+
+### 673ca45 live S3: 120-second pacing still hit external limiter
+
+Exact candidate:
+
+```text
+673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa
+```
+
+The candidate-bound live run proved the new recovery state was active:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_INTER_TURN_COOLDOWN_SEC=118.5
+S3_PHASE=RESTART_CONTINUITY_PASS
+```
+
+The remote compaction probe still encountered a genuine account-side limiter:
+
+```text
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+```
+
+The outer gate correctly promoted it and the new mid-probe cleanup path visibly
+closed the acknowledgement modal:
+
+```text
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+This confirms both the restart/readback fix and the acknowledgement cleanup
+work on the exact candidate. Since the per-turn gap is already at the 120-second
+design cap, further code churn is not justified by this evidence. The remaining
+release blocker is the account's longer rolling request-limit window. Keep the
+candidate frozen and retry only after a materially longer quiet period.
