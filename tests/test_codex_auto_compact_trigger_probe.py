@@ -194,3 +194,33 @@ def test_exact_trigger_reply_does_not_need_deferred_mode():
         remote_success_delta=1,
         token_leak=False,
     )
+
+def test_transition_target_reduces_live_871_token_margin_before_arm():
+    target = probe.transition_target_bytes(
+        margin_to_trigger=871,
+        previous_fine_step=858,
+        fine_bytes=2048,
+    )
+
+    assert target is not None
+    assert 1300 <= target <= 1550
+
+
+def test_transition_target_skips_when_only_tiny_arm_headroom_remains():
+    assert probe.transition_target_bytes(
+        margin_to_trigger=489,
+        previous_fine_step=858,
+        fine_bytes=2048,
+    ) is None
+
+
+def test_transition_prompt_is_bounded_and_exact():
+    prompt = probe.build_transition_prompt(
+        9,
+        1400,
+    )
+
+    assert base.TOKEN not in prompt
+    assert "AUTO_COMPACT_TRANSITION_ACK_09" in prompt
+    assert len(prompt.encode("utf-8")) < 2200
+
