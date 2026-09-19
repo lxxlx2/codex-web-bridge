@@ -65,10 +65,12 @@ from app.services.codex_web_policy import (
 )
 from app.services.codex_web_session_affinity import (
     affinity_status,
+    bind_history_to_conversation,
     bind_response_to_conversation,
     current_chatgpt_conversation_path,
     ensure_chatgpt_conversation,
     resolve_conversation_binding,
+    resolve_history_conversation_binding,
     set_codex_workflow_reuse_hint,
 )
 from app.services.codex_wire_observability import (
@@ -701,8 +703,75 @@ def _browser_delta_chat_request(
     )
 
 
-def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, bool, str, str]:
-    """Prepare browser state and return hydrated state body plus affinity metadata."""
+def _browser_history_suffix_chat_request(
+    state_chat_body: ChatRequest,
+    prefix_count: int,
+) -> ChatRequest:
+    """Send only the unrepresented suffix of a matched full-history lineage."""
+
+    messages = (
+        state_chat_body.messages
+        if isinstance(state_chat_body.messages, list)
+        else []
+    )
+    count = max(0, int(prefix_count or 0))
+    if count <= 0 or count >= len(messages):
+        return state_chat_body
+
+    suffix = [
+        dict(message)
+        for message in messages[count:]
+        if isinstance(message, dict)
+    ]
+
+    if hasattr(state_chat_body, "model_copy"):
+        return state_chat_body.model_copy(
+            update={"messages": suffix}
+        )
+
+    return state_chat_body.copy(
+        update={"messages": suffix}
+    )
+
+
+def _chat_history_after_response(
+    request_messages: Any,
+    chat_payload: Any,
+) -> List[Dict[str, Any]]:
+    messages = [
+        dict(message)
+        for message in request_messages
+        if isinstance(message, dict)
+    ] if isinstance(request_messages, list) else []
+
+    choices = (
+        chat_payload.get("choices")
+        if isinstance(chat_payload, dict)
+        and isinstance(chat_payload.get("choices"), list)
+        else []
+    )
+    choice = (
+        choices[0]
+        if choices and isinstance(choices[0], dict)
+        else {}
+    )
+    assistant = (
+        choice.get("message")
+        if isinstance(choice.get("message"), dict)
+        else None
+    )
+    if assistant is not None:
+        assistant_message = dict(assistant)
+        assistant_message["role"] = "assistant"
+        messages.append(assistant_message)
+
+    return messages
+
+
+def _prepare_codex_web_turn_with_history_affinity(
+    body: ResponsesRequest,
+) -> Tuple[ResponsesRequest, bool, str, str, int]:
+    """Prepare browser state plus optional full-history prefix reuse metadata."""
 
     incoming_previous = str(body.previous_response_id or "").strip()
     reasoning = normalize_codex_reasoning(body.reasoning)
@@ -715,6 +784,8 @@ def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, b
 
     reused = False
     reused_path = ""
+    history_prefix_count = 0
+
     if binding is not None and ensure_chatgpt_conversation(binding.pathname):
         try:
             state = inspect_codex_web_mode_status(reasoning)
@@ -723,7 +794,40 @@ def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, b
         if bool(state.get("verified")):
             reused = True
             reused_path = binding.pathname
-            logger.info("[CODEX_WEB_AFFINITY] reusing mapped ChatGPT conversation (path redacted)")
+            logger.info(
+                "[CODEX_WEB_AFFINITY] reusing mapped ChatGPT conversation "
+                "(path redacted)"
+            )
+
+    hydrated = _hydrate_codex_continuation(body)
+
+    if not reused and not incoming_previous:
+        state_chat_body = _responses_request_to_chat_request(
+            hydrated,
+            stream=False,
+        )
+        history_binding = resolve_history_conversation_binding(
+            state_chat_body.messages,
+            model=web_model,
+            reasoning=reasoning,
+        )
+        if (
+            history_binding is not None
+            and ensure_chatgpt_conversation(history_binding.pathname)
+        ):
+            try:
+                state = inspect_codex_web_mode_status(reasoning)
+            except Exception:
+                state = {"verified": False}
+            if bool(state.get("verified")):
+                reused = True
+                reused_path = history_binding.pathname
+                history_prefix_count = history_binding.message_count
+                logger.info(
+                    "[CODEX_WEB_AFFINITY] reusing hash-matched Codex full-history "
+                    f"lineage prefix_messages={history_prefix_count} "
+                    "(path redacted)"
+                )
 
     if not reused:
         prepare_and_verify_codex_web_mode(body.reasoning)
@@ -733,8 +837,22 @@ def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, b
                 "falling back to fresh chat plus reconstructed history"
             )
 
-    hydrated = _hydrate_codex_continuation(body)
     install_codex_chatgpt_network_tuning()
+    return (
+        hydrated,
+        reused,
+        reused_path,
+        reasoning,
+        history_prefix_count,
+    )
+
+
+def _prepare_codex_web_turn(body: ResponsesRequest) -> Tuple[ResponsesRequest, bool, str, str]:
+    """Compatibility wrapper around the history-aware preparation path."""
+
+    hydrated, reused, reused_path, reasoning, _ = (
+        _prepare_codex_web_turn_with_history_affinity(body)
+    )
     return hydrated, reused, reused_path, reasoning
 
 
@@ -747,6 +865,7 @@ async def _stream_codex_v2_attempt(
     reused_path: str,
     reasoning: str,
     authenticated: bool,
+    history_prefix_count: int = 0,
 ) -> AsyncIterator[str]:
     """Execute one Codex browser turn and emit the minimal Responses SSE contract."""
 
@@ -754,11 +873,18 @@ async def _stream_codex_v2_attempt(
     created_at = int(time.time())
     sequence = 1
     state_chat_body = _responses_request_to_chat_request(state_body, stream=False)
-    browser_body = (
-        _browser_delta_chat_request(state_chat_body, browser_source_body)
-        if reuse_web_conversation
-        else state_chat_body
-    )
+    if reuse_web_conversation and history_prefix_count > 0:
+        browser_body = _browser_history_suffix_chat_request(
+            state_chat_body,
+            history_prefix_count,
+        )
+    elif reuse_web_conversation:
+        browser_body = _browser_delta_chat_request(
+            state_chat_body,
+            browser_source_body,
+        )
+    else:
+        browser_body = state_chat_body
 
     in_progress = _build_responses_object(
         state_body,
@@ -922,13 +1048,24 @@ async def _stream_codex_v2_attempt(
         model=target_web_model(),
         reasoning=reasoning,
     )
+    completed_history = _chat_history_after_response(
+        state_chat_body.messages,
+        payload,
+    )
+    if completed_history:
+        bind_history_to_conversation(
+            completed_history,
+            path,
+            model=target_web_model(),
+            reasoning=reasoning,
+        )
 
     logger.info(
         "[CODEX_RESPONSES_V2] stream completed: "
         f"response_id={response_id} output_items={len(output)} "
         f"tool_names={tool_names or ['none']} status={response_status} "
         f"web_session_reused={reuse_web_conversation} "
-        f"browser_input={'delta' if reuse_web_conversation else 'full'}"
+        f"browser_input={'history_delta' if history_prefix_count > 0 else ('delta' if reuse_web_conversation else 'full')}"
     )
 
     yield _codex_event(
@@ -945,7 +1082,13 @@ async def _codex_web_attempt_response(
     authenticated: bool,
 ) -> StreamingResponse:
     incoming = _model_copy(body)
-    state_body, reused, reused_path, reasoning = _prepare_codex_web_turn(body)
+    (
+        state_body,
+        reused,
+        reused_path,
+        reasoning,
+        history_prefix_count,
+    ) = _prepare_codex_web_turn_with_history_affinity(body)
     return StreamingResponse(
         _stream_codex_v2_attempt(
             request=request,
@@ -955,6 +1098,7 @@ async def _codex_web_attempt_response(
             reused_path=reused_path,
             reasoning=reasoning,
             authenticated=authenticated,
+            history_prefix_count=history_prefix_count,
         ),
         media_type="text/event-stream",
         headers=_stream_headers(),
