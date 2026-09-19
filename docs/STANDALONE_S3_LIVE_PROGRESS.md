@@ -464,3 +464,28 @@ bacef19  Repair post-tool readback refusal ordering
 
 Local focused/full validation is pending. Do not rerun full S3 until those tests
 pass.
+
+
+### 8122e87 local regression validation passed
+
+Exact candidate:
+
+```text
+8122e87e472ec5becbfa01f2310107d43c8a4d00
+```
+
+Local validation after the Gate B readback-refusal repair:
+
+```text
+focused post-tool tests: 7 passed
+related client-tool policy: 62 passed
+full suite: 503 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The focused regression confirms the live refusal wording is now classified and
+repaired without breaking the broader client-tool policy suite. The next action
+is a full candidate-bound S3 rerun. If restart-resume passes, continue through
+compaction and final cleanup on the same SHA.
