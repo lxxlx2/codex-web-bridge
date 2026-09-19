@@ -354,6 +354,37 @@ Regression coverage reproduces the successful validation plus extra directory in
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Stale rate-limit acknowledgement dialog
+
+After an S3 run was interrupted by a genuine ChatGPT Web rate-limit event, the
+account later became usable again, but the controlled browser tab still had the
+old acknowledgement-only rate-limit dialog open. The standalone surface probe
+continued to classify the tab as:
+
+```text
+blocking_reason=rate_limited
+failure_class=chatgpt_web_rate_limited
+```
+
+even though the stale dialog itself was the remaining blocker.
+
+The preflight tool previously detected rate-limit dialogs but intentionally
+never dismissed them. It now performs one narrow cleanup action: when the
+surface is classified as `rate_limited`, it may physically click exactly one
+acknowledgement-only button (`Got it`, `OK`, `Okay`, `明白了`, or
+`知道了`) inside exactly one visible rate-limit dialog. It never clicks
+`Retry`, never dismisses quota/usage-exhaustion blockers, and never sends a
+message. The surface is then re-probed. If the rate-limit blocker remains or
+reappears, preflight still fails closed as `chatgpt_web_rate_limited`.
+
+Regression coverage verifies stale-dialog recovery, persistent-limit
+fail-closed behavior, and no click when a unique acknowledgement target cannot
+be proven.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
