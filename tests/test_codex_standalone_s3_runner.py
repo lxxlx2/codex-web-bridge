@@ -556,5 +556,69 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             s3.core._LAST_LIVE_TURN_FINISHED_AT = previous
 
 
+    def test_recent_rate_limit_wait_happens_before_target_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw) / "private"
+            acceptance_root = Path(raw) / "acceptance"
+            events = []
+
+            with (
+                patch.object(s3.core, "_preflight_repo"),
+                patch.object(s3, "_candidate_commit", return_value="d" * 40),
+                patch.object(s3.core, "_configure_uwa_route"),
+                patch.object(s3.core, "_start_standalone_listener"),
+                patch.object(s3.core, "_health_ready", return_value={}),
+                patch.object(
+                    s3.core,
+                    "_validation_python",
+                    return_value=sys.executable,
+                ),
+                patch.object(
+                    s3,
+                    "_wait_for_recent_rate_limit_window",
+                    side_effect=lambda *_args, **_kwargs: events.append("wait"),
+                ),
+                patch.object(
+                    s3,
+                    "_quiet_codex_desktop",
+                    return_value=False,
+                ),
+                patch.object(s3.core, "_wait_request_cleanup"),
+                patch.object(
+                    s3,
+                    "_reset_acceptance_chatgpt_target",
+                    side_effect=lambda *_args, **_kwargs: (
+                        events.append("reset") or {}
+                    ),
+                ),
+                patch.object(
+                    s3,
+                    "_run_surface_preflight",
+                    return_value={
+                        "ok": True,
+                        "actions": [],
+                    },
+                ),
+                patch.object(s3.core, "_restart_standalone_listener"),
+                patch.object(
+                    s3,
+                    "_passive_surface_recheck",
+                    return_value={"blocking_reason": "none"},
+                ),
+                patch.object(s3.core, "run", return_value=0),
+                patch.object(s3, "_promote_core_result"),
+                patch.object(s3, "_restore_codex_desktop"),
+            ):
+                rc = s3.run(
+                    acceptance_root=acceptance_root,
+                    private_root=private_root,
+                    turn_timeout_sec=60,
+                    compaction_timeout_sec=60,
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(events[:2], ["wait", "reset"])
+
+
 if __name__ == "__main__":
     unittest.main()
