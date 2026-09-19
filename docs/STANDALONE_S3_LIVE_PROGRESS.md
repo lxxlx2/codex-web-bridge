@@ -267,3 +267,40 @@ Candidate-bound verification has not yet been recorded. Next action:
 ```text
 .venv/bin/python tools/standalone_desktop_e2e_gate.py verify
 ```
+
+
+### Desktop E2E verified on exact candidate
+
+Candidate:
+
+```text
+4adeb956b1f31255a86c56354e3a06eead458b61
+```
+
+Formal Desktop verification passed:
+
+```text
+DESKTOP_CONTEXT=PASS
+DESKTOP_LOCAL_TOOLS=PASS
+DESKTOP_ROUTE_UWA_CHATGPT_HIGH=PASS
+DESKTOP_REQUEST_MANAGER_CLEAN=PASS
+DESKTOP_APP_RUNNING=YES
+STANDALONE_DESKTOP_E2E=PASS
+candidate_commit=4adeb956b1f31255a86c56354e3a06eead458b61
+```
+
+Current exact-candidate matrix:
+
+```text
+local focused lifecycle tests   PASS
+related browser/send tests      PASS
+full local suite                PASS
+S3 live                         PASS_LIVE_CLOSED
+Standalone CI                   PASS
+Desktop E2E                     PASS
+clean-checkout install smoke    PENDING
+S4 local release gate           PENDING
+```
+
+Keep `standalone-dev` frozen. Next candidate-bound action is the
+clean-checkout install/provider/rollback smoke on the same SHA.
