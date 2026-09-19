@@ -242,7 +242,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             with (
                 patch.object(s3.core, "_health_ready", return_value=payload),
                 patch.object(
-                    s3.surface_preflight,
+                    s3.core.surface_preflight,
                     "dismiss_rate_limit_notice_in_place",
                     return_value=cleanup_result,
                 ) as cleanup_mock,
@@ -281,7 +281,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             with (
                 patch.object(s3.core, "_health_ready", return_value=payload),
                 patch.object(
-                    s3.surface_preflight,
+                    s3.core.surface_preflight,
                     "dismiss_rate_limit_notice_in_place",
                     side_effect=RuntimeError("browser cleanup failed"),
                 ),
