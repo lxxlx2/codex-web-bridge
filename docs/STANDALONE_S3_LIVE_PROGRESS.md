@@ -489,3 +489,37 @@ The focused regression confirms the live refusal wording is now classified and
 repaired without breaking the broader client-tool policy suite. The next action
 is a full candidate-bound S3 rerun. If restart-resume passes, continue through
 compaction and final cleanup on the same SHA.
+
+
+### Mid-probe rate-limit acknowledgement path gap
+
+On candidate `8122e87e472ec5becbfa01f2310107d43c8a4d00`,
+restart continuity passed, then the remote compaction probe failed and the outer
+gate classified the visible ChatGPT surface as account-side rate limiting:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+
+outer:
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+The existing acknowledgement automation is still present. It can physically
+click the unique acknowledgement-only button (`Got it` / `明白了` /
+`知道了`) in the startup surface preflight, the runtime send guard, and the
+post-compaction cooldown path.
+
+The uncovered case is a limiter that appears *during* the request-heavy
+compaction probe. The probe returns failure before the post-probe cooldown runs,
+and `_external_surface_failure_after_core_failure()` currently performs only a
+passive classification recheck. It does not invoke
+`dismiss_rate_limit_notice_in_place()`. Therefore the gate fails correctly as
+an external limiter but leaves the acknowledgement modal visible.
+
+This does not mean clicking the acknowledgement would make the failed S3 safe to
+continue: dismissing the modal only clears the UI notice and does not prove the
+account-side limiter has expired. Any fix for this path must clean up the modal
+without replaying or automatically continuing the failed probe.
