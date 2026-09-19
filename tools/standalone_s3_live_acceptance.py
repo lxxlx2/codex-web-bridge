@@ -566,7 +566,7 @@ def _external_surface_failure_after_core_failure(private_dir: Path) -> GateFailu
         if exc.gate == "chatgpt_web_rate_limited":
             cleanup: dict[str, Any]
             try:
-                cleanup = surface_preflight.dismiss_rate_limit_notice_in_place(
+                cleanup = core.surface_preflight.dismiss_rate_limit_notice_in_place(
                     timeout_seconds=12.0,
                 )
             except Exception as cleanup_exc:
