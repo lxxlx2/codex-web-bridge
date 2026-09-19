@@ -764,6 +764,33 @@ Because the workflow commit changes the candidate SHA, the successful S3 result
 on `6e16543...` remains historical evidence and must be regenerated on the new
 exact candidate before Desktop E2E, install smoke, S4, merge, or tagging.
 
+
+## 2026-09-19 Final-candidate restart readback refusal
+
+The candidate `8f9719f74fe8ccf3da01e023e4730ae6f41cbae3`
+passed the local 493-test suite and entered the candidate-bound S3 run. The
+restart seed succeeded, but restart resume ended with:
+
+```text
+无法继续完成验收：当前这一轮没有可调用的客户端 exec_command，
+因此缺少对 context/result.txt 的最终读取确认，不能据此回复 CONTEXT_PASS。
+```
+
+This is another post-tool contradiction. The restart acceptance flow already
+contains successful real `exec_command` call/result history, so a later claim
+that "this round" has no callable client `exec_command` is invalid. The
+existing post-tool detector covered current-session, current-environment, and
+toolset-absent wording, but not the exact "当前这一轮没有可调用的客户端
+exec_command" order.
+
+The detector now covers this narrow wording only when a prior workspace client
+tool call/result is present, and regression coverage reproduces the exact live
+reply and verifies repair into the required `context/result.txt` readback.
+
+This changes the exact candidate SHA again. The earlier
+`6e16543...` S3 PASS remains historical; S3 and all downstream candidate-bound
+release evidence must be regenerated on the new SHA.
+
 ## Gate state
 
 ```text
