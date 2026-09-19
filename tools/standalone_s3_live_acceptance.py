@@ -39,6 +39,8 @@ DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 180
 DEFAULT_RECENT_RATE_LIMIT_COOLDOWN_SEC = 180
 DEFAULT_RECENT_RATE_LIMIT_STREAK_WINDOW_SEC = 3600
 DEFAULT_RATE_LIMIT_RECOVERY_TURN_GAP_SEC = 60
+DEFAULT_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC = 300
+_CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV = "UWA_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC"
 _RATE_LIMIT_MARKER_NAME = ".last-rate-limit.json"
 _EXTERNAL_SURFACE_FAILURES = {
     "chatgpt_work_surface",
@@ -587,6 +589,22 @@ def run(
     outer_private_dir = core._private_dir(private_root)
     candidate = ""
     desktop_was_running = False
+    pre_fill_idle_timeout_before = os.environ.get(
+        _CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV
+    )
+    if pre_fill_idle_timeout_before is None:
+        os.environ[
+            _CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV
+        ] = str(DEFAULT_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC)
+    _emit(
+        "S3_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC="
+        + str(
+            os.environ.get(
+                _CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV,
+                DEFAULT_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC,
+            )
+        )
+    )
     try:
         core._preflight_repo()
         candidate = _candidate_commit()
@@ -685,6 +703,15 @@ def run(
         return 1
     finally:
         _restore_codex_desktop(desktop_was_running)
+        if pre_fill_idle_timeout_before is None:
+            os.environ.pop(
+                _CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV,
+                None,
+            )
+        else:
+            os.environ[
+                _CHATGPT_PRE_FILL_IDLE_TIMEOUT_ENV
+            ] = pre_fill_idle_timeout_before
 
 
 def main() -> int:
