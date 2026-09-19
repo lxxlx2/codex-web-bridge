@@ -385,6 +385,36 @@ def looks_like_client_access_refusal(text: str) -> bool:
     return any(pattern.search(value) for pattern in _REFUSAL_PATTERNS)
 
 
+_MISSING_TASK_CLARIFICATION_PATTERNS = (
+    re.compile(
+        r"(?:请|麻烦)?(?:继续)?(?:发送|提供|给出|告诉我).{0,40}"
+        r"(?:具体任务|任务|验证步骤|操作步骤|需要我执行的)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:please\s+)?(?:send|provide|give|tell me).{0,60}"
+        r"(?:the\s+)?(?:concrete|specific|next|remaining)?\s*"
+        r"(?:task|steps?|verification steps?|action)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:what|which).{0,50}(?:task|step|action).{0,50}"
+        r"(?:should|do you want|need me to)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+
+
+def looks_like_missing_task_clarification(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return any(
+        pattern.search(value)
+        for pattern in _MISSING_TASK_CLARIFICATION_PATTERNS
+    )
+
+
 def looks_like_post_tool_unavailable_claim(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
@@ -464,6 +494,12 @@ def should_repair_client_workspace_refusal(
     if _specific_required_workspace_tool_name(tool_choice, tools):
         return True
 
+    compacted_workspace_request = (
+        _looks_like_compacted_workspace_continuation(
+            messages
+        )
+    )
+
     has_history = _has_tool_history(messages)
     if has_history:
         # Once a workspace tool has really appeared in the conversation, an
@@ -471,9 +507,21 @@ def should_repair_client_workspace_refusal(
         # contradiction. Do not depend on the latest user-shaped message still
         # looking like the original coding request: Codex follow-up turns often
         # encode tool output as the newest user item.
-        return (
+        if (
             _has_workspace_tool_call_history(messages)
             and looks_like_post_tool_unavailable_claim(assistant_text)
+        ):
+            return True
+
+        # After recursive compaction the model can retain the exact pending
+        # workspace state yet still ask the user to resend "the concrete task"
+        # or "verification steps". That is also a contradiction: the pending
+        # action is already present in ACTIVE CONTINUATION STATE.
+        return bool(
+            compacted_workspace_request
+            and looks_like_missing_task_clarification(
+                assistant_text
+            )
         )
 
     local_workspace_request = (
@@ -484,16 +532,22 @@ def should_repair_client_workspace_refusal(
 
     if not local_workspace_request:
         local_workspace_request = (
-            _looks_like_compacted_workspace_continuation(
-                messages
-            )
+            compacted_workspace_request
         )
 
     if not local_workspace_request:
         return False
 
-    return looks_like_client_access_refusal(
+    if looks_like_client_access_refusal(
         assistant_text
+    ):
+        return True
+
+    return bool(
+        compacted_workspace_request
+        and looks_like_missing_task_clarification(
+            assistant_text
+        )
     )
 
 
@@ -602,6 +656,25 @@ def build_client_workspace_repair_messages(
             "Use the command/action required by the Original user request. "
             "Do not invent a result; the client will execute the emitted call."
         )
+    elif (
+        compacted_context
+        and looks_like_missing_task_clarification(
+            assistant_text
+        )
+    ):
+        correction = (
+            "The previous reply incorrectly asked the user to resend or restate the task. "
+            "The pending task and verification steps are already recorded in the compacted continuation state below. "
+            "Treat that ACTIVE CONTINUATION STATE as authoritative and continue from the next unfinished workspace step."
+        )
+        if repeated:
+            correction += (
+                " This clarification loop has already repeated. Do not ask for the task, command, or verification steps again."
+            )
+        action = (
+            f"Call {preferred_name} now to execute the next pending workspace step from the compacted continuation state. "
+            "Return only the corrected tool-call output."
+        )
     elif has_prior_workspace_call:
         correction = (
             "The previous reply contradicted the existing client tool history by claiming that the client execution "
@@ -658,6 +731,7 @@ __all__ = [
     "has_suspicious_root_workdir_tool_call",
     "looks_like_client_access_refusal",
     "looks_like_local_workspace_request",
+    "looks_like_missing_task_clarification",
     "looks_like_post_tool_unavailable_claim",
     "should_repair_client_workspace_refusal",
     "user_explicitly_requested_root_workdir",
