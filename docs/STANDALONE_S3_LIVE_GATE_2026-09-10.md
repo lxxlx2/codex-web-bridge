@@ -52,7 +52,7 @@ From a current standalone checkout:
 cd "$HOME/codex-web-bridge"
 git switch standalone-dev
 git pull --ff-only
-python3 tools/standalone_s3_live_acceptance.py
+.venv/bin/python tools/standalone_s3_live_acceptance.py
 ```
 
 If the repository has not yet been cloned locally, clone it first and then run the same acceptance command from `standalone-dev`.
