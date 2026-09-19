@@ -5,6 +5,7 @@ Send confirmation and attachment flow mixin for WorkflowExecutor.
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -630,7 +631,76 @@ class WorkflowExecutorSendMixin:
             )
         return ready
 
-    def _wait_for_send_idle_before_action(self, send_selector: str) -> bool:
+    def _chatgpt_pre_fill_idle_timeout(self) -> Optional[float]:
+        """Optional longer idle wait used before mutating the ChatGPT composer."""
+
+        raw = str(
+            os.getenv(
+                "UWA_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC",
+                "",
+            )
+            or ""
+        ).strip()
+        if not raw:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return max(0.0, min(value, 600.0))
+
+    def _wait_for_chatgpt_idle_before_fill(
+        self,
+        target_key: str,
+    ) -> bool:
+        """Keep a new prompt out of ChatGPT while an older turn is active."""
+
+        if str(target_key or "") != "input_box":
+            return True
+
+        tab = getattr(self, "tab", None)
+        if tab is None:
+            return True
+
+        try:
+            current_url = str(
+                getattr(tab, "url", "")
+                or ""
+            ).lower()
+        except Exception:
+            current_url = ""
+
+        if "chatgpt.com" not in current_url:
+            return True
+
+        selectors = getattr(self, "_selectors", None)
+        send_selector = ""
+        if isinstance(selectors, dict):
+            send_selector = str(
+                selectors.get("send_btn")
+                or ""
+            )
+
+        timeout_override = self._chatgpt_pre_fill_idle_timeout()
+        logger.info(
+            "[SEND] ChatGPT composer pre-fill idle guard active"
+            + (
+                f" (timeout={timeout_override:.1f}s)"
+                if timeout_override is not None
+                else ""
+            )
+        )
+        return self._wait_for_send_idle_before_action(
+            send_selector,
+            wait_timeout_override=timeout_override,
+        )
+
+    def _wait_for_send_idle_before_action(
+        self,
+        send_selector: str,
+        *,
+        wait_timeout_override: Optional[float] = None,
+    ) -> bool:
         """Wait out or interrupt generation owned by an earlier action before submitting this prompt."""
         if self._chatgpt_composer_send_ready(send_selector):
             return True
@@ -668,13 +738,19 @@ class WorkflowExecutorSendMixin:
                         return True
                     logger.debug("[SEND] Arena 主动打断后页面尚未完全就绪，继续进入常规等待流程")
 
-        wait_timeout = self._get_send_confirmation_window(
-            "pre_send_idle_timeout",
-            120.0,
-            min_value=0.0,
-            max_value=300.0,
-            raw_only=True,
-        )
+        if wait_timeout_override is None:
+            wait_timeout = self._get_send_confirmation_window(
+                "pre_send_idle_timeout",
+                120.0,
+                min_value=0.0,
+                max_value=300.0,
+                raw_only=True,
+            )
+        else:
+            wait_timeout = max(
+                0.0,
+                min(float(wait_timeout_override), 600.0),
+            )
         logger.warning(
             "[SEND] 发送前检测到页面仍处于旧生成/停止态，"
             f"等待其结束后再提交本次消息 (timeout={wait_timeout:.1f}s)"
