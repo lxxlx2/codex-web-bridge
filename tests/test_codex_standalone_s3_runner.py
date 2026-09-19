@@ -782,5 +782,56 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     ] = old_recovery
 
 
+    def test_repeated_rate_limits_raise_recovery_turn_gap_to_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_root = Path(raw)
+
+            with patch.object(s3.time, "time", return_value=1000.0):
+                s3._record_rate_limit_marker(private_root)
+            with patch.object(s3.time, "time", return_value=1100.0):
+                s3._record_rate_limit_marker(private_root)
+
+            old = os.environ.get(
+                "UWA_S3_MIN_LIVE_TURN_GAP_SEC"
+            )
+            old_recovery = os.environ.get(
+                "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+            )
+            try:
+                os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"] = "30"
+                os.environ[
+                    "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+                ] = "60"
+
+                s3._apply_rate_limit_recovery_pacing(
+                    private_root
+                )
+
+                self.assertEqual(
+                    os.environ["UWA_S3_MIN_LIVE_TURN_GAP_SEC"],
+                    "120",
+                )
+            finally:
+                if old is None:
+                    os.environ.pop(
+                        "UWA_S3_MIN_LIVE_TURN_GAP_SEC",
+                        None,
+                    )
+                else:
+                    os.environ[
+                        "UWA_S3_MIN_LIVE_TURN_GAP_SEC"
+                    ] = old
+
+                if old_recovery is None:
+                    os.environ.pop(
+                        "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC",
+                        None,
+                    )
+                else:
+                    os.environ[
+                        "UWA_S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC"
+                    ] = old_recovery
+
+
 if __name__ == "__main__":
     unittest.main()
