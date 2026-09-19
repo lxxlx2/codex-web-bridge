@@ -523,3 +523,38 @@ This does not mean clicking the acknowledgement would make the failed S3 safe to
 continue: dismissing the modal only clears the UI notice and does not prove the
 account-side limiter has expired. Any fix for this path must clean up the modal
 without replaying or automatically continuing the failed probe.
+
+
+### Mid-probe acknowledgement cleanup fix landed
+
+The previously implemented rate-limit acknowledgement clicker was confirmed
+present. The missing path was the outer failure classifier after a compaction
+probe failed mid-run.
+
+New `standalone-dev` head:
+
+```text
+41018a22c5fb15845c686a0c6e5f462301ce1aee
+```
+
+Commits:
+
+```text
+d0ad7b3  Dismiss mid-probe rate-limit acknowledgement
+743bea5  Cover mid-probe rate-limit cleanup
+41018a2  Record mid-probe rate-limit cleanup fix
+```
+
+Behavior now:
+
+```text
+mid-probe rate limit
+-> fail current probe
+-> classify chatgpt_web_rate_limited
+-> click one acknowledgement-only 明白了/知道了/Got it if uniquely present
+-> record sanitized cleanup result
+-> do not retry or continue the failed probe
+-> preserve rate-limit marker/cooldown for the next S3 run
+```
+
+Local focused/full validation is pending.
