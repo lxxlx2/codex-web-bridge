@@ -553,11 +553,52 @@ def _external_surface_failure_after_core_failure(private_dir: Path) -> GateFailu
     product failure evidence privately, but expose the external surface condition as
     the outer release failure class so operators do not repeatedly rerun the full
     stress probe while the account is still blocked.
+
+    If the failed probe left an acknowledgement-only rate-limit dialog visible,
+    dismiss that one safe acknowledgement before returning. This is cleanup only:
+    the failed probe is never replayed or resumed, and the original rate-limit
+    failure remains release-blocking.
     """
 
     try:
         _passive_surface_recheck(private_dir)
     except GateFailure as exc:
+        if exc.gate == "chatgpt_web_rate_limited":
+            cleanup: dict[str, Any]
+            try:
+                cleanup = surface_preflight.dismiss_rate_limit_notice_in_place(
+                    timeout_seconds=12.0,
+                )
+            except Exception as cleanup_exc:
+                cleanup = {
+                    "ok": False,
+                    "dismissed": False,
+                    "blocking_reason": "cleanup_exception",
+                    "error_type": type(cleanup_exc).__name__,
+                }
+
+            core._write_private(
+                private_dir / "rate-limit-failure-cleanup.json",
+                json.dumps(
+                    {
+                        "dismissed": bool(cleanup.get("dismissed")),
+                        "ok": bool(cleanup.get("ok")),
+                        "blocking_reason": str(
+                            cleanup.get("blocking_reason") or ""
+                        ),
+                        "target_count": int(cleanup.get("target_count", 0) or 0),
+                        "surface_kind": str(cleanup.get("surface_kind") or ""),
+                        "composer_empty": bool(cleanup.get("composer_empty")),
+                        "error_type": str(cleanup.get("error_type") or ""),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                )
+                + "\n",
+            )
+            return exc
+
         if exc.gate in _EXTERNAL_SURFACE_FAILURES:
             return exc
     return None
