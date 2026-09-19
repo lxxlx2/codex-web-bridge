@@ -70,6 +70,44 @@ def is_interrupted_stream_reason(reason: str) -> bool:
         )
     )
 
+def _ordinary_text_completion_reason(
+    *,
+    content_ever_changed: bool,
+    suppress_fast_exit: bool,
+    still_generating: bool,
+    stable_text_count: int,
+    stable_count_threshold: int,
+    silence_duration: float,
+    silence_threshold: float,
+    silence_threshold_fallback: float,
+) -> str:
+    """Return a safe ordinary-text terminal reason, if one is proven.
+
+    ChatGPT Web can expose stable final-looking DOM text while the same turn
+    still has an active generation/stop indicator. Treating text stability
+    alone as terminal lets the next request race the still-live turn. Ordinary
+    text completion therefore requires the active generation state to clear.
+    """
+
+    if (
+        not content_ever_changed
+        or suppress_fast_exit
+        or still_generating
+    ):
+        return ""
+
+    if (
+        stable_text_count >= stable_count_threshold
+        and silence_duration > silence_threshold
+    ):
+        return "stable"
+
+    if silence_duration > silence_threshold_fallback * 3:
+        return "long_silence"
+
+    return ""
+
+
 _GEMINI_IMAGE_PLACEHOLDER_RE = re.compile(
     r"^\s*https?://(?:[\w.-]+\.)?googleusercontent\.com/image_generation_content/\d+\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -2312,11 +2350,22 @@ class StreamMonitor:
                 # completion rules while the page still has no rendered image.
                 pass
             elif ctx.content_ever_changed:
-                if (not suppress_fast_exit and ctx.stable_text_count >= stable_count_threshold and
-                        silence_duration > silence_threshold):
-                    logger.debug(f"生成结束 (稳定{ctx.stable_text_count}次, 静默{silence_duration:.1f}s)")
+                ordinary_completion = _ordinary_text_completion_reason(
+                    content_ever_changed=ctx.content_ever_changed,
+                    suppress_fast_exit=suppress_fast_exit,
+                    still_generating=still_generating,
+                    stable_text_count=ctx.stable_text_count,
+                    stable_count_threshold=stable_count_threshold,
+                    silence_duration=silence_duration,
+                    silence_threshold=silence_threshold,
+                    silence_threshold_fallback=silence_threshold_fallback,
+                )
+                if ordinary_completion == "stable":
+                    logger.debug(
+                        f"生成结束 (稳定{ctx.stable_text_count}次, 静默{silence_duration:.1f}s)"
+                    )
                     break
-                elif (not suppress_fast_exit and silence_duration > silence_threshold_fallback * 3):
+                elif ordinary_completion == "long_silence":
                     logger.info(f"[Exit] 生成结束（超长静默 {silence_duration:.1f}s）")
                     break
                 elif (
