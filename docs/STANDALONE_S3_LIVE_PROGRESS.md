@@ -617,3 +617,28 @@ macOS compatibility was still running at the time of this progress update.
 
 No new full live S3 should be started until the local focused/full regression
 passes on this exact SHA and the account-side rate-limit cooldown has cleared.
+
+
+### 3261691 local release-critical validation passed
+
+Exact candidate:
+
+```text
+32616917489c41963ee2122133d0e0e56dc29541
+```
+
+Local validation after the namespace/command-documentation review fixes:
+
+```text
+S3 runner:        26 passed
+release critical: 92 passed
+full suite:       504 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The operator did not manually dismiss the old ChatGPT rate-limit acknowledgement
+modal. Before the next live S3, use the repository helper to dismiss only the
+unique acknowledgement-only rate-limit control in place; this does not send a
+message or retry a failed request.
