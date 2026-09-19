@@ -693,3 +693,27 @@ Commits:
 ```
 
 Local focused/full validation and CI must pass before the next live S3.
+
+
+### 673ca45 local validation passed
+
+Exact candidate:
+
+```text
+673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa
+```
+
+Local validation after adaptive rate-limit pacing:
+
+```text
+S3 runner:        27 passed
+release critical: 93 passed
+full suite:       505 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The next action is one candidate-bound live S3 run. Do not manually clear the
+persisted rate-limit marker; the runner should consume it and print the
+persisted streak plus the adaptive recovery gap before any request-heavy work.
