@@ -558,3 +558,62 @@ mid-probe rate limit
 ```
 
 Local focused/full validation is pending.
+
+
+### Release-critical review after local S3-runner test failure
+
+The first local validation of `41018a2...` exposed two test failures before any
+live rerun. Root cause was a real namespace bug in the new mid-probe cleanup
+path: `standalone_s3_live_acceptance.py` referenced
+`surface_preflight.dismiss_rate_limit_notice_in_place()` even though the
+wrapper imports the surface helper through `standalone_s3_live_core as core`.
+The same stale namespace was used by the two new test patch targets.
+
+The runtime and tests now consistently use:
+
+```text
+core.surface_preflight.dismiss_rate_limit_notice_in_place(...)
+```
+
+A broader release-critical static review was also performed before asking for
+another local run:
+
+- all `core.<name>` references from the S3 wrapper resolve in
+  `standalone_s3_live_core.py`;
+- S3 core references to its imported acceptance/helper modules were checked for
+  missing attributes;
+- Desktop E2E references into S3/core resolve;
+- Desktop/install/S4 unit-test patch/reference targets were checked for missing
+  exported attributes;
+- GitHub CI compiles the S3/Desktop control scripts and runs
+  `test_codex_standalone_s3_runner.py` in focused and broad jobs;
+- release documentation was audited for the earlier system-Python trap.
+
+That audit found a second concrete issue: the Desktop E2E guide, Desktop
+`prepare` completion hint, and S3 live-gate guide still instructed operators
+to use system `python3`, even though these release controls import runtime
+dependencies such as DrissionPage from the project virtual environment. They
+now consistently use `.venv/bin/python`.
+
+Current `standalone-dev` head after these review fixes:
+
+```text
+32616917489c41963ee2122133d0e0e56dc29541
+```
+
+Relevant follow-up commits:
+
+```text
+f6713de  Use core surface preflight for rate-limit cleanup
+665063f  Fix rate-limit cleanup test patch targets
+5324a0e  Use project Python in Desktop gate hint
+3ffc883  Document project Python for Desktop gate
+3261691  Document project Python for S3 gate
+```
+
+GitHub CI on `3261691...` has already passed scaffold-static,
+runtime-import/focused regression, broad Codex regression, and release-metadata;
+macOS compatibility was still running at the time of this progress update.
+
+No new full live S3 should be started until the local focused/full regression
+passes on this exact SHA and the account-side rate-limit cooldown has cleared.
