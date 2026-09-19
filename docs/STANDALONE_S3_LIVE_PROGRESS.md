@@ -304,3 +304,38 @@ S4 local release gate           PENDING
 
 Keep `standalone-dev` frozen. Next candidate-bound action is the
 clean-checkout install/provider/rollback smoke on the same SHA.
+
+
+### Install smoke passed; S4 static security doc gap
+
+On exact candidate `4adeb956b1f31255a86c56354e3a06eead458b61`,
+clean-checkout install/provider/rollback smoke passed:
+
+```text
+INSTALL_SMOKE=PASS
+DEPENDENCY_BOOTSTRAP=PASS
+ACCEPTANCE_TARGET_RESET=PASS
+OFFICIAL_ROLLBACK=PASS
+BASIC_CODEX_REQUEST=PASS
+AUTH=UNCHANGED
+```
+
+The subsequent S4 local gate reached docs/version checks and then failed only on
+the SECURITY.md literal requirement:
+
+```text
+S4_DOCS_SYNC=PASS
+S4_VERSION_SYNC=PASS
+STANDALONE_S4_LOCAL=FAIL
+FAILURE_CLASS=security
+FAILURE_DETAIL=missing=127.0.0.1
+```
+
+A full static audit of the remaining S4 document predicates confirmed:
+version/tag/changelog, approval markers, stale-text checks, CORS/unsafe markers,
+and NOTICE provenance are already satisfied. The only static documentation gap
+is the explicit `127.0.0.1` security-default marker.
+
+This requires a documentation commit on `standalone-dev`, which moves the
+candidate SHA. Existing S3/Desktop/install results remain valid historical
+evidence but must be regenerated on the final frozen SHA before release.
