@@ -791,6 +791,69 @@ This changes the exact candidate SHA again. The earlier
 `6e16543...` S3 PASS remains historical; S3 and all downstream candidate-bound
 release evidence must be regenerated on the new SHA.
 
+## 2026-09-19 Active-generation text terminal-state race
+
+The exact candidate `2b4deda4b1cce012a60ddc3c2eaa9ddd25376f73`
+passed the targeted policy/S3 regressions and the full local suite:
+
+```text
+targeted: 75 passed
+full suite: 495 passed
+```
+
+Its live S3 run also closed the previous restart-resume readback blocker:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+```
+
+The next remote-compaction seed completed its visible contract:
+
+```text
+SEED_REPLY_EXACT=YES
+SEED_TOOL_EFFECTS=0
+PRIVATE_THREAD_CAPTURED=YES
+```
+
+The first coarse turn then failed with:
+
+```text
+RUN_FAIL coarse_turn_failed round=1 rc=1
+stream disconnected before completion: send_blocked_by_preexisting_generation
+```
+
+Private browser evidence showed the ChatGPT pre-fill idle guard detected the
+preceding seed turn as still generating, waited the full S3-specific 300-second
+window, and failed before mutating the composer. This proves the earlier
+pre-fill ordering fix remained effective.
+
+Source inspection identified the upstream lifecycle gap in
+`app/core/stream_monitor.py`: the ordinary text stable-count and long-silence
+completion branches could declare a turn terminal while
+`still_generating=True`. A final-looking DOM reply could therefore be returned
+to Codex while the same ChatGPT turn still exposed an active generation/stop
+state.
+
+The runtime now centralizes the ordinary-text terminal decision and requires the
+active generation state to clear before either stable-text or long-silence
+completion is accepted. The existing image/recovery branches remain outside
+that helper and retain their specialized behavior. Focused regression coverage
+proves active generation blocks both ordinary completion paths, idle generation
+allows them, and non-text/suppressed paths are not claimed by the helper.
+
+Implementation commits:
+
+```text
+f5e7cec  Require idle generation state for text completion
+52c9425  Cover active-generation text completion invariant
+```
+
+Local validation of these new commits is pending. The full candidate-bound S3
+run must not be repeated until the focused regression and repository full suite
+pass. Because these changes move HEAD, all candidate-bound release evidence must
+be regenerated on the final exact SHA after documentation is committed.
+
+
 ## Gate state
 
 ```text
