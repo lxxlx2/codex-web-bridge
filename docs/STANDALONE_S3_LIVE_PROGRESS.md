@@ -123,3 +123,29 @@ minimum, ordinary text completion must not report the turn terminal while the
 same active-turn generation indicator is still live. Any stale-generation
 recovery/interrupt behavior must be separately bounded and proven safe, rather
 than solved by simply extending the next-turn pre-fill timeout.
+
+
+### Runtime fix landed on standalone-dev
+
+The lifecycle fix and focused regression coverage have now been committed to
+`standalone-dev`. The current exact head after code, tests, gate documentation,
+and a non-semantic line-ending cleanup is:
+
+```text
+4adeb956b1f31255a86c56354e3a06eead458b61
+```
+
+Final diff from the previous candidate `2b4deda...` is intentionally small:
+
+```text
+app/core/stream_monitor.py                 +53 -4
+tests/test_stream_monitor_terminal_state.py +56
+docs/STANDALONE_S3_LIVE_GATE_2026-09-10.md +63
+```
+
+The runtime change requires ordinary text completion to observe
+`still_generating=False` before accepting either stable-count or long-silence
+termination. Existing image/recovery branches remain separate.
+
+Local validation is now the next step. Do not run full live S3 until the focused
+test and repository full pytest suite pass on this exact head.
