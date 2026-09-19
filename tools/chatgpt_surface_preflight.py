@@ -2,9 +2,10 @@
 """Acceptance-only ChatGPT Web surface normalization and readiness probe.
 
 This tool is intentionally narrow: it may select one exact Chat control from a
-controlled Work/ambiguous ChatGPT surface and may navigate an existing Chat
-conversation to New Chat. It never sends messages, clears composer text,
-changes accounts, or bypasses quota/rate limits.
+controlled Work/ambiguous ChatGPT surface, dismiss one acknowledgement-only
+stale rate-limit notice, and may navigate an existing Chat conversation to New
+Chat. It never sends messages, clears composer text, changes accounts, clicks
+Retry, or bypasses quota/rate limits.
 """
 
 from __future__ import annotations
@@ -32,6 +33,9 @@ from app.services.chatgpt_web_surface import (  # noqa: E402
 
 _SWITCH_MARKER_ATTR = "data-uwa-acceptance-chat-target"
 _SWITCH_MARKER_SELECTOR = f'[{_SWITCH_MARKER_ATTR}="1"]'
+
+_RATE_LIMIT_ACK_MARKER_ATTR = "data-uwa-acceptance-rate-limit-ack"
+_RATE_LIMIT_ACK_MARKER_SELECTOR = f'[{_RATE_LIMIT_ACK_MARKER_ATTR}="1"]'
 
 _SWITCH_CHAT_JS = rf"""
 const marker = '{_SWITCH_MARKER_ATTR}';
@@ -166,6 +170,69 @@ document.querySelectorAll('[{_SWITCH_MARKER_ATTR}]').forEach(
 return true;
 """
 
+_RATE_LIMIT_ACK_JS = rf"""
+const marker = '{_RATE_LIMIT_ACK_MARKER_ATTR}';
+document.querySelectorAll(`[${{marker}}]`).forEach(
+  (el) => el.removeAttribute(marker)
+);
+const visible = (el) => {{
+  if (!el) return false;
+  const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+  const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+  return (!style || (style.display !== 'none' && style.visibility !== 'hidden')) &&
+    (!rect || (rect.width > 0 && rect.height > 0));
+}};
+const norm = (value) => String(value || '')
+  .replace(/[\s\u200b-\u200d\ufeff]+/g, ' ')
+  .trim()
+  .toLowerCase();
+const rateLike = (value) => {{
+  const text = norm(value);
+  return text.includes('too many requests') ||
+    text.includes('making requests too quickly') ||
+    text.includes('temporarily limited access to your conversations') ||
+    text.includes('请求过于频繁') ||
+    text.includes('暂时限制你访问对话记录');
+}};
+const dialogs = Array.from(document.querySelectorAll(
+  '[role="dialog"],[aria-modal="true"]'
+)).filter(visible).filter((el) => rateLike(el.innerText || el.textContent));
+
+if (dialogs.length !== 1) {{
+  return {{marked:false, dialogs:dialogs.length, ack_matches:0}};
+}}
+
+const ackValues = new Set([
+  'got it',
+  'ok',
+  'okay',
+  '明白了',
+  '知道了',
+]);
+const buttons = Array.from(dialogs[0].querySelectorAll(
+  'button,[role="button"]'
+)).filter(visible);
+const matches = buttons.filter((el) => {{
+  const text = norm(el.innerText || el.textContent);
+  const aria = norm(el.getAttribute && el.getAttribute('aria-label'));
+  return ackValues.has(text) || ackValues.has(aria);
+}});
+
+if (matches.length !== 1) {{
+  return {{marked:false, dialogs:1, ack_matches:matches.length}};
+}}
+
+matches[0].setAttribute(marker, '1');
+return {{marked:true, dialogs:1, ack_matches:1}};
+"""
+
+_CLEAN_RATE_LIMIT_ACK_MARKER_JS = rf"""
+document.querySelectorAll('[{_RATE_LIMIT_ACK_MARKER_ATTR}]').forEach(
+  (el) => el.removeAttribute('{_RATE_LIMIT_ACK_MARKER_ATTR}')
+);
+return true;
+"""
+
 # ChatGPT can paint an apparently-ready Chat composer before account-level mode
 # restoration finishes and flips the root page back to Work. Acceptance must
 # observe a short consecutive ready window before it is allowed to send.
@@ -233,6 +300,91 @@ def _physical_click_marked_chat(tab: Any, result: Any) -> bool:
             tab.run_js(_CLEAN_SWITCH_MARKER_JS)
         except Exception:
             pass
+
+
+def _physical_click_rate_limit_ack(tab: Any) -> bool:
+    """Dismiss one acknowledgement-only rate-limit dialog, never Retry/quota controls."""
+
+    try:
+        result = tab.run_js(_RATE_LIMIT_ACK_JS)
+    except Exception:
+        return False
+
+    if not isinstance(result, dict) or not result.get("marked"):
+        return False
+
+    try:
+        element = tab.ele(
+            f"css:{_RATE_LIMIT_ACK_MARKER_SELECTOR}",
+            timeout=1.5,
+        )
+        if not element:
+            return False
+        clicked = element.click(
+            by_js=False,
+            timeout=2.0,
+            wait_stop=True,
+        )
+        return clicked is not False
+    except Exception:
+        return False
+    finally:
+        try:
+            tab.run_js(
+                _CLEAN_RATE_LIMIT_ACK_MARKER_JS
+            )
+        except Exception:
+            pass
+
+
+def _wait_after_rate_limit_dismiss(
+    tab: Any,
+    timeout_seconds: float,
+) -> Any:
+    """Wait for a dismissed stale notice to disappear.
+
+    If the account is genuinely still limited, the dialog/status will remain or
+    reappear and the caller continues to fail closed as rate_limited.
+    """
+
+    deadline = time.monotonic() + max(
+        1.0,
+        float(timeout_seconds),
+    )
+    state = inspect_chatgpt_surface(
+        tab,
+        target_count=1,
+    )
+    ready_samples = 0
+
+    while time.monotonic() < deadline:
+        if (
+            state.blocking_reason == "none"
+            and state.surface_kind == "chat"
+        ):
+            ready_samples += 1
+            if ready_samples >= max(
+                1,
+                int(READY_STABLE_SAMPLES),
+            ):
+                break
+        else:
+            ready_samples = 0
+            if state.blocking_reason not in {
+                "rate_limited",
+                "unknown_surface",
+                "prompt_missing",
+                "send_missing",
+            }:
+                break
+
+        time.sleep(POLL_SECONDS)
+        state = inspect_chatgpt_surface(
+            tab,
+            target_count=1,
+        )
+
+    return state
 
 
 def _wait_initial_surface(tab: Any, timeout_seconds: float) -> Any:
@@ -334,6 +486,18 @@ def run(*, timeout_seconds: float = 8.0) -> int:
 
     tab = tabs[0]
     state = _wait_initial_surface(tab, timeout_seconds)
+
+    # ChatGPT can leave an acknowledgement-only "requests too frequent" dialog
+    # visible after the cooldown has already ended. Dismiss that stale notice
+    # once and re-probe. This does not bypass an active limit: if the blocker
+    # remains or reappears, preflight still fails closed as rate_limited.
+    if state.blocking_reason == "rate_limited":
+        if _physical_click_rate_limit_ack(tab):
+            actions.append("dismiss_rate_limit_notice")
+            state = _wait_after_rate_limit_dismiss(
+                tab,
+                timeout_seconds,
+            )
 
     if _can_safely_select_chat(state):
         original_reason = state.blocking_reason
