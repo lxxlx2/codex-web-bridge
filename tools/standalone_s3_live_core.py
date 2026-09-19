@@ -57,7 +57,10 @@ DEFAULT_TURN_TIMEOUT_SEC = 600
 DEFAULT_COMPACTION_TIMEOUT_SEC = 900
 DEFAULT_CLEANUP_TIMEOUT_SEC = 30.0
 DEFAULT_COMPACTION_COOLDOWN_SEC = 180
+DEFAULT_MIN_LIVE_TURN_GAP_SEC = 30
 KNOWN_INTEGRATED_REPO = "lxxlx2/universal-web-api"
+
+_LAST_LIVE_TURN_FINISHED_AT: float | None = None
 
 
 class GateFailure(RuntimeError):
@@ -437,7 +440,7 @@ def _run_restart_continuity(
     private_dir: Path,
     timeout_sec: int,
 ) -> None:
-    seed = _run_codex_turn(
+    seed = _run_paced_codex_turn(
         codex=codex,
         cwd=root,
         prompt=desktop.PROMPTS["context_1"],
@@ -453,7 +456,7 @@ def _run_restart_continuity(
     _restart_standalone_listener()
     _health_ready(require_clean=True)
 
-    resumed = _run_codex_turn(
+    resumed = _run_paced_codex_turn(
         codex=codex,
         cwd=root,
         prompt=_restart_context_prompt(),
@@ -501,6 +504,71 @@ def _probe_trigger_reply_acceptable(
             "TRIGGER_REPLY_DEFERRED_TO_POST_COMPACTION_RECOVERY"
         ) == "YES"
     )
+
+
+def _min_live_turn_gap_seconds() -> int:
+    raw = str(
+        os.getenv(
+            "UWA_S3_MIN_LIVE_TURN_GAP_SEC",
+            DEFAULT_MIN_LIVE_TURN_GAP_SEC,
+        )
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_MIN_LIVE_TURN_GAP_SEC
+    return max(0, min(value, 120))
+
+
+def _pace_before_live_turn(
+    *,
+    gap_seconds: int | None = None,
+) -> None:
+    """Enforce a minimum quiet gap between acceptance Web turns."""
+
+    global _LAST_LIVE_TURN_FINISHED_AT
+
+    gap = (
+        _min_live_turn_gap_seconds()
+        if gap_seconds is None
+        else max(0, min(int(gap_seconds), 120))
+    )
+    if gap <= 0 or _LAST_LIVE_TURN_FINISHED_AT is None:
+        return
+
+    elapsed = max(
+        0.0,
+        time.monotonic()
+        - _LAST_LIVE_TURN_FINISHED_AT,
+    )
+    remaining = gap - elapsed
+
+    if remaining <= 0:
+        return
+
+    print(
+        f"S3_INTER_TURN_COOLDOWN_SEC={remaining:.1f}",
+        flush=True,
+    )
+    time.sleep(remaining)
+
+
+def _mark_live_turn_finished() -> None:
+    global _LAST_LIVE_TURN_FINISHED_AT
+    _LAST_LIVE_TURN_FINISHED_AT = time.monotonic()
+
+
+def _reset_live_turn_pacer() -> None:
+    global _LAST_LIVE_TURN_FINISHED_AT
+    _LAST_LIVE_TURN_FINISHED_AT = None
+
+
+def _run_paced_codex_turn(**kwargs: Any):
+    _pace_before_live_turn()
+    try:
+        return _run_codex_turn(**kwargs)
+    finally:
+        _mark_live_turn_finished()
 
 
 def _compaction_cooldown_seconds() -> int:
@@ -610,7 +678,11 @@ def _run_remote_compaction_recovery(
     original_turn = trigger_probe._run_turn_preserving_failure
 
     def capture_turn(**kwargs: Any):
-        obs = original_turn(**kwargs)
+        _pace_before_live_turn()
+        try:
+            obs = original_turn(**kwargs)
+        finally:
+            _mark_live_turn_finished()
         ids = list(dict.fromkeys(obs.thread_ids))
         if ids and "id" not in captured_thread:
             if len(ids) != 1:
@@ -678,6 +750,7 @@ def _run_remote_compaction_recovery(
         private_dir,
     )
 
+    _pace_before_live_turn()
     try:
         recovery = large_context._run_codex_turn(
             codex=codex,
@@ -688,10 +761,13 @@ def _run_remote_compaction_recovery(
             timeout_sec=timeout_sec,
         )
     except RuntimeError as exc:
+        _mark_live_turn_finished()
         raise GateFailure(
             "post_compaction_recovery",
             "codex_turn_runtime_error",
         ) from exc
+    else:
+        _mark_live_turn_finished()
     if recovery.returncode != 0:
         raise GateFailure("post_compaction_recovery", f"rc={recovery.returncode}")
     if not large_context._verify_thread(recovery, thread_id):
@@ -773,6 +849,7 @@ def run(
 ) -> int:
     private_dir = _private_dir(private_root)
     listener_transition = "UNKNOWN"
+    _reset_live_turn_pacer()
     try:
         _preflight_repo()
         print("S3_PHASE=REPO_PREFLIGHT_PASS")
