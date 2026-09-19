@@ -422,6 +422,90 @@ def looks_like_post_tool_unavailable_claim(text: str) -> bool:
     return any(pattern.search(value) for pattern in _POST_TOOL_UNAVAILABLE_PATTERNS)
 
 
+def _tool_result_exit_zero(message: Dict[str, Any]) -> bool:
+    if not isinstance(message, dict):
+        return False
+    role = str(message.get("role") or "").strip().lower()
+    if role not in {"tool", "function"}:
+        return False
+
+    text = _message_content_text(message)
+    if not text:
+        return False
+
+    patterns = (
+        r"Process exited with code 0\b",
+        r"exit(?:ed)?(?:\s+with)?(?:\s+code)?\s*[:=]?\s*0\b",
+        r"\"exit_code\"\s*:\s*0\b",
+    )
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in patterns
+    )
+
+
+def _successful_acceptance_workspace_validation_observed(
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Return True only for a real successful acceptance workspace probe."""
+
+    calls: Dict[str, str] = {}
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for item in tool_calls:
+                if not isinstance(item, dict):
+                    continue
+                if _tool_name(item) not in _EXEC_LIKE_TOOLS:
+                    continue
+                call_id = str(item.get("id") or "").strip()
+                args = _decode_tool_arguments(item)
+                command = str(args.get("cmd") or args.get("command") or "").strip()
+                if call_id and command:
+                    calls[call_id] = command
+
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"tool", "function"}:
+            continue
+
+        call_id = str(
+            message.get("tool_call_id")
+            or message.get("call_id")
+            or ""
+        ).strip()
+        command = calls.get(call_id, "")
+
+        if not command or not _tool_result_exit_zero(message):
+            continue
+
+        required = (
+            "pwd",
+            "test -f .uwa_codex_acceptance",
+            "test -d large_context",
+        )
+        if all(fragment in command for fragment in required):
+            return True
+
+    return False
+
+
+def looks_like_false_acceptance_workspace_mismatch(
+    assistant_text: str,
+    messages: List[Dict[str, Any]],
+) -> bool:
+    return (
+        str(assistant_text or "").strip()
+        == "ACCEPTANCE_WORKSPACE_MISMATCH"
+        and _successful_acceptance_workspace_validation_observed(
+            messages
+        )
+    )
+
+
 def _decode_tool_arguments(tool_call: Dict[str, Any]) -> Dict[str, Any]:
     function_data = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
     raw = function_data.get("arguments")
@@ -501,6 +585,15 @@ def should_repair_client_workspace_refusal(
     )
 
     has_history = _has_tool_history(messages)
+    if (
+        has_history
+        and looks_like_false_acceptance_workspace_mismatch(
+            assistant_text,
+            messages,
+        )
+    ):
+        return True
+
     if has_history:
         # Once a workspace tool has really appeared in the conversation, an
         # explicit later claim that the same declared tool is absent is a direct
@@ -656,6 +749,25 @@ def build_client_workspace_repair_messages(
             "Use the command/action required by the Original user request. "
             "Do not invent a result; the client will execute the emitted call."
         )
+    elif looks_like_false_acceptance_workspace_mismatch(
+        assistant_text,
+        messages,
+    ):
+        correction = (
+            "The previous reply incorrectly returned ACCEPTANCE_WORKSPACE_MISMATCH even though the real client "
+            "workspace-validation exec_command already completed with exit code 0. The user's contract says that "
+            "sentinel is allowed only when the complete validation command exits non-zero. Treat the successful "
+            "tool result as authoritative and continue the unfinished post-validation steps."
+        )
+        if repeated:
+            correction += (
+                " This false mismatch sentinel has already repeated. Do not rerun or reinterpret the successful "
+                "workspace validation as a failure."
+            )
+        action = (
+            f"Call {preferred_name} now to execute the next unfinished workspace step from the compacted continuation "
+            "state. Return only the corrected tool-call output."
+        )
     elif (
         compacted_context
         and looks_like_missing_task_clarification(
@@ -733,6 +845,7 @@ __all__ = [
     "looks_like_local_workspace_request",
     "looks_like_missing_task_clarification",
     "looks_like_post_tool_unavailable_claim",
+    "looks_like_false_acceptance_workspace_mismatch",
     "should_repair_client_workspace_refusal",
     "user_explicitly_requested_root_workdir",
 ]
