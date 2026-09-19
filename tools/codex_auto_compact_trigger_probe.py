@@ -528,6 +528,12 @@ def run(
             thread_id=thread_id,
             timeout_sec=timeout_sec,
         )
+        if observation.returncode != 0:
+            print(
+                f"RUN_FAIL coarse_turn_failed round={round_index} "
+                f"rc={observation.returncode}"
+            )
+            return 1
         current_cumulative = cumulative_tokens(observation)
         if current_cumulative is None:
             print(f"RUN_FAIL coarse_usage_missing round={round_index}")
@@ -578,6 +584,12 @@ def run(
             timeout_sec=timeout_sec,
         )
 
+        if observation.returncode != 0:
+            print(
+                f"RUN_FAIL fine_turn_failed round={round_index} "
+                f"rc={observation.returncode}"
+            )
+            return 1
         current_cumulative = cumulative_tokens(observation)
 
         if current_cumulative is None:
@@ -642,6 +654,12 @@ def run(
             timeout_sec=timeout_sec,
         )
 
+        if observation.returncode != 0:
+            print(
+                f"RUN_FAIL transition_turn_failed round={round_index} "
+                f"rc={observation.returncode}"
+            )
+            return 1
         current_cumulative = cumulative_tokens(observation)
 
         if current_cumulative is None:
@@ -700,6 +718,12 @@ def run(
             timeout_sec=timeout_sec,
         )
 
+        if observation.returncode != 0:
+            print(
+                f"RUN_FAIL arm_turn_failed round={round_index} "
+                f"rc={observation.returncode}"
+            )
+            return 1
         current_cumulative = cumulative_tokens(observation)
 
         if current_cumulative is None:
