@@ -322,6 +322,38 @@ Regression coverage uses the exact live Chinese reply, verifies conversion into 
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 False workspace-mismatch sentinel after successful validation
+
+The S3 run on `6f9e4fd49d2378c33dac0e665c257e450ead547d` again passed the remote compaction probe and reached post-compaction recovery. The private trace proved the complete required validation command executed successfully:
+
+```text
+COMMAND_1:
+pwd && test -f .uwa_codex_acceptance && test -d large_context
+EXIT_CODE=0
+OUTPUT=/Users/jerson/uwa-codex-acceptance
+
+COMMAND_2:
+pwd && ls -la large_context
+EXIT_CODE=0
+```
+
+The acceptance workspace independently confirmed both `.uwa_codex_acceptance` and `large_context` were present and the exact validation command returned 0. Nevertheless the final Web reply was:
+
+```text
+ACCEPTANCE_WORKSPACE_MISMATCH
+```
+
+and no `large_context/result.txt` was created.
+
+This is a post-tool interpretation error. The final acceptance prompt allows the mismatch sentinel only when the complete validation command exits non-zero, so returning it after a real exit-code-0 result directly contradicts authoritative client-tool evidence.
+
+The client workspace policy now repairs this exact contradiction only when history contains a real successful `exec_command` whose command includes the full acceptance validation fragments and whose corresponding tool result reports exit code 0. A genuine non-zero validation result remains untouched. The repair directs the model to continue the pending post-validation workspace steps from compacted state instead of reinterpreting validation.
+
+Regression coverage reproduces the successful validation plus extra directory inspection observed live, verifies recovery into the pending result-file write, and verifies an exit-code-1 validation does not trigger repair.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
