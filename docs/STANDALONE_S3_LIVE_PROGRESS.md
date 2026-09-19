@@ -390,3 +390,40 @@ gap. Treat `131abfd...` as the frozen final candidate unless a release-blocking
 product or release-gate defect is found. Next required evidence is final
 candidate-bound S3 Gate B, then Desktop E2E, install smoke, and the complete S4
 candidate-match gate on this exact SHA.
+
+
+### Final candidate S3 Gate B restart-resume mismatch
+
+Frozen candidate:
+
+```text
+131abfd9cfe6d68ede3e3b34f195ad56ea8aa20f
+```
+
+The final candidate-bound S3 Gate B reached the restart-continuity resume turn
+and failed with:
+
+```text
+S3_PHASE=RELEASE_PREFLIGHT_PASS
+S3_PHASE=ACCEPTANCE_TARGET_RESET
+S3_PHASE=BROWSER_SURFACE_PREFLIGHT_PASS
+S3_CHATGPT_SURFACE_PREFLIGHT=PASS
+S3_PHASE=REPO_PREFLIGHT_PASS
+S3_PHASE=UWA_ROUTE_CONFIGURED
+S3_PHASE=STANDALONE_LISTENER_READY
+S3_PHASE=LOCAL_GATES_PASS
+S3_INTER_TURN_COOLDOWN_SEC=58.5
+STANDALONE_S3=FAIL
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+A browser screenshot taken after the failure shows a visible
+`LARGE_CONTEXT_READY` response with an active Stop button. That marker belongs
+to the compaction probe, while this run reported failure before
+`RESTART_CONTINUITY_PASS`. Treat the screenshot as suspicious surface state,
+not yet as proof of the current failing turn. The next step is to inspect the
+private `restart-seed.jsonl`, `restart-resume.jsonl`, acceptance-target reset
+metadata, and matching UWA log window. Do not rerun full S3 until the exact final
+reply and browser-target ownership are classified.
