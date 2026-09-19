@@ -217,7 +217,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     s3._passive_surface_recheck(private_dir)
             self.assertEqual(ctx.exception.gate, "chatgpt_work_surface")
 
-    def test_mid_run_rate_limit_is_promoted_as_external_surface_failure(self) -> None:
+    def test_mid_run_rate_limit_is_promoted_and_acknowledgement_is_cleaned(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             private_dir = Path(raw)
             payload = {
@@ -231,12 +231,76 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     }
                 }
             }
-            with patch.object(s3.core, "_health_ready", return_value=payload):
+            cleanup_result = {
+                "ok": True,
+                "dismissed": True,
+                "target_count": 1,
+                "surface_kind": "chat",
+                "composer_empty": True,
+                "blocking_reason": "none",
+            }
+            with (
+                patch.object(s3.core, "_health_ready", return_value=payload),
+                patch.object(
+                    s3.surface_preflight,
+                    "dismiss_rate_limit_notice_in_place",
+                    return_value=cleanup_result,
+                ) as cleanup_mock,
+            ):
                 failure = s3._external_surface_failure_after_core_failure(private_dir)
+
             self.assertIsNotNone(failure)
             assert failure is not None
             self.assertEqual(failure.gate, "chatgpt_web_rate_limited")
             self.assertEqual(failure.detail, "rate_limited")
+            cleanup_mock.assert_called_once_with(timeout_seconds=12.0)
+
+            cleanup = json.loads(
+                (private_dir / "rate-limit-failure-cleanup.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(cleanup["dismissed"])
+            self.assertTrue(cleanup["ok"])
+            self.assertEqual(cleanup["blocking_reason"], "none")
+
+    def test_mid_run_rate_limit_cleanup_failure_does_not_mask_external_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            private_dir = Path(raw)
+            payload = {
+                "chatgpt_web": {
+                    "surface": {
+                        "surface_kind": "chat",
+                        "surface_ready": False,
+                        "pathname_class": "conversation",
+                        "composer_empty": True,
+                        "blocking_reason": "rate_limited",
+                    }
+                }
+            }
+            with (
+                patch.object(s3.core, "_health_ready", return_value=payload),
+                patch.object(
+                    s3.surface_preflight,
+                    "dismiss_rate_limit_notice_in_place",
+                    side_effect=RuntimeError("browser cleanup failed"),
+                ),
+            ):
+                failure = s3._external_surface_failure_after_core_failure(private_dir)
+
+            self.assertIsNotNone(failure)
+            assert failure is not None
+            self.assertEqual(failure.gate, "chatgpt_web_rate_limited")
+
+            cleanup = json.loads(
+                (private_dir / "rate-limit-failure-cleanup.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertFalse(cleanup["dismissed"])
+            self.assertFalse(cleanup["ok"])
+            self.assertEqual(cleanup["blocking_reason"], "cleanup_exception")
+            self.assertEqual(cleanup["error_type"], "RuntimeError")
 
     def test_mid_run_unknown_surface_does_not_mask_core_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
