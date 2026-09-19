@@ -1250,3 +1250,127 @@ def test_real_failed_acceptance_workspace_validation_keeps_mismatch_sentinel(mon
         parsed=parsed,
     ) is False
 
+def _successful_restart_workspace_validation_history():
+    return [
+        {
+            "role": "user",
+            "content": (
+                "这是同一个 Codex 对话的第二轮重启恢复验收。"
+                "第一步必须通过客户端 exec_command 在当前工作区执行 "
+                "pwd && test -f .uwa_codex_acceptance && test -d context。"
+                "如果工作区校验失败，只回复 ACCEPTANCE_WORKSPACE_MISMATCH。"
+                "校验成功后，只使用上一轮对话上下文中记住的令牌，"
+                "通过客户端 exec_command 创建 context/result.txt，"
+                "随后再次读取并确认该文件。完成后只回复 CONTEXT_PASS。"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_restart_validate",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && test -f .uwa_codex_acceptance '
+                            '&& test -d context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_restart_validate",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "/Users/jerson/uwa-codex-acceptance\n"
+            ),
+        },
+    ]
+
+
+def test_repairs_false_restart_workspace_mismatch_after_successful_validation(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_WORKSPACE_MISMATCH",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_successful_restart_workspace_validation_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is True
+
+
+def test_false_restart_workspace_mismatch_repairs_into_pending_context_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            "ACCEPTANCE_WORKSPACE_MISMATCH",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"echo CONTEXT-REMEMBERED > context/result.txt '
+                '&& cat context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=_successful_restart_workspace_validation_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages)
+            or next(replies)
+        ),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 2
+    assert "completed with exit code 0" in seen[1][1]["content"]
+    assert "current acceptance request" in seen[1][1]["content"]
+    assert "context/result.txt" in seen[1][1]["content"]
+
+
+def test_real_failed_restart_workspace_validation_keeps_mismatch_sentinel(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    messages = _successful_restart_workspace_validation_history()
+    messages[2] = {
+        "role": "tool",
+        "tool_call_id": "call_restart_validate",
+        "name": "exec_command",
+        "content": "Process exited with code 1\nFinal output:\n",
+    }
+
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_WORKSPACE_MISMATCH",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is False
+
