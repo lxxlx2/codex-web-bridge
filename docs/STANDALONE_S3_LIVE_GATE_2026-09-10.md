@@ -595,6 +595,37 @@ continuation state so it is correct for both paths.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Post-compaction readback toolset refusal
+
+The S3 run on `2167f341961a97fa40dc8d3b8ae22c53114d3928`
+passed restart continuity and the compaction cooldown, then reached the final
+post-compaction recovery sequence. The live Web state showed that the
+`large_context/result.txt` write step had already completed and only the real
+readback remained. The model then replied:
+
+```text
+无法执行该 exec_command 调用，因为当前实际可用工具集中没有这个客户端工具。
+我不能伪造 <adapter_calls> 并将其当作已执行结果。
+```
+
+This is a post-tool contradiction: the same conversation already contains a
+successful client `exec_command` call/result, so claiming that the current
+toolset has no such client tool is invalid. The existing post-tool refusal
+patterns covered unavailable/exposed wording and readback-specific refusals,
+but did not match this exact word order where `exec_command` appears before
+"当前实际可用工具集中没有这个客户端工具".
+
+The post-tool detector now covers this current-toolset-absent wording. The
+repair remains gated on actual prior workspace-tool history, so ordinary
+capability statements without a real prior client tool call are unaffected.
+Regression coverage reproduces the exact live Chinese refusal and verifies
+recovery into a real `exec_command` readback of
+`large_context/result.txt`.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
