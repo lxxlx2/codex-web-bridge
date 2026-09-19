@@ -20,6 +20,7 @@ Safety:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -34,6 +35,7 @@ import standalone_s3_live_core as core
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CDP_BASE = "http://127.0.0.1:9222"
+DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 180
 _EXTERNAL_SURFACE_FAILURES = {
     "chatgpt_work_surface",
     "chatgpt_work_quota_exhausted",
@@ -240,7 +242,11 @@ def _run_surface_preflight(*, python: str, private_dir: Path) -> dict[str, Any]:
         "actions": [
             str(value)
             for value in list(payload.get("actions") or [])
-            if str(value) in {"switch_to_chat", "new_chat"}
+            if str(value) in {
+                "switch_to_chat",
+                "new_chat",
+                "dismiss_rate_limit_notice",
+            }
         ],
     }
     core._write_private(
@@ -252,6 +258,64 @@ def _run_surface_preflight(*, python: str, private_dir: Path) -> dict[str, Any]:
         failure = str(payload.get("failure_class") or "chatgpt_surface_prepare_failed")
         raise GateFailure(failure, str(payload.get("blocking_reason") or "surface_not_ready"))
     return sanitized
+
+
+def _rate_limit_cooldown_seconds() -> int:
+    raw = str(
+        os.getenv(
+            "UWA_S3_RATE_LIMIT_COOLDOWN_SEC",
+            DEFAULT_RATE_LIMIT_COOLDOWN_SEC,
+        )
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_RATE_LIMIT_COOLDOWN_SEC
+    return max(0, min(value, 900))
+
+
+def _cooldown_after_rate_limit_notice(
+    private_dir: Path,
+    *,
+    seconds: int | None = None,
+) -> None:
+    """Wait quietly after dismissing a rate-limit notice before sending again.
+
+    Dismissing the UI notice only proves the modal was acknowledged. It does
+    not prove the account-side limiter has reset. A bounded quiet period avoids
+    immediately starting the request-heavy S3 probe inside the same cooldown
+    window. The final passive recheck still fails closed if a blocker is visible.
+    """
+
+    delay = (
+        _rate_limit_cooldown_seconds()
+        if seconds is None
+        else max(0, min(int(seconds), 900))
+    )
+    _emit(f"S3_RATE_LIMIT_COOLDOWN_SEC={delay}")
+
+    started = time.monotonic()
+    if delay > 0:
+        time.sleep(delay)
+
+    _passive_surface_recheck(private_dir)
+
+    elapsed = max(0.0, time.monotonic() - started)
+    core._write_private(
+        private_dir / "rate-limit-cooldown.json",
+        json.dumps(
+            {
+                "configured_seconds": delay,
+                "elapsed_seconds": round(elapsed, 3),
+                "surface_recheck": "pass",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+    )
+    _emit("S3_PHASE=RATE_LIMIT_COOLDOWN_PASS")
 
 
 def _passive_surface_recheck(private_dir: Path) -> dict[str, Any]:
@@ -350,10 +414,18 @@ def run(
         _reset_acceptance_chatgpt_target()
         _emit("S3_PHASE=ACCEPTANCE_TARGET_RESET")
 
-        _run_surface_preflight(
+        surface_preflight = _run_surface_preflight(
             python=python,
             private_dir=outer_private_dir,
         )
+
+        if "dismiss_rate_limit_notice" in surface_preflight.get(
+            "actions",
+            [],
+        ):
+            _cooldown_after_rate_limit_notice(
+                outer_private_dir,
+            )
 
         # The listener may still retain a pool reference to the disposed target.
         # Restart once after normalization, then require a passive re-check.
