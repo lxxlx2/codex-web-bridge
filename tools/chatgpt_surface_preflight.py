@@ -465,6 +465,64 @@ def _wait_after_chat_switch(tab: Any, timeout_seconds: float) -> Any:
     return state
 
 
+def dismiss_rate_limit_notice_in_place(
+    *,
+    timeout_seconds: float = 8.0,
+) -> dict[str, Any]:
+    """Dismiss one stale rate-limit acknowledgement without leaving the thread.
+
+    This helper is intentionally safe for mid-run continuity checks: it never
+    opens New Chat, never switches modes, never clicks Retry, and never sends a
+    message. If a real blocker remains after the acknowledgement is dismissed,
+    the returned state still reports that blocker.
+    """
+
+    tabs = controlled_chatgpt_tabs()
+    if len(tabs) != 1:
+        return {
+            "ok": False,
+            "dismissed": False,
+            "target_count": len(tabs),
+            "surface_kind": "unknown",
+            "composer_empty": False,
+            "blocking_reason": (
+                "target_missing"
+                if not tabs
+                else "target_ambiguous"
+            ),
+        }
+
+    tab = tabs[0]
+    state = inspect_chatgpt_surface(
+        tab,
+        target_count=1,
+    )
+    dismissed = False
+
+    if state.blocking_reason == "rate_limited":
+        dismissed = _physical_click_rate_limit_ack(
+            tab
+        )
+        if dismissed:
+            state = _wait_after_rate_limit_dismiss(
+                tab,
+                timeout_seconds,
+            )
+
+    return {
+        "ok": bool(
+            state.blocking_reason == "none"
+            and state.surface_kind == "chat"
+            and state.composer_empty
+        ),
+        "dismissed": dismissed,
+        "target_count": 1,
+        "surface_kind": state.surface_kind,
+        "composer_empty": state.composer_empty,
+        "blocking_reason": state.blocking_reason,
+    }
+
+
 def run(*, timeout_seconds: float = 8.0) -> int:
     actions: list[str] = []
     switch_probe: dict[str, Any] | None = None
