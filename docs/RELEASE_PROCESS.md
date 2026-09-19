@@ -1,0 +1,40 @@
+# Release process
+
+GitHub Releases are the public, immutable distribution checkpoints for Codex Web Bridge. A Release is created from an exact Git tag and is separate from ordinary development commits on `standalone-dev`.
+
+## Version policy
+
+The first standalone candidate will use:
+
+```text
+v0.1.0-rc.1
+```
+
+If further release-candidate fixes are required, increment the RC suffix. The first stable standalone release will use:
+
+```text
+v0.1.0
+```
+
+Patch-only fixes then use `v0.1.x`; larger compatible feature work may move to `v0.2.0`.
+
+## Release gate
+
+Do not create a GitHub Release from the current extraction branch. A tag is publishable only after all of the following are true:
+
+1. S1 dependency/import/runtime audit is closed.
+2. S2 standalone extraction and decoupling is closed.
+3. S3 unit/regression CI plus real Codex CLI/Desktop/live parity is PASS.
+4. Public-repository safety, provenance, LICENSE/NOTICE and dependency checks are PASS.
+5. The release tree is clean and the candidate commit is merged to `main`.
+6. `VERSION`, `CHANGELOG.md`, README status and release notes agree with the tag.
+
+## Planned release contents
+
+Each Release should identify the exact commit and verified environment, summarize user-visible changes and known limitations, and publish integrity metadata for any generated archive or installer. GitHub automatically provides source-code ZIP and tar.gz snapshots for the tagged commit.
+
+The project may later add generated convenience bundles and SHA-256 checksums, but those artifacts must be produced from the tagged `main` commit and must not contain browser profiles, cookies, credentials, private Responses state, prompts, tool bodies, wire traces or other local state.
+
+## Current state
+
+`standalone-dev` is the active `v0.1.0-rc.1` candidate branch. S1/S2 are closed. A real standalone Codex Desktop E2E path has been proven, but release evidence is valid only when final S3 live closure, Desktop E2E, clean-install smoke, CI, and the S4 local gate all pass on the exact same candidate SHA. `main` and the `v0.1.0-rc.1` tag remain untouched until that candidate-bound matrix is complete.

@@ -1,0 +1,19 @@
+# Changelog
+
+All notable standalone release changes will be documented here.
+
+## 0.1.0-rc.1
+
+Release-candidate scope for Codex Web Bridge:
+
+- Closed S1 dependency/import/runtime audit and S2 standalone extraction/decoupling.
+- Added standalone lifecycle/provider wrappers, loopback-safe defaults, public-repository safety checks, dependency/provenance gates, and clean-checkout install smoke.
+- Added ChatGPT Web surface classification, Chat/Work normalization for acceptance, quota/rate-limit fail-closed behavior, and bounded request cleanup.
+- Added Codex Responses V2 continuity, real client-tool round trips, restart continuity, native/Remote V2 compaction, required-tool hardening, and private wire observability.
+- Added a release-blocking real Codex Desktop E2E gate covering same-thread context, real local tool execution, route verification, and request-manager cleanup.
+- Added full standalone test collection enforcement and removed orphaned legacy tests whose implementation scripts were intentionally excluded from the standalone tree.
+- Release evidence must be produced on the exact candidate SHA: final S3 live closure, Desktop E2E, clean-install smoke, CI, and the S4 local gate all remain mandatory before tagging `v0.1.0-rc.1`.
+
+## Unreleased
+
+Post-RC work remains intentionally out of scope for the first candidate, including broader runtime slimming, cross-platform live certification, and non-release feature work.

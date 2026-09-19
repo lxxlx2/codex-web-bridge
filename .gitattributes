@@ -1,0 +1,3 @@
+# Preserve the legacy CRLF convention in this workflow module while allowing
+# Git whitespace checks to treat carriage returns at EOL as line endings.
+app/core/workflow/executor_send.py whitespace=cr-at-eol

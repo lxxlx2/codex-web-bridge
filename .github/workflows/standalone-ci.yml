@@ -1,0 +1,239 @@
+name: Standalone CI
+
+on:
+  push:
+    branches:
+      - standalone-dev
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  scaffold-static:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Compile standalone control and service entrypoints
+        run: |
+          python -m py_compile tools/bootstrap_from_uwa.py
+          python -m py_compile tools/install_codex_uwa_commands.py
+          python -m py_compile tools/codex_provider_switch.py
+          python -m py_compile tools/codex_uwa_lifecycle.py
+          python -m py_compile tools/codex_hybrid_ledger.py
+          python -m py_compile tools/codex_remote_compaction_compat.py
+          python -m py_compile tools/standalone_dependency_audit.py
+          python -m py_compile tools/standalone_s3_live_core.py
+          python -m py_compile tools/standalone_s3_live_acceptance.py
+          python -m py_compile tools/standalone_desktop_e2e_gate.py
+          python -m py_compile tools/chatgpt_surface_preflight.py
+          python -m py_compile tools/standalone_install_smoke.py
+          python -m py_compile tools/standalone_s4_release_gate.py
+          python -m py_compile security_guard.py
+          python -m py_compile start.py
+          python -m py_compile main.py
+          python -m py_compile app/api/standalone_routes.py
+          python -m py_compile app/api/codex_runtime.py
+          python -m py_compile app/api/codex_responses_v2.py
+          python -m py_compile app/services/codex_chatgpt_executor.py
+          python -m py_compile app/services/chatgpt_web_surface.py
+          python -m py_compile app/services/chatgpt_web_prepare.py
+          python -m py_compile app/services/chatgpt_web_rate_limit_guard.py
+      - name: Validate release control documents
+        run: |
+          test -f README.md
+          test -f README.en.md
+          test -f README.zh-CN.md
+          test -f NOTICE.md
+          test -f SECURITY.md
+          test -f LICENSE
+          test -f .env.example
+          test -f VERSION
+          test -f docs/RELEASE_PROCESS.md
+          test -f docs/RELEASE_REQUIREMENTS.md
+          test -f docs/RELEASE_TECHNICAL_DESIGN.md
+          test -f docs/RELEASE_TEST_PLAN.md
+          grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
+          grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
+          grep -q 'TEST_PLAN_APPROVED=YES' docs/RELEASE_TEST_PLAN.md
+      - name: Validate standalone import and entrypoint boundaries
+        run: |
+          python -m unittest tests.test_standalone_api_import_boundary
+          python -m unittest tests.test_standalone_entrypoint
+      - name: Public repository safety
+        run: python tools/public_repo_safety_check.py
+      - name: Validate extracted tree when present
+        shell: bash
+        run: |
+          if [ -f SOURCE_BASELINE ]; then
+            test -f LICENSE
+            test -f manifests/bootstrap-candidate.json
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('manifests/bootstrap-candidate.json').read_text(encoding='utf-8'))
+          assert data['source_commit'] == 'a140002e65a02a3323abcde3e1fdb8674710c996'
+          assert data['candidate_file_count'] > 0
+          print('EXTRACTED_MANIFEST=PASS')
+          PY
+          fi
+
+  runtime-import:
+    needs: scaffold-static
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Validate complete test collection
+        run: python -m pytest --collect-only -q tests
+      - name: Import standalone application
+        run: |
+          python - <<'PY'
+          import sys
+          import main
+          from app.api import codex_compact, codex_responses_v2, codex_runtime
+          from app.services.codex_chatgpt_executor import execute_chatgpt_nonstream
+          paths = {getattr(route, 'path', '') for route in main.app.routes}
+          required = {'/', '/health', '/v1/models', '/v1/responses', '/v1/responses/compact'}
+          missing = sorted(required - paths)
+          assert not missing, f'missing standalone routes: {missing}'
+          forbidden_prefixes = ('/api/config', '/api/system', '/api/browser', '/api/provider', '/v1/messages')
+          leaked = sorted(path for path in paths if path.startswith(forbidden_prefixes))
+          assert not leaked, f'generic UWA routes leaked into standalone app: {leaked}'
+          assert 'app.api.legacy_chat_runtime' not in sys.modules
+          assert codex_runtime._run_chat_completion_final is execute_chatgpt_nonstream
+          assert codex_compact._run_chat_completion_final is execute_chatgpt_nonstream
+          assert codex_responses_v2._run_chat_completion_final is execute_chatgpt_nonstream
+          print('STANDALONE_RUNTIME_IMPORT=PASS')
+          PY
+      - name: Run focused standalone regression
+        run: |
+          python -m pytest -q \
+            tests/test_codex_compat.py \
+            tests/test_codex_runtime_extraction.py \
+            tests/test_codex_chatgpt_executor.py \
+            tests/test_codex_chatgpt_executor_parity.py \
+            tests/test_chatgpt_web_surface.py \
+            tests/test_chatgpt_web_surface_preflight.py \
+            tests/test_chatgpt_web_prepare.py \
+            tests/test_chatgpt_web_rate_limit_guard.py \
+            tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_standalone_health.py \
+            tests/test_standalone_api_import_boundary.py \
+            tests/test_standalone_entrypoint.py \
+            tests/test_codex_standalone_s3_runner.py \
+            tests/test_standalone_desktop_e2e_gate.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
+      - name: Audit standalone dependency closure
+        run: |
+          python tools/standalone_dependency_audit.py --check --print-candidates --json-out /tmp/standalone-runtime-audit.json \
+            --why app.core.config \
+            --why app.models.schemas \
+            --why app.services.config.engine \
+            --why app.services.config.processors \
+            --why app.services.command_engine \
+            --why app.services.extractor_manager \
+            --why app.services.parser_manager
+
+  codex-regression:
+    needs: runtime-import
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Run broad non-live Codex regression
+        shell: bash
+        run: |
+          CODEX_TESTS=$(find tests -maxdepth 1 -name 'test_codex*.py' -print | sort)
+          python -m pytest -q \
+            $CODEX_TESTS \
+            tests/test_client_tool_policy*.py \
+            tests/test_chatgpt_web_*.py \
+            tests/test_standalone_health.py \
+            tests/test_standalone_desktop_e2e_gate.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py \
+            tests/test_install_codex_uwa_commands.py \
+            tests/test_security_hardening.py
+
+  release-metadata:
+    needs: codex-regression
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Validate frozen planning documents and provenance
+        run: |
+          test -f docs/RELEASE_REQUIREMENTS.md
+          test -f docs/RELEASE_TECHNICAL_DESIGN.md
+          test -f docs/RELEASE_TEST_PLAN.md
+          test -f LICENSE
+          test -f NOTICE.md
+          test -f SECURITY.md
+          grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
+          grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
+          grep -q 'TEST_PLAN_APPROVED=YES' docs/RELEASE_TEST_PLAN.md
+          grep -q 'leeguooooo/chatgpt-use' NOTICE.md
+          grep -q 'kev489/gpt-tool-use' NOTICE.md
+      - name: Run release gate unit tests
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q \
+            tests/test_standalone_desktop_e2e_gate.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
+
+  macos-compat:
+    needs: release-metadata
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install candidate runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Validate macOS release-control compatibility
+        run: |
+          python -m pytest -q \
+            tests/test_codex_provider_switch.py \
+            tests/test_codex_uwa_lifecycle.py \
+            tests/test_install_codex_uwa_commands.py \
+            tests/test_chatgpt_web_surface.py \
+            tests/test_chatgpt_web_surface_preflight.py \
+            tests/test_chatgpt_web_prepare.py \
+            tests/test_chatgpt_web_rate_limit_guard.py \
+            tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_codex_standalone_s3_runner.py \
+            tests/test_standalone_desktop_e2e_gate.py \
+            tests/test_standalone_install_smoke.py \
+            tests/test_standalone_s4_release_gate.py
