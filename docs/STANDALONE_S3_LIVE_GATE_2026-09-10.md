@@ -957,6 +957,67 @@ Because the runtime changed, candidate-bound evidence from `8122e87...` is
 historical. Local validation must pass before another full S3 run.
 
 
+## 2026-09-20 Repeated account-side rate-limit pacing
+
+Candidate `32616917489c41963ee2122133d0e0e56dc29541`
+passed all local release-critical regressions and GitHub CI, then the next live
+S3 run again reached:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+```
+
+before the request-heavy remote compaction probe encountered a genuine ChatGPT
+account-side rate limiter. Startup acknowledgement cleanup had already been
+verified with:
+
+```text
+{'ok': True, 'dismissed': True, 'target_count': 1,
+ 'surface_kind': 'chat', 'composer_empty': True,
+ 'blocking_reason': 'none'}
+```
+
+The outer gate correctly promoted the failed probe to:
+
+```text
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+This confirms the restart/readback and browser lifecycle fixes are no longer the
+active blocker. The remaining blocker is acceptance load versus the account's
+rolling request limit.
+
+The existing cross-run backoff already scales cooldown duration by the recorded
+rate-limit streak, but the per-turn recovery gap was previously a fixed 60
+seconds for every non-zero streak. Two consecutive live failures showed that
+60-second pacing is insufficient for the compaction stress probe on this
+account.
+
+The acceptance wrapper now scales per-turn pacing with the persisted streak:
+
+```text
+streak 1 -> 60 seconds
+streak 2+ -> 120 seconds (global live-pacer cap)
+```
+
+It also prints `S3_RATE_LIMIT_STREAK=<n>` and
+`S3_RATE_LIMIT_ACK_DISMISSED=YES|NO` so operators can see the recovery state
+and acknowledgement cleanup directly in terminal output.
+
+This changes acceptance pacing only. It does not weaken the compaction evidence,
+retry a failed request, bypass the limiter, or alter production bridge behavior.
+
+Implementation commits:
+
+```text
+26bbfb0  Adapt S3 pacing after repeated rate limits
+176cbde  Cover adaptive S3 rate-limit pacing
+```
+
+Local focused/full validation is required before another live S3 run.
+
+
 ## Gate state
 
 ```text
