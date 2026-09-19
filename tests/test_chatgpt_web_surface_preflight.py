@@ -40,11 +40,22 @@ class _Tab:
             return dict(self.switch_result)
         if script == preflight._CLEAN_SWITCH_MARKER_JS:
             return True
+        if script == preflight._RATE_LIMIT_ACK_JS:
+            return {
+                "marked": True,
+                "dialogs": 1,
+                "ack_matches": 1,
+            }
+        if script == preflight._CLEAN_RATE_LIMIT_ACK_MARKER_JS:
+            return True
         raise AssertionError("unexpected script")
 
     def ele(self, locator, timeout=0):
-        assert locator == f"css:{preflight._SWITCH_MARKER_SELECTOR}"
-        return _Element(self) if self.marker_found else None
+        if locator == f"css:{preflight._SWITCH_MARKER_SELECTOR}":
+            return _Element(self) if self.marker_found else None
+        if locator == f"css:{preflight._RATE_LIMIT_ACK_MARKER_SELECTOR}":
+            return _Element(self) if self.marker_found else None
+        raise AssertionError("unexpected locator")
 
 
 def _state(
@@ -318,3 +329,117 @@ def test_quota_blocker_fails_before_navigation(monkeypatch, capsys):
     assert rc == 1
     assert tab.clicks == 0
     assert '"failure_class": "chatgpt_work_quota_exhausted"' in capsys.readouterr().out
+
+def test_stale_rate_limit_notice_is_dismissed_then_preflight_continues(
+    monkeypatch,
+    capsys,
+):
+    tab = _Tab()
+    initial = _state(
+        kind="chat",
+        ready=False,
+        reason="rate_limited",
+        empty=True,
+    )
+    settled = _state(
+        kind="chat",
+        ready=True,
+        reason="none",
+        empty=True,
+    )
+
+    monkeypatch.setattr(
+        preflight,
+        "controlled_chatgpt_tabs",
+        lambda: [tab],
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_initial_surface",
+        lambda *_args, **_kwargs: initial,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_after_rate_limit_dismiss",
+        lambda *_args, **_kwargs: settled,
+    )
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 0
+    assert tab.clicks == 1
+    out = capsys.readouterr().out
+    assert '"dismiss_rate_limit_notice"' in out
+    assert '"ok": true' in out
+
+
+def test_persistent_rate_limit_still_fails_closed_after_ack_dismiss(
+    monkeypatch,
+    capsys,
+):
+    tab = _Tab()
+    limited = _state(
+        kind="chat",
+        ready=False,
+        reason="rate_limited",
+        empty=True,
+    )
+
+    monkeypatch.setattr(
+        preflight,
+        "controlled_chatgpt_tabs",
+        lambda: [tab],
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_initial_surface",
+        lambda *_args, **_kwargs: limited,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_after_rate_limit_dismiss",
+        lambda *_args, **_kwargs: limited,
+    )
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 1
+    assert tab.clicks == 1
+    out = capsys.readouterr().out
+    assert '"dismiss_rate_limit_notice"' in out
+    assert '"failure_class": "chatgpt_web_rate_limited"' in out
+
+
+def test_rate_limit_without_unique_ack_does_not_click(monkeypatch, capsys):
+    tab = _Tab()
+    limited = _state(
+        kind="chat",
+        ready=False,
+        reason="rate_limited",
+        empty=True,
+    )
+
+    monkeypatch.setattr(
+        preflight,
+        "controlled_chatgpt_tabs",
+        lambda: [tab],
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_initial_surface",
+        lambda *_args, **_kwargs: limited,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_physical_click_rate_limit_ack",
+        lambda *_args, **_kwargs: False,
+    )
+
+    rc = preflight.run(timeout_seconds=1)
+
+    assert rc == 1
+    assert tab.clicks == 0
+    out = capsys.readouterr().out
+    assert '"actions": []' in out
+    assert '"failure_class": "chatgpt_web_rate_limited"' in out
+
