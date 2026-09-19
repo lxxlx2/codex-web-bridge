@@ -854,6 +854,65 @@ pass. Because these changes move HEAD, all candidate-bound release evidence must
 be regenerated on the final exact SHA after documentation is committed.
 
 
+## 2026-09-19 Final Gate B post-tool readback refusal ordering
+
+Frozen candidate `131abfd9cfe6d68ede3e3b34f195ad56ea8aa20f`
+passed release/browser/repository/local preflight but failed the restart-resume
+turn before `RESTART_CONTINUITY_PASS`:
+
+```text
+STANDALONE_S3=FAIL
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+Private restart evidence showed the seed completed exactly with
+`CONTEXT_READY`. The resume turn then executed two real client
+`exec_command` calls: the acceptance workspace check and the write of the
+durable context token to `context/result.txt`. The write succeeded and the
+result file contained the expected token. The model then stopped with:
+
+```text
+无法完成所要求的本地 exec_command 读取校验，因此不能据实回复 CONTEXT_PASS。
+```
+
+The required third readback call was therefore missing.
+
+The existing post-tool workspace repair already handled two equivalent readback
+refusal orderings:
+
+```text
+exec_command -> cannot -> read/verify
+cannot -> read/verify -> exec_command
+```
+
+This live wording used the uncovered ordering:
+
+```text
+cannot -> exec_command -> read/verify
+```
+
+The client-tool policy now recognizes that third ordering only inside the
+existing post-tool contradiction path, where a real workspace client tool call
+has already appeared. It repairs the final text back into the next real client
+tool call instead of weakening required-tool duplicate suppression.
+
+Focused regression coverage reproduces the exact live Chinese refusal and proves
+that the roundtrip is repaired into another `exec_command` request for the
+readback step.
+
+Implementation commits:
+
+```text
+bacef19  Repair post-tool readback refusal ordering
+6758b0d  Cover Gate B readback refusal wording
+```
+
+This runtime change invalidates candidate-bound evidence from
+`131abfd9...`. After local validation, all exact-SHA live/release evidence must
+be regenerated on the new candidate.
+
+
 ## Gate state
 
 ```text
