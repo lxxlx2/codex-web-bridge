@@ -385,6 +385,42 @@ be proven.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Rate-limit cooldown after acknowledgement dismissal
+
+The S3 run on `0a96fe095444627d0428e2c587398bc07cd90f1a`
+demonstrated that stale-notice dismissal alone is not sufficient evidence that
+the account-side request limiter has reset. Preflight successfully performed:
+
+```text
+actions=["dismiss_rate_limit_notice", "new_chat"]
+blocking_reason=none
+```
+
+and an immediate S3 run then reached a new genuine rate-limit event during the
+restart/resume phase:
+
+```text
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=rc=1
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+The S3 wrapper now preserves the `dismiss_rate_limit_notice` action from
+surface normalization and, when observed, enforces a quiet cooldown before any
+live acceptance traffic is sent. The default is 180 seconds, configurable with
+`UWA_S3_RATE_LIMIT_COOLDOWN_SEC` and bounded to 0-900 seconds. After the quiet
+period, the wrapper performs another passive surface recheck and still fails
+closed if a blocker is visible.
+
+This does not bypass rate limiting and does not retry through an active
+limiter. It only prevents the acceptance runner from immediately re-entering a
+request-heavy sequence after acknowledging a recent rate-limit notice.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
