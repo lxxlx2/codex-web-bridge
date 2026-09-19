@@ -427,3 +427,40 @@ not yet as proof of the current failing turn. The next step is to inspect the
 private `restart-seed.jsonl`, `restart-resume.jsonl`, acceptance-target reset
 metadata, and matching UWA log window. Do not rerun full S3 until the exact final
 reply and browser-target ownership are classified.
+
+
+### Gate B restart-resume root cause fixed
+
+Private trace for candidate
+`131abfd9cfe6d68ede3e3b34f195ad56ea8aa20f` confirmed:
+
+```text
+seed: CONTEXT_READY
+resume exec #1: workspace validation
+resume exec #2: write EMBER-7319 to context/result.txt
+final: 无法完成所要求的本地 exec_command 读取校验，因此不能据实回复 CONTEXT_PASS。
+```
+
+The result file contained the expected token. The missing step was the third
+readback `exec_command`.
+
+The post-tool repair policy already recognized two equivalent readback refusal
+word orders but missed the live order `cannot -> exec_command -> read/verify`.
+That narrow ordering is now covered and regression-tested.
+
+Current `standalone-dev` head after runtime fix, tests, and gate documentation:
+
+```text
+8122e87e472ec5becbfa01f2310107d43c8a4d00
+```
+
+Candidate transition commits:
+
+```text
+bacef19  Repair post-tool readback refusal ordering
+6758b0d  Cover Gate B readback refusal wording
+8122e87  Record Gate B readback refusal fix
+```
+
+Local focused/full validation is pending. Do not rerun full S3 until those tests
+pass.
