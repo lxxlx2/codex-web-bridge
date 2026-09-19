@@ -1556,3 +1556,128 @@ def test_state_only_phrase_without_compacted_workspace_request_is_not_forced(mon
         parsed=parsed,
     ) is False
 
+LIVE_RESTART_READBACK_TOOL_REFUSAL = (
+    "无法继续完成验收：当前这一轮没有可调用的客户端 exec_command，"
+    "因此缺少对 context/result.txt 的最终读取确认，不能据此回复 CONTEXT_PASS。"
+)
+
+
+def _restart_context_write_completed_history():
+    return [
+        {
+            "role": "user",
+            "content": (
+                "这是同一个 Codex 对话的第二轮重启恢复验收。"
+                "先使用客户端 exec_command 校验当前工作区；"
+                "校验成功后写入 context/result.txt，"
+                "再使用客户端 exec_command 读取并确认文件，"
+                "最后只回复 CONTEXT_PASS。"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_restart_validate",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && test -f .uwa_codex_acceptance '
+                            '&& test -d context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_restart_validate",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "/Users/jerson/uwa-codex-acceptance\n"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_restart_write",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"echo CONTEXT-REMEMBERED > context/result.txt"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_restart_write",
+            "name": "exec_command",
+            "content": (
+                "Process exited with code 0\n"
+                "Final output:\n"
+            ),
+        },
+    ]
+
+
+def test_detects_live_restart_readback_tool_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    parsed = {
+        "mode": "final",
+        "content": LIVE_RESTART_READBACK_TOOL_REFUSAL,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_restart_context_write_completed_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=parsed["content"],
+        parsed=parsed,
+    ) is True
+
+
+def test_live_restart_readback_tool_refusal_repairs_into_context_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            LIVE_RESTART_READBACK_TOOL_REFUSAL,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"cat context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=_restart_context_write_completed_history(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages)
+            or next(replies)
+        ),
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert len(seen) == 2
+    assert "prior workspace client tool call/result" in seen[1][0]["content"]
+    assert "context/result.txt" in seen[1][1]["content"]
+
