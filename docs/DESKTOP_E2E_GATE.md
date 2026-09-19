@@ -22,7 +22,7 @@ Before starting, ChatGPT Web must be a safe ordinary Chat surface. Work, quota e
 Prepare:
 
 ```bash
-python3 tools/standalone_desktop_e2e_gate.py prepare
+.venv/bin/python tools/standalone_desktop_e2e_gate.py prepare
 ```
 
 The command:
@@ -41,7 +41,7 @@ Run the first two context prompts in the same Desktop thread. Run the multi-file
 Then verify:
 
 ```bash
-python3 tools/standalone_desktop_e2e_gate.py verify
+.venv/bin/python tools/standalone_desktop_e2e_gate.py verify
 ```
 
 A PASS proves:
@@ -64,7 +64,7 @@ The private result is stored at:
 Status-only inspection does not send a model request:
 
 ```bash
-python3 tools/standalone_desktop_e2e_gate.py status
+.venv/bin/python tools/standalone_desktop_e2e_gate.py status
 ```
 
 ## Release rule
