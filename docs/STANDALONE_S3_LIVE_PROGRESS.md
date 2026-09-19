@@ -197,3 +197,27 @@ This closes the active S3 live blocker on the exact candidate SHA. Do not move
 `standalone-dev` before collecting the remaining candidate-bound release
 evidence. The next release work is Desktop E2E, clean-checkout install smoke,
 CI verification, and S4 release-gate evidence on the same exact SHA.
+
+
+### Candidate CI status after S3 closure
+
+GitHub Actions for exact candidate
+`4adeb956b1f31255a86c56354e3a06eead458b61` now includes a completed
+`Standalone CI` pull-request run with conclusion `success`.
+
+The earlier push-triggered run for the same SHA was cancelled because the
+pull-request run superseded it; the completed PR run is the usable candidate
+CI evidence.
+
+Current exact-candidate matrix:
+
+```text
+local focused lifecycle tests   PASS
+related browser/send tests      PASS
+full local suite                PASS
+S3 live                         PASS_LIVE_CLOSED
+Standalone CI                   PASS
+Desktop E2E                     PENDING
+clean-checkout install smoke    PENDING
+S4 local release gate           PENDING
+```
