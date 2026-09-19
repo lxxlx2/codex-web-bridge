@@ -237,7 +237,7 @@ def prepare(*, acceptance_root: Path, state_path: Path) -> int:
         print(desktop.PROMPTS["multi_file"], flush=True)
         print("", flush=True)
         print("After all three complete, run:", flush=True)
-        print("python3 tools/standalone_desktop_e2e_gate.py verify", flush=True)
+        print(".venv/bin/python tools/standalone_desktop_e2e_gate.py verify", flush=True)
         return 0
     except (GateFailure, core.GateFailure) as exc:
         gate = getattr(exc, "gate", "desktop_prepare")
