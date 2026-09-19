@@ -655,6 +655,55 @@ an `exec_command` continuation, and includes a non-compacted negative case.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Pre-fill send lifecycle race in the compaction probe
+
+The S3 run on `14058395248b1123447c2754bd95b0f3afe27cac`
+passed restart continuity, entered the remote compaction probe, and completed
+the seed contract:
+
+```text
+SEED_REPLY_EXACT=YES
+SEED_TOOL_EFFECTS=0
+PRIVATE_THREAD_CAPTURED=YES
+```
+
+The first coarse turn then failed. The probe originally surfaced this only as:
+
+```text
+RUN_FAIL coarse_usage_missing round=1
+```
+
+Private browser logs showed the real failure happened earlier in the send
+lifecycle:
+
+```text
+[SEND] 发送前检测到页面仍处于旧生成/停止态，等待其结束后再提交本次消息 (timeout=120.0s)
+[SEND] 等待旧生成态结束超时，本次发送动作尚未执行
+send_blocked_by_preexisting_generation
+```
+
+At failure time the ChatGPT composer still contained about 29k characters from
+the next coarse prompt. The prompt had already been written during
+`FILL_INPUT`; only the later `CLICK` step waited for the preceding generation
+to become idle. ChatGPT permits typing while an older answer is still
+generating, so this ordering can strand a new prompt in the shared composer.
+
+The browser workflow now performs the ChatGPT old-generation idle guard before
+mutating `input_box` on the browser-composer path. Request-transport sends and
+non-ChatGPT routes are unchanged. The normal click-time guard remains as a
+second check. S3 additionally gives this pre-fill guard a 300-second timeout so
+the high-reasoning live acceptance can wait longer without contaminating the
+composer; normal runtime keeps the existing configured timeout unless explicitly
+overridden.
+
+The compaction probe also now reports nonzero turn return codes before checking
+token usage, so a failed browser send is classified as a turn failure instead
+of the secondary `*_usage_missing` symptom.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
