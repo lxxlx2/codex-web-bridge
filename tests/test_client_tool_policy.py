@@ -1198,7 +1198,7 @@ def test_false_acceptance_workspace_mismatch_repairs_into_pending_write(monkeypa
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt '
+                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
                 '&& cat large_context/result.txt"}'
                 ']]></arguments></call></adapter_calls>'
             ),
