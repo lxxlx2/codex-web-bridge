@@ -296,6 +296,32 @@ Regression coverage verifies strict-prefix matching, unrelated-history rejection
 
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Post-compaction missing-task clarification
+
+The S3 run on `bea1926c204d077796b2c1319ae437ca384b8790` passed release preflight, browser surface preflight, repo preflight, standalone listener readiness, local gates, restart continuity, and the remote compaction probe. This is the first run after the full-history affinity fix to reach post-compaction recovery again.
+
+The remaining failure was:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+The visible final Web reply was:
+
+```text
+请继续发送这一轮需要我执行的具体任务或验证步骤。
+```
+
+This is a distinct continuation failure from the earlier false "exec_command unavailable" replies. The model no longer denies the client tool; it asks the user to restate a task that is already present in the structured `[ACTIVE CONTINUATION STATE]`.
+
+The client workspace policy now treats this narrow clarification shape as repairable only when a compacted unresolved workspace continuation is present. The repair prompt explicitly states that the pending task and verification steps are already recorded in the compacted continuation state and directs the model to execute the next unfinished workspace step instead of asking the user again. Ordinary clarification replies without compacted workspace state are not forced into tool calls.
+
+Regression coverage uses the exact live Chinese reply, verifies conversion into an `exec_command` call with the preserved exact token/file target, and verifies the non-compacted negative case.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
