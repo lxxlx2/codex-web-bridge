@@ -98,3 +98,145 @@ def test_workflow_teardown_preserves_composer_after_real_dispatch():
     assert element.text == "sent prompt"
     assert executor._last_send_dispatched_since_fill is True
 
+class _Tab:
+    def __init__(self, url: str):
+        self.url = url
+
+
+def test_chatgpt_pre_fill_guard_waits_before_mutating_composer(monkeypatch):
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor.tab = _Tab("https://chatgpt.com/c/test")
+    executor._selectors = {
+        "send_btn": 'css:[data-testid="send-button"]',
+    }
+
+    seen = []
+
+    def wait(selector, *, wait_timeout_override=None):
+        seen.append((selector, wait_timeout_override))
+        return True
+
+    executor._wait_for_send_idle_before_action = wait
+    monkeypatch.setenv(
+        "UWA_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC",
+        "300",
+    )
+
+    assert executor._wait_for_chatgpt_idle_before_fill(
+        "input_box"
+    ) is True
+    assert seen == [
+        ('css:[data-testid="send-button"]', 300.0),
+    ]
+
+
+def test_non_chatgpt_pre_fill_guard_is_noop(monkeypatch):
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor.tab = _Tab("https://example.com/")
+    executor._selectors = {}
+    called = []
+
+    executor._wait_for_send_idle_before_action = (
+        lambda *args, **kwargs: called.append(
+            (args, kwargs)
+        )
+        or True
+    )
+    monkeypatch.setenv(
+        "UWA_CHATGPT_PRE_FILL_IDLE_TIMEOUT_SEC",
+        "300",
+    )
+
+    assert executor._wait_for_chatgpt_idle_before_fill(
+        "input_box"
+    ) is True
+    assert called == []
+
+
+def test_fill_input_runs_idle_guard_before_actual_fill():
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor._should_stop = lambda: False
+    executor._current_step_execution = {}
+    executor._last_stream_media_state = {}
+
+    events = []
+
+    executor._stage_request_transport_from_context = (
+        lambda **kwargs: False
+    )
+    executor._wait_for_chatgpt_idle_before_fill = (
+        lambda target_key: events.append(
+            ("idle", target_key)
+        )
+        or True
+    )
+    executor._execute_fill = (
+        lambda selector, prompt, target_key, optional:
+        events.append(
+            (
+                "fill",
+                selector,
+                prompt,
+                target_key,
+                optional,
+            )
+        )
+    )
+
+    list(
+        executor.execute_step(
+            "FILL_INPUT",
+            "css:#prompt",
+            "input_box",
+            optional=False,
+            context={"prompt": "next prompt"},
+        )
+    )
+
+    assert events == [
+        ("idle", "input_box"),
+        (
+            "fill",
+            "css:#prompt",
+            "next prompt",
+            "input_box",
+            False,
+        ),
+    ]
+
+
+def test_request_transport_fill_path_skips_browser_idle_guard():
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor._should_stop = lambda: False
+    executor._current_step_execution = {}
+    executor._last_stream_media_state = {}
+
+    events = []
+
+    executor._stage_request_transport_from_context = (
+        lambda **kwargs: True
+    )
+    executor._wait_for_chatgpt_idle_before_fill = (
+        lambda target_key: events.append(
+            ("idle", target_key)
+        )
+        or True
+    )
+    executor._execute_fill = (
+        lambda *args, **kwargs: events.append(
+            ("fill", args, kwargs)
+        )
+    )
+
+    list(
+        executor.execute_step(
+            "FILL_INPUT",
+            "css:#prompt",
+            "input_box",
+            optional=False,
+            context={"prompt": "transport prompt"},
+        )
+    )
+
+    assert events == []
+
