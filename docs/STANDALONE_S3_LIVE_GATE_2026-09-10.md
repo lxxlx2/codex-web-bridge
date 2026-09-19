@@ -913,6 +913,50 @@ This runtime change invalidates candidate-bound evidence from
 be regenerated on the new candidate.
 
 
+## 2026-09-19 Mid-probe rate-limit acknowledgement cleanup
+
+Candidate `8122e87e472ec5becbfa01f2310107d43c8a4d00`
+closed restart continuity, then the request-heavy remote compaction probe hit an
+account-side ChatGPT rate limiter:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+
+outer:
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+The existing acknowledgement automation was still present and could physically
+click the unique acknowledgement-only `Got it` / `明白了` / `知道了`
+control. The uncovered control-flow case was a limiter that appeared during the
+compaction probe itself. The probe failed before the normal post-probe cooldown
+cleanup ran, while the outer failure classifier only performed a passive
+surface recheck.
+
+The outer mid-run rate-limit failure path now invokes
+`dismiss_rate_limit_notice_in_place()` exactly once before returning the same
+external rate-limit failure. This cleanup never clicks Retry, never sends a
+message, and never replays or resumes the failed probe. A sanitized private
+`rate-limit-failure-cleanup.json` records whether the acknowledgement was
+dismissed. Cleanup failure cannot mask the original external failure.
+
+Regression coverage proves both successful acknowledgement cleanup and the
+fail-safe case where browser cleanup itself raises.
+
+Implementation commits:
+
+```text
+d0ad7b3  Dismiss mid-probe rate-limit acknowledgement
+743bea5  Cover mid-probe rate-limit cleanup
+```
+
+Because the runtime changed, candidate-bound evidence from `8122e87...` is
+historical. Local validation must pass before another full S3 run.
+
+
 ## Gate state
 
 ```text
