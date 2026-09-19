@@ -502,6 +502,14 @@ def run(
         core._health_ready(require_clean=True)
         python = core._validation_python()
 
+        # Honor a recent account-side limiter before closing, opening, or
+        # navigating any ChatGPT Web target. The Web limiter can apply to
+        # conversation/history access itself, so target reset is not a
+        # "free" operation while the account is still hot.
+        _wait_for_recent_rate_limit_window(
+            private_root,
+        )
+
         desktop_was_running = _quiet_codex_desktop()
         core._wait_request_cleanup()
         _reset_acceptance_chatgpt_target()
@@ -527,10 +535,6 @@ def run(
         _passive_surface_recheck(outer_private_dir)
         _emit("S3_PHASE=BROWSER_SURFACE_PREFLIGHT_PASS")
         _emit("S3_CHATGPT_SURFACE_PREFLIGHT=PASS")
-
-        _wait_for_recent_rate_limit_window(
-            private_root,
-        )
 
         core_rc = core.run(
             acceptance_root=acceptance_root,
