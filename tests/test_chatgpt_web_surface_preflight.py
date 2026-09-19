@@ -443,3 +443,76 @@ def test_rate_limit_without_unique_ack_does_not_click(monkeypatch, capsys):
     assert '"actions": []' in out
     assert '"failure_class": "chatgpt_web_rate_limited"' in out
 
+def test_in_place_rate_limit_cleanup_keeps_current_conversation(
+    monkeypatch,
+):
+    tab = _Tab()
+    limited = _state(
+        kind="chat",
+        ready=False,
+        reason="rate_limited",
+        empty=True,
+    )
+    settled = _state(
+        kind="chat",
+        ready=True,
+        reason="none",
+        empty=True,
+    )
+
+    monkeypatch.setattr(
+        preflight,
+        "controlled_chatgpt_tabs",
+        lambda: [tab],
+    )
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: limited,
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_wait_after_rate_limit_dismiss",
+        lambda *_args, **_kwargs: settled,
+    )
+
+    result = preflight.dismiss_rate_limit_notice_in_place(
+        timeout_seconds=1,
+    )
+
+    assert result["ok"] is True
+    assert result["dismissed"] is True
+    assert result["blocking_reason"] == "none"
+    assert tab.clicks == 1
+
+
+def test_in_place_cleanup_does_not_navigate_when_surface_is_already_ready(
+    monkeypatch,
+):
+    tab = _Tab()
+    ready = _state(
+        kind="chat",
+        ready=True,
+        reason="none",
+        empty=True,
+    )
+
+    monkeypatch.setattr(
+        preflight,
+        "controlled_chatgpt_tabs",
+        lambda: [tab],
+    )
+    monkeypatch.setattr(
+        preflight,
+        "inspect_chatgpt_surface",
+        lambda *_args, **_kwargs: ready,
+    )
+
+    result = preflight.dismiss_rate_limit_notice_in_place(
+        timeout_seconds=1,
+    )
+
+    assert result["ok"] is True
+    assert result["dismissed"] is False
+    assert tab.clicks == 0
+
