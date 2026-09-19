@@ -421,6 +421,47 @@ request-heavy sequence after acknowledging a recent rate-limit notice.
 This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
 release evidence must be regenerated after validation.
 
+
+## 2026-09-19 Compaction-probe cooldown before recovery
+
+The S3 run on `901be27a8f644d89aa12807096774204a4617b10`
+started from a clean surface and passed restart continuity. The request-heavy
+auto-compaction probe reached the visible success marker:
+
+```text
+AUTO_COMPACT_TRIGGER_OK
+```
+
+and then ChatGPT Web raised a new genuine "requests too frequent" dialog before
+the post-compaction recovery could complete. The outer gate reported:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=codex_turn_runtime_error
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+This shows the earlier cooldown after *stale-dialog dismissal* solves only the
+startup case. A clean startup can still accumulate enough request pressure
+inside the compaction probe to enter the limiter immediately before the final
+recovery turn.
+
+The S3 core now enforces a second quiet period after the remote compaction probe
+has fully passed and before sending the post-compaction recovery request. The
+default is 180 seconds, configurable with
+`UWA_S3_COMPACTION_COOLDOWN_SEC` and bounded to 0-900 seconds. After waiting,
+the runner performs an in-place surface cleanup that may dismiss exactly one
+acknowledgement-only stale rate-limit notice without navigating away from the
+current ChatGPT conversation. If the blocker remains, the gate fails closed.
+
+This preserves the exact Web conversation required for same-thread recovery and
+prevents the successful trigger probe from immediately consuming another
+request inside the same account-side rate-limit window.
+
+This changes the exact release-candidate SHA again. Exact-SHA S3 and downstream
+release evidence must be regenerated after validation.
+
 ## Gate state
 
 ```text
