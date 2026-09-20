@@ -1537,3 +1537,37 @@ This diagnostic is consistent with an active request-heavy remote compaction
 probe spending time in deliberate inter-turn pacing, not with a stuck UWA
 request or browser failure. Do not interrupt the run solely because the terminal
 is quiet.
+
+
+### 19d66d8 live S3 reached post-compaction recovery but failed token verification
+
+Exact candidate:
+
+```text
+19d66d850cb79e1da57b653132a66e66505728fd
+```
+
+The live run advanced through restart continuity, the full remote-compaction
+probe, and the 180-second cooldown. The final ChatGPT Web reply visibly returned
+`LARGE_CONTEXT_PASS`, but the runner rejected the recovery result:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_COMPACTION_COOLDOWN_SEC=180
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=token_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+The gate checks the actual local
+`~/uwa-codex-acceptance/large_context/result.txt` contents after the final
+reply and requires exactly `ORBIT-5921\n`. Therefore the visible
+`LARGE_CONTEXT_PASS` is not sufficient evidence: the local file differs from
+the retained large-context token.
+
+Do not rerun S3 or change candidate code until the final recovery trace and
+result file are inspected. The next diagnostic must compare the result file
+representation and list the completed client commands from
+`post-compaction-recovery.jsonl` without exposing unrelated private history.
