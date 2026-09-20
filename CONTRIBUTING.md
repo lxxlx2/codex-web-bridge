@@ -6,6 +6,7 @@ Before changing code, read:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development guide](docs/DEVELOPMENT.md)
+- [Browser setup](docs/BROWSER_SETUP.md)
 - [Testing guide](docs/TESTING.md)
 - [Troubleshooting and engineering decisions](docs/TROUBLESHOOTING.md)
 - [Security policy](SECURITY.md)
