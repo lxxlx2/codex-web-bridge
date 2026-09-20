@@ -37,4 +37,4 @@ The project may later add generated convenience bundles and SHA-256 checksums, b
 
 ## Current state
 
-`standalone-dev` is the active `v0.1.0-rc.1` candidate branch. S1/S2 are closed. A real standalone Codex Desktop E2E path has been proven, but release evidence is valid only when final S3 live closure, Desktop E2E, clean-install smoke, CI, and the S4 local gate all pass on the exact same candidate SHA. `main` and the `v0.1.0-rc.1` tag remain untouched until that candidate-bound matrix is complete.
+`standalone-dev` is the development/candidate branch and `main` is the release boundary. A release commit is publishable only when CI, S3 live closure, Desktop E2E, clean-install smoke, and S4 all bind to that exact commit, `main` is fast-forwarded to the same commit, main-branch CI succeeds, and tagged-source smoke passes. Any source or documentation change before tagging creates a new candidate and invalidates older candidate-bound evidence.
