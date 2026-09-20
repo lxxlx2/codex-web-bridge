@@ -928,15 +928,23 @@ v0.1.0-rc.1
 
 ### G8-03 Tagged source smoke
 
-从 tag 做一次只读/轻量 smoke：
+从 tag 做 fresh checkout，在该 checkout 的项目虚拟环境中执行：
+
+```bash
+.venv/bin/python tools/standalone_tagged_source_smoke.py
+```
+
+必须验证：
 
 ```text
-fresh checkout tag
+HEAD carries v0.1.0-rc.1
 VERSION correct
-README quick start files present
+required README/contributor/docs files present
 LICENSE/NOTICE/SECURITY present
+worktree clean
 public_repo_safety_check PASS
 dependency audit PASS
+TAGGED_SOURCE_SMOKE=PASS
 ```
 
 如果 release process 最终包含生成 bundle，再追加：
