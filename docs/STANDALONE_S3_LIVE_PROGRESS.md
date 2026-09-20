@@ -2239,3 +2239,31 @@ The warnings remain the known FastAPI/Python 3.14
 Candidate-bound install/live evidence from `523fa23...` remains invalidated by
 the source change. After exact-SHA CI is green, regenerate install/rollback
 smoke, then begin a new S3 success attempt on this exact candidate.
+
+
+### 0339fad install / rollback smoke passed
+
+Exact candidate:
+
+```text
+0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+```
+
+Candidate-bound clean-checkout install / rollback smoke:
+
+```text
+INSTALL_SMOKE=PASS
+DEPENDENCY_BOOTSTRAP=PASS
+ACCEPTANCE_TARGET_RESET=PASS
+OFFICIAL_ROLLBACK=PASS
+BASIC_CODEX_REQUEST=PASS
+AUTH=UNCHANGED
+WRAPPER_ROOT=PASS
+LISTENER_OWNERSHIP=PASS
+candidate_commit=0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+worktree=clean
+```
+
+This candidate is now cleared to begin a new S3 success attempt. The previous
+`523fa23...` live attempt remains invalidated and does not count toward the
+three required successful S3 results.
