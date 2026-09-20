@@ -115,6 +115,7 @@ exact-SHA CI                                    PASS
 clean-checkout install / rollback smoke         PASS
 S3 full live PASS_LIVE_CLOSED                   >= 3 次，同一 SHA
 S3 successful evidence windows                  >= 2 个两小时 UTC window
+S3 first-to-last successful span                 >= 7200 秒
 office-work soak + effect verification          PASS，同一 SHA
 release confidence aggregate                    PASS，同一 SHA
 Codex Desktop E2E                               PASS，同一 SHA
