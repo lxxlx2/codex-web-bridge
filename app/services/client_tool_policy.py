@@ -349,6 +349,26 @@ def _latest_user_is_generated_function_output_fallback(
     return False
 
 
+def _latest_private_compacted_continuation_text(
+    messages: List[Dict[str, Any]],
+) -> str:
+    """Return compacted continuation carried only as internal bridge metadata."""
+
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        value = message.get("_uwa_compacted_continuation_context")
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if "[Compacted prior context]" in text:
+            if len(text) > 3200:
+                text = text[:3197] + "..."
+            return text
+
+    return ""
+
+
 def _looks_like_compacted_workspace_continuation(
     messages: List[Dict[str, Any]],
 ) -> bool:
@@ -367,6 +387,22 @@ def _looks_like_compacted_workspace_continuation(
     """
 
     active_header = "[ACTIVE CONTINUATION STATE]"
+
+    private_context = _latest_private_compacted_continuation_text(
+        messages
+    )
+    if private_context:
+        candidate = private_context
+        if active_header in private_context:
+            candidate = private_context.split(
+                active_header,
+                1,
+            )[1]
+        return any(
+            pattern.search(candidate)
+            for pattern
+            in _WORKSPACE_REQUEST_PATTERNS
+        )
 
     for message in reversed(
         messages or []
@@ -413,6 +449,12 @@ def _latest_compacted_continuation_text(
 ) -> str:
     """Return the newest compacted continuation state, bounded for repair prompts."""
 
+    private_context = _latest_private_compacted_continuation_text(
+        messages
+    )
+    if private_context:
+        return private_context
+
     for message in reversed(messages or []):
         if not isinstance(message, dict):
             continue
@@ -440,7 +482,7 @@ def looks_like_client_access_refusal(text: str) -> bool:
 
 _MISSING_TASK_CLARIFICATION_PATTERNS = (
     re.compile(
-        r"(?:请|麻烦)?(?:继续)?(?:发送|提供|给出|告诉我).{0,40}"
+        r"(?:请|麻烦)?(?:直接|继续|重新|再)?(?:发送|提供|给出|告诉我).{0,60}"
         r"(?:具体任务|任务|验证步骤|操作步骤|需要我执行的)",
         re.IGNORECASE | re.DOTALL,
     ),
