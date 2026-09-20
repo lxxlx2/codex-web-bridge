@@ -71,6 +71,7 @@ jobs:
           test -f docs/TESTING.md
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
+          test -f docs/KNOWN_LIMITATIONS.md
           test -f manifests/README.md
           grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
           grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
@@ -210,6 +211,7 @@ jobs:
           test -f docs/TESTING.md
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
+          test -f docs/KNOWN_LIMITATIONS.md
           test -f manifests/README.md
           test -f CONTRIBUTING.md
           test -f requirements-dev.txt
