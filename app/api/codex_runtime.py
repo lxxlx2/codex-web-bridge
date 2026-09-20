@@ -29,6 +29,7 @@ from app.core.config import get_logger
 
 
 logger = get_logger("API.CODEX_RUNTIME")
+_UWA_FUNCTION_OUTPUT_FALLBACK_MARKER = "_uwa_function_output_fallback"
 RESPONSES_STATE_MAX_ENTRIES = 1024
 RESPONSES_STATE_TTL_SEC = 3600.0
 
@@ -511,6 +512,8 @@ def _append_response_input_item(messages: List[Dict[str, Any]], item: Any) -> No
                 {
                     "role": "user",
                     "content": _responses_tool_output_fallback_content(item, output),
+                    _UWA_FUNCTION_OUTPUT_FALLBACK_MARKER: True,
+                    "_uwa_function_output_call_id": tool_call_id,
                 }
             )
         return
