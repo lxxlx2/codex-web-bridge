@@ -1160,3 +1160,26 @@ f34ad2f  Mark generated Responses tool-output fallbacks
 
 Do not run live S3 until focused/full local validation and exact-SHA CI are
 green.
+
+
+### 2365287 local affinity-provenance validation passed
+
+Exact candidate:
+
+```text
+23652871f9fc4f901ee68ee7ab9db18ee13a4177
+```
+
+Local validation after the internal Responses tool-output provenance marker fix:
+
+```text
+exact affinity provenance regression: 27 passed, 8 warnings
+related client tool policy:            119 passed, 8 warnings
+full suite:                            516 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Next gate: exact-SHA CI must be green before the next candidate-bound live S3
+attempt.
