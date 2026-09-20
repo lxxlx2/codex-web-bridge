@@ -1,4 +1,5 @@
-from app.core.stream_monitor import _ordinary_text_completion_reason
+from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
+from app.core.stream_monitor import GeneratingStatusCache, _ordinary_text_completion_reason
 
 
 def _reason(**overrides):
@@ -54,3 +55,43 @@ def test_suppressed_fast_exit_remains_non_terminal():
         still_generating=False,
         silence_duration=60.0,
     ) == ""
+
+
+class _DisplayedStates:
+    is_displayed = True
+
+
+class _DisplayedElement:
+    states = _DisplayedStates()
+
+
+class _SelectorOnlyTab:
+    def __init__(self, selector):
+        self.selector = selector
+        self.calls = []
+
+    def ele(self, selector, timeout=0):
+        self.calls.append((selector, timeout))
+        if selector == self.selector:
+            return _DisplayedElement()
+        return None
+
+
+def test_shared_generation_selectors_cover_localized_chatgpt_stop_controls():
+    assert 'button[aria-label*="停止"]' in GENERATION_INDICATOR_CSS_SELECTORS
+    assert '[data-testid="stop-button"]' in GENERATION_INDICATOR_CSS_SELECTORS
+
+
+def test_stream_generation_cache_detects_chinese_stop_control():
+    tab = _SelectorOnlyTab('css:button[aria-label*="停止"]')
+    cache = GeneratingStatusCache(tab)
+
+    assert cache.is_generating() is True
+    assert _reason(still_generating=cache.is_generating()) == ""
+
+
+def test_stream_generation_cache_detects_chatgpt_stop_testid():
+    tab = _SelectorOnlyTab('css:[data-testid="stop-button"]')
+    cache = GeneratingStatusCache(tab)
+
+    assert cache.is_generating() is True
