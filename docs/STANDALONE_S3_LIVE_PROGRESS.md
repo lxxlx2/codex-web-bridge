@@ -1822,3 +1822,33 @@ the exact local result-file bytes before changing code or rerunning S3. In
 particular, determine whether the required local byte-exact file was created and
 whether the assistant final message was a near-match, a refusal, or an
 additional verification/status message.
+
+
+### cd220a9 post-compaction refusal narrowed to client-tool availability contradiction
+
+Read-only diagnosis of the failed post-compaction recovery showed:
+
+```text
+result file: missing
+workspace-validation command: completed, exit 0
+two further exec_command calls: completed, exit 0
+final assistant reply: claimed the current environment did not expose
+                       exec_command or write_stdin
+retained token in final reply: ORBIT-5921
+wrong-token contamination: not observed
+request manager after failure: 28 completed / 0 running
+current Web surface: healthy, ready, not rate-limited
+repo: clean
+```
+
+The model therefore retained the durable token and had just used real client
+tools successfully, then contradicted that same live tool history and stopped
+before writing the result file. This is not a byte-format failure and not a
+remote-compaction failure.
+
+The existing client-tool policy already contains patterns for this exact class
+of post-tool availability refusal, so changing the regex immediately would be
+speculative. The next diagnostic should inspect the metadata-only Codex wire
+summaries for the final few Responses turns to determine whether the final
+function-output continuation still declared workspace tools and whether
+required-tool/provenance metadata survived the affinity delta.
