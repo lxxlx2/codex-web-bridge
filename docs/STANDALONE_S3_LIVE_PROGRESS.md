@@ -1366,3 +1366,34 @@ all printed to stdout but are verified by S4.
 
 Remaining local release gate: run S4 candidate/evidence consistency on the same
 frozen SHA.
+
+
+### 8344323 S4 local release gate passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+All candidate-bound local release evidence now matches the same frozen SHA:
+
+```text
+S4_DOCS_SYNC=PASS
+S4_VERSION_SYNC=PASS
+S4_SECURITY_CHECK=PASS
+S4_PROVENANCE_CHECK=PASS
+S4_INSTALL_SMOKE=PASS
+S4_OFFICIAL_ROLLBACK=PASS
+S4_S3_CANDIDATE_MATCH=PASS
+S4_DESKTOP_E2E_CANDIDATE_MATCH=PASS
+STANDALONE_S4_LOCAL=PASS
+```
+
+Together with the already recorded exact-SHA Standalone CI success, complete
+S3 live closure, Desktop E2E pass, and clean-checkout install smoke pass, the
+candidate has completed the pre-tag release acceptance gates.
+
+Next actions must follow `docs/RELEASE_PROCESS.md`: verify the frozen SHA and
+CI/evidence once more, merge/tag without modifying the candidate contents, then
+run the required tagged-source smoke.
