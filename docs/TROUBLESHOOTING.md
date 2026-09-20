@@ -186,3 +186,32 @@ Relevant code/tests:
 - `app/core/stream_monitor.py`
 - `app/core/workflow/executor_send.py`
 - `tests/test_stream_monitor_terminal_state.py`
+
+
+## Post-compaction final says declared client tools are not exposed
+
+A live S3 recovery retained the correct durable token and successfully executed
+multiple real `exec_command` calls, then recursive compaction removed the
+immediately preceding function-call/output history. The next final response
+incorrectly claimed that the current environment did not expose
+`exec_command` or `write_stdin`.
+
+Wire metadata proved that the request still declared both client tools. The
+failure was therefore a policy/provenance gap after lossy compaction, not a real
+tool-availability change.
+
+Current protection:
+
+- a final claim that an explicitly declared workspace tool is unavailable,
+  missing, not exposed, or not callable is repaired directly from the current
+  request's authoritative tool schema;
+- this repair no longer depends on prior function-call history surviving
+  recursive compaction;
+- `tool_choice="none"` still disables the repair;
+- the bridge still never executes a command itself and never bypasses Codex
+  sandbox or approval behavior.
+
+Relevant code/tests:
+
+- `app/services/client_tool_policy.py`
+- `tests/test_client_tool_policy_repeated_refusal.py`
