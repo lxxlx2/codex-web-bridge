@@ -1320,6 +1320,7 @@ docs/RELEASE_TEST_PLAN.md
 STANDALONE_S3=PASS_LIVE_CLOSED >= 3 次
 candidate_commit == git HEAD
 successful evidence windows >= 2
+first-to-last successful S3 elapsed span >= 7200 seconds
 ```
 
 time window 定义：
@@ -1416,6 +1417,7 @@ current git HEAD
 ```text
 S3 pass count >= 3
 S3 time windows >= 2
+S3 elapsed span >= 7200 seconds
 office soak PASS
 all positive evidence candidate_commit == HEAD
 ```
@@ -1426,6 +1428,7 @@ all positive evidence candidate_commit == HEAD
 STANDALONE_RELEASE_CONFIDENCE=PASS
 RELEASE_CONFIDENCE_S3_PASS_COUNT>=3
 RELEASE_CONFIDENCE_S3_TIME_WINDOWS>=2
+RELEASE_CONFIDENCE_S3_SPAN_SECONDS>=7200
 RELEASE_CONFIDENCE_OFFICE_SOAK=PASS
 candidate_commit=<HEAD>
 ```
@@ -1498,6 +1501,7 @@ S3 successful evidence collection must end with at least three successful runs a
 ```text
 S3_PASS_COUNT>=3
 S3_TIME_WINDOWS>=2
+S3_SPAN_SECONDS>=7200
 OFFICE_SOAK=PASS
 EFFECT_VERIFICATION=PASS
 RELEASE_CONFIDENCE=PASS
