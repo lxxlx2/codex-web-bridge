@@ -1124,3 +1124,39 @@ Next fix: carry an internal non-prompt metadata marker on generated
 function-output fallback messages, and let the post-tool repair policy treat
 that marker as authoritative workspace-tool provenance. The marker must remain
 internal and must not be serialized into browser-visible prompt content.
+
+
+### Affinity-delta provenance marker fix landed
+
+The repeated post-compaction failure on `255791ba...` was traced to an
+affinity-delta provenance gap. The model retained the durable token and pending
+workspace action but again claimed that the current ChatGPT session had no real
+callable local workspace tool. The refusal wording itself was already covered.
+
+A generated Responses `function_call_output` fallback now carries internal
+metadata proving that it came from a real tool result. The client-tool policy
+accepts that marker as prior workspace-tool provenance even when the current
+browser delta omits the compacted summary because that summary already exists in
+the open ChatGPT conversation. Browser prompt serialization ignores the private
+marker, and an unmarked user-authored fallback-looking string does not gain the
+same authority.
+
+Current `standalone-dev` head:
+
+```text
+23652871f9fc4f901ee68ee7ab9db18ee13a4177
+```
+
+Implementation commits:
+
+```text
+f34ad2f  Mark generated Responses tool-output fallbacks
+311a7f9  Trust internal Responses tool-output provenance
+7e11350  Cover internal tool-output fallback provenance
+63f0223  Cover affinity-delta tool-output provenance repair
+3511f5e  Verify provenance marker stays browser-internal
+2365287  Record affinity-delta provenance marker fix
+```
+
+Do not run live S3 until focused/full local validation and exact-SHA CI are
+green.
