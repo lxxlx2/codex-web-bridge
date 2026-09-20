@@ -11,7 +11,7 @@ Codex Web Bridge는 Codex Desktop / Codex CLI의 모델 추론 요청을 로그�
 
 ## 빠른 시작
 
-개발 중에는 `standalone-dev`를 사용합니다.
+일반 사용자는 `main` 또는 Release tag를 사용하고, 개발 참여자는 `standalone-dev`를 사용합니다.
 
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
