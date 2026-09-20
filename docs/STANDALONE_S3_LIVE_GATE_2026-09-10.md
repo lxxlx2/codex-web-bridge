@@ -1071,6 +1071,67 @@ f161aef  Cover localized active-generation detection
 ```
 
 
+## 2026-09-20 Post-compaction function-output provenance gap
+
+The exact candidate `df0ffa0384bb3ba976299cde85169a7c6aabc6ed`
+passed local validation and exact-SHA CI, then the live S3 run advanced through
+restart continuity, the full remote-compaction probe, and the 180-second
+post-probe cooldown:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_COMPACTION_COOLDOWN_SEC=180
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+```
+
+The remaining failure was:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+The private post-compaction trace proves three real successful
+`exec_command` calls occurred in the final recovery turn. The first exact
+workspace-validation command exited 0. Two subsequent read-only inspections also
+exited 0 and confirmed `large_context/result.txt` was still missing. The model
+then returned:
+
+```text
+无法执行 `exec_command`：当前实际可调用工具集中没有这个工具，因此不能伪造客户端工具调用或结果。
+```
+
+The existing post-tool unavailable-language matcher already recognizes this
+wording. The uncovered case was provenance after recursive compaction. Responses
+input can carry a completed client tool result as the bridge-generated
+`[Function Call Output ...]` user fallback when the matching assistant
+`function_call` has been compacted out of the local Chat-shaped history.
+`client_tool_policy` had a helper recognizing that fallback, but the main
+post-tool decision path still required structured tool-call history. The live
+refusal therefore escaped repair even though the current compacted
+`[ACTIVE CONTINUATION STATE]` still contained the unresolved workspace task.
+
+The policy now accepts the generated function-output fallback as post-tool
+workspace provenance only when the same request also contains a compacted
+unresolved workspace continuation. This keeps the repair narrow: an arbitrary
+function-output-like user message without compacted workspace state does not
+enable the repair. The repair prompt likewise treats that bounded provenance as
+proof that a client workspace tool already executed.
+
+Regression coverage reproduces the exact live refusal, verifies recovery into a
+real `exec_command` write, and includes the non-compacted negative case.
+
+Implementation commits:
+
+```text
+fbd47d5  Repair compacted function-output tool refusals
+9073f9c  Cover compacted function-output refusal recovery
+```
+
+This changes the release candidate SHA again. Exact-SHA local/CI/live evidence
+must be regenerated before downstream release gates.
+
+
 ## Gate state
 
 ```text
