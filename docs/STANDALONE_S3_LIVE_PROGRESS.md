@@ -1611,3 +1611,32 @@ Current candidate HEAD after the fix:
 The previous `19d66d8...` candidate-bound evidence is invalidated by this
 source/documentation change. Run focused/full local validation and exact-SHA CI
 before the next single live S3 attempt.
+
+
+### 8c3e76f local byte-exact recovery validation passed
+
+Exact candidate:
+
+```text
+8c3e76f05d61c910d5c6b9d64ad0531a565129da
+```
+
+Local validation after the byte-exact large-context recovery fix:
+
+```text
+large-context + S3 regression: 38 passed
+release hygiene regression:   27 passed
+public repository safety:      PASS
+standalone dependency audit:   PASS
+full suite:                    529 passed, 22 warnings
+worktree:                      clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The dependency audit still reports one prune candidate, but the audited runtime
+closure passes and no release change should prune additional code at this stage.
+
+Next gate: exact-SHA CI must be green before the next single candidate-bound S3
+live attempt.
