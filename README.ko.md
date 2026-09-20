@@ -16,7 +16,6 @@ Codex Web Bridge는 Codex Desktop / Codex CLI의 모델 추론 요청을 로그�
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
 cd codex-web-bridge
-git switch standalone-dev
 python3 tools/install_codex_uwa_commands.py
 export PATH="$HOME/bin:$PATH"
 ```
