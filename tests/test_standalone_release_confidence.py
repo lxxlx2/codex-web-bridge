@@ -108,6 +108,21 @@ def test_s3_stability_accepts_three_passes_across_two_windows(tmp_path: Path):
     assert windows == 2
 
 
+def test_latest_successful_office_soak_ignores_newer_failed_attempt(tmp_path: Path):
+    good = tmp_path / "20260921T000000Z" / "result.txt"
+    _soak(good, candidate="abc")
+
+    failed = tmp_path / "20260921T010000Z" / "result.txt"
+    _soak(failed, candidate="abc", status="FAIL")
+
+    selected = confidence.latest_successful_office_soak(
+        tmp_path,
+        candidate="abc",
+    )
+
+    assert selected == good
+
+
 def test_office_soak_requires_all_markers_and_same_candidate(tmp_path: Path):
     result = _soak(tmp_path / "soak.txt", candidate="abc")
     confidence.check_office_soak(
@@ -143,6 +158,7 @@ def test_run_writes_candidate_bound_confidence_result(
         root=tmp_path,
         s3_root=s3_root,
         office_soak_result=soak,
+        office_soak_root=tmp_path / "unused-soak-root",
         result_path=out,
     )
 
