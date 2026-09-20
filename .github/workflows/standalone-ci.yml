@@ -277,5 +277,7 @@ jobs:
             tests/test_codex_standalone_s3_runner.py \
             tests/test_standalone_desktop_e2e_gate.py \
             tests/test_standalone_install_smoke.py \
+            tests/test_standalone_office_soak.py \
+            tests/test_standalone_release_confidence.py \
             tests/test_standalone_s4_release_gate.py \
             tests/test_standalone_tagged_source_smoke.py
