@@ -45,7 +45,9 @@ import standalone_s3_live_core as core
 DEFAULT_ACCEPTANCE_ROOT = Path.home() / "uwa-codex-acceptance"
 DEFAULT_PRIVATE_ROOT = Path.home() / ".uwa" / "standalone-office-soak"
 DEFAULT_TURN_TIMEOUT_SEC = 600
-DEFAULT_TURN_GAP_SEC = 60
+DEFAULT_TURN_GAP_SEC = 90
+DEFAULT_WORK_CYCLES = 5
+MIN_RELEASE_SOAK_TURNS = 20
 SCENARIOS = (
     "multi_file",
     "failure_recovery",
@@ -141,7 +143,14 @@ def _run_turn(
     return obs
 
 
-def _write_result(private_dir: Path, *, candidate: str, started_at: float, turn_count: int) -> None:
+def _write_result(
+    private_dir: Path,
+    *,
+    candidate: str,
+    started_at: float,
+    turn_count: int,
+    work_cycles: int,
+) -> None:
     core._write_private(
         private_dir / "result.txt",
         "STANDALONE_OFFICE_SOAK=PASS\n"
@@ -155,6 +164,7 @@ def _write_result(private_dir: Path, *, candidate: str, started_at: float, turn_
         "OFFICE_SOAK_REQUEST_MANAGER_CLEAN=PASS\n"
         "OFFICE_SOAK_REPOSITORY_CLEAN=PASS\n"
         f"OFFICE_SOAK_TURN_COUNT={turn_count}\n"
+        f"OFFICE_SOAK_WORK_CYCLES={work_cycles}\n"
         f"started_at_unix={started_at:.3f}\n"
         f"finished_at_unix={time.time():.3f}\n"
         f"candidate_commit={candidate}\n",
@@ -181,6 +191,7 @@ def run(
     acceptance_root: Path,
     private_root: Path,
     turn_timeout_sec: int,
+    work_cycles: int,
 ) -> int:
     private_dir = core._private_dir(private_root)
     started_at = time.time()
@@ -236,26 +247,45 @@ def run(
         _check(root, "context")
         print("OFFICE_SOAK_CONTEXT=PASS", flush=True)
 
-        for scenario in SCENARIOS:
-            _prepare(root, scenario)
-            _pace(last_finished_at)
-            obs = _run_turn(
-                codex=codex,
-                root=root,
-                prompt=desktop.PROMPTS[scenario],
-                trace_path=private_dir / f"{scenario}.jsonl",
-                thread_id=None,
-                timeout_sec=turn_timeout_sec,
-                require_tool_effect=True,
+        for cycle in range(1, work_cycles + 1):
+            print(
+                f"OFFICE_SOAK_CYCLE={cycle}/{work_cycles}",
+                flush=True,
             )
-            turn_count += 1
-            last_finished_at = time.monotonic()
-            if not obs.final_message:
-                raise GateFailure("office_soak_final_reply", f"scenario={scenario}")
-            _check(root, scenario)
-            print(f"OFFICE_SOAK_{scenario.upper()}=PASS", flush=True)
-            core._wait_request_cleanup()
-            core._health_ready(require_clean=True)
+            for scenario in SCENARIOS:
+                _prepare(root, scenario)
+                _pace(last_finished_at)
+                obs = _run_turn(
+                    codex=codex,
+                    root=root,
+                    prompt=desktop.PROMPTS[scenario],
+                    trace_path=private_dir / (
+                        f"cycle-{cycle:02d}-{scenario}.jsonl"
+                    ),
+                    thread_id=None,
+                    timeout_sec=turn_timeout_sec,
+                    require_tool_effect=True,
+                )
+                turn_count += 1
+                last_finished_at = time.monotonic()
+                if not obs.final_message:
+                    raise GateFailure(
+                        "office_soak_final_reply",
+                        f"cycle={cycle} scenario={scenario}",
+                    )
+                _check(root, scenario)
+                print(
+                    f"OFFICE_SOAK_{scenario.upper()}=PASS cycle={cycle}",
+                    flush=True,
+                )
+                core._wait_request_cleanup()
+                core._health_ready(require_clean=True)
+
+        if turn_count < MIN_RELEASE_SOAK_TURNS:
+            raise GateFailure(
+                "office_soak_duration",
+                f"turn_count={turn_count} required={MIN_RELEASE_SOAK_TURNS}",
+            )
 
         core._route_gate(marker_epoch)
         print("OFFICE_SOAK_ROUTE_UWA_CHATGPT_HIGH=PASS", flush=True)
@@ -271,6 +301,7 @@ def run(
             candidate=candidate,
             started_at=started_at,
             turn_count=turn_count,
+            work_cycles=work_cycles,
         )
         print("OFFICE_SOAK_EFFECT_VERIFICATION=PASS", flush=True)
         print("OFFICE_SOAK_REQUEST_MANAGER_CLEAN=PASS", flush=True)
@@ -293,6 +324,7 @@ def run(
             f"FAILURE_CLASS={failure.gate}\n"
             f"FAILURE_DETAIL={failure.detail}\n"
             f"OFFICE_SOAK_TURN_COUNT={turn_count}\n"
+            f"OFFICE_SOAK_WORK_CYCLES={work_cycles}\n"
             f"started_at_unix={started_at:.3f}\n"
             f"finished_at_unix={time.time():.3f}\n"
             + (f"candidate_commit={candidate}\n" if candidate else ""),
@@ -322,11 +354,22 @@ def main() -> int:
         type=int,
         default=DEFAULT_TURN_TIMEOUT_SEC,
     )
+    parser.add_argument(
+        "--work-cycles",
+        type=int,
+        default=DEFAULT_WORK_CYCLES,
+        help=(
+            "Number of safe office-scenario cycles. "
+            "Release confidence requires enough cycles to produce at least "
+            f"{MIN_RELEASE_SOAK_TURNS} live turns including context."
+        ),
+    )
     args = parser.parse_args()
     return run(
         acceptance_root=args.acceptance_root,
         private_root=args.private_root,
         turn_timeout_sec=max(30, min(args.turn_timeout_sec, 1800)),
+        work_cycles=max(1, min(args.work_cycles, 10)),
     )
 
 
