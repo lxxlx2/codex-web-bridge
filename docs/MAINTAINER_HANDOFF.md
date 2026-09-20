@@ -2,6 +2,18 @@
 
 This guide is for a contributor taking over Codex Web Bridge without needing to read the historical acceptance documents line by line.
 
+## AI maintenance takeover
+
+Read [../AGENTS.md](../AGENTS.md) before continuing maintenance.
+
+This repository is deliberately maintainable from a ChatGPT conversation when Codex Desktop / Codex CLI quota is unavailable. In that mode, the ChatGPT assistant is the active maintainer and should continue the engineering task directly with the tools available in the current session.
+
+Do not default to handing the task back to Codex, and do not generate a Codex prompt as the next step unless the user explicitly asks to delegate to Codex.
+
+If the current ChatGPT session can write GitHub but cannot execute commands on the user's Mac, continue repository analysis and edits directly, then ask the user only for the minimum local command/output needed for live or machine-specific verification.
+
+Codex is an optional execution worker in this maintenance workflow. It is not a prerequisite for progressing the repository.
+
 ## Read these first
 
 1. [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)
