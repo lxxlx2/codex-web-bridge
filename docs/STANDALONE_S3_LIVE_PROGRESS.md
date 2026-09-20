@@ -1893,3 +1893,30 @@ Prior candidate-bound live evidence is invalidated by this source change. Run
 focused client-tool-policy regressions, related runtime/affinity tests, release
 hygiene, full suite, public safety, and dependency audit before the next single
 S3 live attempt.
+
+
+### Legacy regression aligned with declared-tool repair invariant
+
+Local validation of `ada4fad...` exposed one deterministic stale test:
+`test_function_output_fallback_without_compacted_workspace_state_is_not_enough`
+still expected a declared `exec_command` absence claim to be accepted when
+compaction provenance was missing.
+
+That expectation conflicts with the newly approved protocol invariant proved by
+the live wire metadata: the current request's declared workspace-tool schema is
+authoritative evidence that the tool exists, even if recursive compaction has
+removed immediate function-call history.
+
+The test has been renamed and updated to expect repair. The separate provenance
+boundary remains covered: unmarked user text that merely resembles function
+output does not gain authoritative provenance, and `tool_choice="none"` still
+disables repair.
+
+Current `standalone-dev` HEAD:
+
+```text
+590b7d9b79a75e3aaa0d745ed74effc5d533f517
+```
+
+This was a test-alignment correction, not a production-policy semantic change
+beyond the preceding declared-tool repair.
