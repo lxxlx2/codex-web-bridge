@@ -41,6 +41,7 @@ jobs:
           python -m py_compile start.py
           python -m py_compile main.py
           python -m py_compile app/api/standalone_routes.py
+          python -m py_compile app/core/generation_state.py
           python -m py_compile app/api/codex_runtime.py
           python -m py_compile app/api/codex_responses_v2.py
           python -m py_compile app/services/codex_chatgpt_executor.py
@@ -133,6 +134,7 @@ jobs:
             tests/test_chatgpt_web_prepare.py \
             tests/test_chatgpt_web_rate_limit_guard.py \
             tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_stream_monitor_terminal_state.py \
             tests/test_standalone_health.py \
             tests/test_standalone_api_import_boundary.py \
             tests/test_standalone_entrypoint.py \
@@ -172,6 +174,7 @@ jobs:
             $CODEX_TESTS \
             tests/test_client_tool_policy*.py \
             tests/test_chatgpt_web_*.py \
+            tests/test_stream_monitor_terminal_state.py \
             tests/test_standalone_health.py \
             tests/test_standalone_desktop_e2e_gate.py \
             tests/test_standalone_install_smoke.py \
@@ -233,6 +236,7 @@ jobs:
             tests/test_chatgpt_web_prepare.py \
             tests/test_chatgpt_web_rate_limit_guard.py \
             tests/test_chatgpt_web_rate_limit_workflow_terminal.py \
+            tests/test_stream_monitor_terminal_state.py \
             tests/test_codex_standalone_s3_runner.py \
             tests/test_standalone_desktop_e2e_gate.py \
             tests/test_standalone_install_smoke.py \
