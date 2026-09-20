@@ -497,6 +497,23 @@ _MISSING_TASK_CLARIFICATION_PATTERNS = (
         r"(?:should|do you want|need me to)",
         re.IGNORECASE | re.DOTALL,
     ),
+    # post_compaction_no_new_concrete_task:
+    # Live S3 wording after successful workspace validation. The model retained
+    # the exact durable token but incorrectly treated the current tool-result
+    # continuation as if no actionable task remained:
+    # "当前消息没有包含新的具体执行任务。"
+    #
+    # This matcher is only actionable inside
+    # should_repair_client_workspace_refusal when authoritative compacted
+    # workspace intent/provenance is also present, so ordinary conversational
+    # acknowledgements are not turned into workspace actions.
+    re.compile(
+        r"(?:当前|这条|本轮|这轮)?(?:消息|请求|输入)"
+        r".{0,40}(?:没有|未|并未|不包含)"
+        r".{0,40}(?:包含|提供|给出|指定)?"
+        r".{0,40}(?:新的?)?(?:具体)?(?:执行)?(?:任务|操作|步骤)",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 
