@@ -4,14 +4,19 @@ This directory separates durable contributor guidance from release-specific desi
 
 ## Start here
 
+- [Project overview](PROJECT_OVERVIEW.md): the core product goal, supported scope, fail-closed behavior, and explicit non-goals.
 - [Architecture](ARCHITECTURE.md): request flow, trust boundaries, state, module ownership, and compatibility facades.
 - [Development](DEVELOPMENT.md): local environment, lifecycle commands, configuration policy, and safe change workflow.
 - [Browser setup](BROWSER_SETUP.md): local CDP, dedicated browser profile, login, and platform examples.
 - [Testing](TESTING.md): focused test map, CI layers, live gates, and exact-candidate rules.
+- [Reliability model](RELIABILITY_MODEL.md): repeated S3 evidence, office-work soak, effect verification, and what release confidence means.
+- [Maintainer handoff](MAINTAINER_HANDOFF.md): code/test ownership, debugging workflow, private evidence locations, and release discipline.
 - [Troubleshooting](TROUBLESHOOTING.md): common failure signatures, root causes, and the regression tests that protect them.
 - [Roadmap](ROADMAP.md): post-RC stabilization and the planned structural cleanup after the first stable release.
 - [Known limitations](KNOWN_LIMITATIONS.md): platform, browser/CDP, account-limit, Web-UI, and RC scope constraints.
 - [Contributing](../CONTRIBUTING.md): pull-request workflow and repository hygiene.
+- [Test suite guide](../tests/README.md): logical ownership of the flat test tree and test naming expectations.
+- [Tooling guide](../tools/README.md): lifecycle, acceptance, confidence, and release scripts.
 
 ## Release specification
 
