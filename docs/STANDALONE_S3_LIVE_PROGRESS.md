@@ -1719,3 +1719,45 @@ it is not sufficient to classify the failure. The next diagnostic must inspect
 the private `trigger-probe-01-coarse.jsonl` event types and bounded error
 messages before deciding whether this is lifecycle, timeout, transport, or an
 external transient failure.
+
+
+### Final-settle generation race fixed after 8c3e76f coarse round-1 failure
+
+The failed S3 run on `8c3e76f05d61c910d5c6b9d64ad0531a565129da`
+was classified from the private trigger-probe trace and UWA log:
+
+```text
+seed reply exact: LARGE_CONTEXT_READY
+seed turn: completed
+next coarse turn: failed before submission
+failure: send_blocked_by_preexisting_generation
+pre-fill guard wait: 300 seconds
+current service after failure: healthy
+rate-limit surface after failure: false
+```
+
+The browser still showed an active Stop control after the seed had already been
+released as completed. This is a stream terminal-state race: ordinary completion
+observed an idle state, then generation was visible again before the next turn.
+
+Fixes landed on `standalone-dev`:
+
+- ChatGPT generation detection now has a composer-scoped Stop/Cancel/Abort
+  metadata fallback in addition to the shared selectors;
+- final settle continuously re-validates generation state;
+- generation reappearance invalidates the previous stability window;
+- clearing generation starts a fresh settle window;
+- final settle fails closed if generation remains active through its bounded
+  grace instead of returning a successful completed turn;
+- the pre-send guard logs which detector observed the stale generation;
+- focused regression and historical troubleshooting documentation were added.
+
+Current `standalone-dev` HEAD:
+
+```text
+cd220a98f5630f8fffc8995aa6cfc2168c499d14
+```
+
+This source change invalidates prior exact-candidate live evidence. Run focused,
+release-hygiene, full-suite, safety, and dependency validation before another
+single S3 live attempt.
