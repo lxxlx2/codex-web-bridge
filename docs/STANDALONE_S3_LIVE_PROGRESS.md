@@ -1442,3 +1442,27 @@ standalone-dev=83443230f853e1f6aaf88dadc174831fba7acfec
 This is an operator command formatting issue only. No release evidence is
 invalidated and no candidate contents changed. Retry with a single-line explicit
 refspec using the frozen SHA.
+
+
+### main fast-forwarded to the validated candidate
+
+The remote `main` ref was fast-forwarded directly to the exact validated
+candidate without creating a new commit:
+
+```text
+main=83443230f853e1f6aaf88dadc174831fba7acfec
+standalone-dev=83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+This preserves the candidate-bound S3, Desktop E2E, install-smoke, S4, and CI
+evidence because the release SHA is unchanged.
+
+The push triggered a fresh Standalone CI run on `main`:
+
+```text
+run_id=35514698342
+branch=main
+status=in_progress
+```
+
+Do not create the RC tag until this main-branch CI run completes successfully.
