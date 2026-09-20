@@ -1311,3 +1311,30 @@ This is the first complete live S3 closure for the current exact candidate after
 the localized generation-lifecycle, compacted tool-provenance, and
 affinity-continuation fixes. The candidate remains frozen. Next release gates:
 exact-SHA Desktop E2E, install smoke, and S4 candidate/evidence match.
+
+
+### 8344323 Desktop E2E passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+Operator-assisted Codex Desktop acceptance completed successfully on the same
+candidate. The context continuity scenario returned `CONTEXT_PASS`, the
+multi-file scenario modified the required implementation files and passed its
+real tests, and the verifier reported:
+
+```text
+DESKTOP_CONTEXT=PASS
+DESKTOP_LOCAL_TOOLS=PASS
+DESKTOP_ROUTE_UWA_CHATGPT_HIGH=PASS
+DESKTOP_REQUEST_MANAGER_CLEAN=PASS
+DESKTOP_APP_RUNNING=YES
+STANDALONE_DESKTOP_E2E=PASS
+candidate_commit=83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+The candidate remains frozen. Remaining release gates are the exact-SHA
+clean-checkout install/rollback smoke and S4 candidate/evidence consistency gate.
