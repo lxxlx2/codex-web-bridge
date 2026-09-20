@@ -283,6 +283,7 @@ codex-uwa-stop
 同一 exact candidate SHA
 >= 3 次完整 STANDALONE_S3=PASS_LIVE_CLOSED
 成功证据覆盖 >= 2 个两小时 UTC time window
+首个到最后一个成功 S3 的实际时间跨度 >= 7200 秒
 ```
 
 外部 rate limit、quota、auth/challenge 或临时 Web 不可用：
@@ -458,6 +459,7 @@ S1=CLOSED
 S2=CLOSED
 S3=PASS_LIVE_CLOSED x3 on same candidate
 S3_TIME_WINDOWS>=2
+S3_SPAN_SECONDS>=7200
 OFFICE_SOAK=PASS
 RELEASE_CONFIDENCE=PASS
 S4=PASS
@@ -493,6 +495,7 @@ S1 = PASS / CLOSED
 S2 = PASS / CLOSED
 S3 = PASS_LIVE_CLOSED at least 3 times on current candidate
 S3 successful evidence windows >= 2
+S3 successful evidence span >= 7200 seconds
 OFFICE_SOAK = PASS on current candidate
 RELEASE_CONFIDENCE = PASS on current candidate
 DESKTOP_E2E = PASS on current candidate
