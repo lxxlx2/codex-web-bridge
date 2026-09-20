@@ -6,12 +6,16 @@ This roadmap separates first-release stabilization from later structural cleanup
 
 Before the first RC tag:
 
-- keep README section structure stable while making installation/release wording durable;
-- publish contributor architecture, development, testing, troubleshooting, and documentation indexes;
+- keep the runtime/test/tool path layout stable, but add durable project, maintainer, test, and tooling maps so handoff does not depend on tribal knowledge;
+- publish the project overview, reliability model, architecture, development, testing, troubleshooting, and maintainer-handoff docs;
 - remove machine-specific conversation/session identifiers from tracked configuration;
 - strengthen public-repository safety checks;
-- synchronize stale S3/S4 status documents;
-- regenerate the complete candidate-bound release matrix on the final documentation/hygiene commit;
+- independently verify acceptance side effects instead of trusting model completion prose;
+- require at least three full S3 live passes on the exact candidate across at least two two-hour UTC evidence windows;
+- require an office-work soak on the same candidate;
+- aggregate repeated-live evidence with the release-confidence gate before S4;
+- keep rc.1 on one ChatGPT Web inference path and fail explicitly rather than adding an automatic provider/local-model/API fallback;
+- regenerate the complete candidate-bound release matrix after the final release-tree commit;
 - fast-forward `main`, run main CI, create the RC tag, perform tagged-source smoke, then create the GitHub Release.
 
 ## RC observation period
