@@ -1338,3 +1338,31 @@ candidate_commit=83443230f853e1f6aaf88dadc174831fba7acfec
 
 The candidate remains frozen. Remaining release gates are the exact-SHA
 clean-checkout install/rollback smoke and S4 candidate/evidence consistency gate.
+
+
+### 8344323 install smoke passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+The clean-checkout install/provider/rollback smoke completed successfully:
+
+```text
+INSTALL_SMOKE=PASS
+DEPENDENCY_BOOTSTRAP=PASS
+ACCEPTANCE_TARGET_RESET=PASS
+OFFICIAL_ROLLBACK=PASS
+BASIC_CODEX_REQUEST=PASS
+AUTH=UNCHANGED
+```
+
+The smoke runner also records the release-gate-only fields
+`WRAPPER_ROOT=PASS`, `LISTENER_OWNERSHIP=PASS`, and the exact candidate SHA in
+`~/.uwa/standalone-s4/install-smoke-result.txt`; these are intentionally not
+all printed to stdout but are verified by S4.
+
+Remaining local release gate: run S4 candidate/evidence consistency on the same
+frozen SHA.
