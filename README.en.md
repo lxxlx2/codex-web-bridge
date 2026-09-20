@@ -2,11 +2,19 @@
 
 [中文](README.md) · [English](README.en.md) · [ไทย](README.th.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-Codex Web Bridge is an unofficial local bridge that routes Codex Desktop / Codex CLI model requests through a logged-in ChatGPT Web session while keeping file access, shell commands, edits, tests, Git operations, sandboxing, and approvals under the Codex client.
+Codex Web Bridge is an unofficial local bridge with one narrow goal: route Codex Desktop / Codex CLI model inference through a logged-in ChatGPT Web session while keeping file access, shell commands, edits, tests, Git operations, sandboxing, and approvals entirely under the Codex client.
+
+The first RC supports one inference path:
+
+```text
+Codex Desktop / CLI -> Codex Web Bridge -> ChatGPT Web
+```
+
+There is no automatic fallback to another provider, a local model, or an official API in this RC. If ChatGPT Web, the account quota, the controlled browser surface, or route safety cannot be proven, the bridge fails explicitly and stops instead of silently switching backends.
 
 > The first RC uses an exact-candidate release policy: CI, S3 live, Codex Desktop E2E, clean-install smoke, and the S4 release gate must all bind to the same commit. A historical PASS does not transfer automatically to a new code or documentation commit.
 >
-> The repository now includes a complete release/acceptance workflow. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/README.md](docs/README.md) for the code map, test matrix, and engineering-decision index.
+> The repository now includes a complete release/acceptance workflow. Start with the [project overview](docs/PROJECT_OVERVIEW.md). Contributors and maintainers should also use [CONTRIBUTING.md](CONTRIBUTING.md), [docs/README.md](docs/README.md), and [docs/MAINTAINER_HANDOFF.md](docs/MAINTAINER_HANDOFF.md).
 
 ## Quick start
 
@@ -98,23 +106,28 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the primary call path, cont
 
 ## RC acceptance requirements
 
-All release evidence for the first RC must bind to the same candidate commit:
+All release evidence for the first RC must bind to the same candidate commit, and one lucky live run is not enough for release confidence:
 
 ```text
 S1 / S2                                         PASS / CLOSED
-standalone non-live regression                  PASS
-Codex Desktop E2E                               REQUIRED ON EXACT CANDIDATE
-S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
-clean-checkout install smoke                    REQUIRED ON EXACT CANDIDATE
-S4 docs/version/security/provenance gate        REQUIRED ON EXACT CANDIDATE
-CI                                              REQUIRED ON EXACT CANDIDATE
-main CI                                         REQUIRED BEFORE TAG
-tagged-source smoke                             REQUIRED BEFORE GITHUB RELEASE
+standalone deterministic regression             PASS
+exact-SHA CI                                    PASS
+clean-checkout install / rollback smoke         PASS
+S3 full live PASS_LIVE_CLOSED                   >= 3 times, same SHA
+successful S3 evidence windows                  >= 2 two-hour UTC windows
+office-work soak + effect verification          PASS, same SHA
+release confidence aggregate                    PASS, same SHA
+Codex Desktop E2E                               PASS, same SHA
+S4 docs/version/security/provenance              PASS, same SHA
+main CI                                         PASS BEFORE TAG
+tagged-source smoke                             PASS BEFORE GITHUB RELEASE
 ```
 
-Desktop and CLI/live evidence are complementary. Desktop proves real desktop same-thread context, local file/shell tools and route behavior. S3 proves restart continuity, native/remote compaction, post-compaction recovery, route verification and request cleanup. Evidence from a different release commit SHA cannot be reused.
+S3 proves restart continuity, native/remote compaction, post-compaction recovery, route verification, and cleanup. The office-work soak exercises multi-file edits, real failure recovery, Git diff discipline, and interactive processes while independent checkers verify actual files/tests/diffs instead of trusting final model prose. Desktop E2E covers the real desktop path.
 
-See [docs/TESTING.md](docs/TESTING.md) for the test layers and change-to-test map.
+An external ChatGPT Web rate limit/quota/auth/challenge makes the current live run fail explicitly and stop. That does not automatically prove a source-code defect, but it also does not count toward the required successful evidence.
+
+See [docs/TESTING.md](docs/TESTING.md) and [docs/RELIABILITY_MODEL.md](docs/RELIABILITY_MODEL.md).
 
 ## Continuity and long context
 
@@ -154,7 +167,7 @@ After the RC is published, the project enters an observation/compatibility perio
 v0.1.0
 ```
 
-Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md). Local setup/configuration is documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and post-release work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
+Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md). New maintainers should read [docs/MAINTAINER_HANDOFF.md](docs/MAINTAINER_HANDOFF.md). Local setup/configuration is documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md); the test and tool maps are [tests/README.md](tests/README.md) and [tools/README.md](tools/README.md).
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the RC platform, browser/CDP, account-limit, and retained-runtime constraints.
 
