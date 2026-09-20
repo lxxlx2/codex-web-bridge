@@ -38,13 +38,25 @@ Close the remaining S3/S4 gates for:
 v0.1.0-rc.1
 ```
 
-## Current canonical candidate before the next source fix
+## Current canonical candidate
 
 ```text
-90cdbdfb7b8259f8fb00e7a0e35b57c26f7ba711
+51dea04ab95e818680b96769811c3620d36fc912
 ```
 
-Deterministic validation on that candidate was green, GitHub exact-SHA CI was green, and clean install/rollback smoke passed.
+This candidate contains the narrow `ACCEPTANCE_INCOMPLETE` continuation repair and its regression coverage.
+
+GitHub Standalone CI run `#870` completed successfully for this exact SHA. All jobs passed:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+Historical candidate `90cdbdfb7b8259f8fb00e7a0e35b57c26f7ba711` remains diagnostic evidence only.
 
 ## Current live S3 blocker
 
@@ -90,9 +102,13 @@ as an unfinished synthetic acceptance continuation.
 
 In the observed live run, validation and write were complete, while the mandatory separate readback remained unfinished. The text response was therefore accepted as a normal final response and S3 later rejected it.
 
+## Completed engineering step
+
+The narrow synthetic acceptance repair has been implemented on `standalone-dev` and exact-SHA CI is green.
+
 ## Next engineering step
 
-Implement the narrowest safe repair on `standalone-dev`.
+Regenerate candidate-bound local/live evidence for `51dea04ab95e818680b96769811c3620d36fc912`.
 
 Primary files:
 
@@ -154,3 +170,45 @@ Any source change creates a new candidate SHA. Historical evidence from `90cdbdf
 Material blocker diagnosis and next steps should be updated here whenever the active task changes.
 
 A new ChatGPT conversation should read this file and continue the task directly. It should not ask the user to transfer the task to Codex unless the user explicitly requests that workflow.
+
+
+## 2026-09-21 ChatGPT implementation update
+
+ChatGPT implemented the blocker directly through GitHub without delegating to Codex.
+
+The implementation:
+
+- recognizes exact `ACCEPTANCE_INCOMPLETE` only when one synthetic acceptance contract is unambiguously present;
+- binds successful workspace validation to the matching `context` or `large_context` directory;
+- derives write/readback progress only from successful paired client-tool history;
+- when write is complete and readback is missing, directs the next repair only to independent readback and explicitly forbids rewriting the file;
+- leaves the detector inactive after a successful write plus later readback;
+- keeps `tool_choice="none"` unchanged;
+- does not convert `ACCEPTANCE_INCOMPLETE` into a PASS sentinel inside the bridge.
+
+An initial CI run exposed two regression-fixture defects. They were diagnosed from GitHub Actions logs and fixed directly. Exact-SHA CI for `51dea04...` then passed all jobs.
+
+Local next commands are:
+
+```bash
+cd ~/codex-web-bridge
+git switch standalone-dev
+git pull --ff-only
+git rev-parse HEAD
+git status --porcelain=v1 --untracked-files=all
+.venv/bin/python tools/standalone_install_smoke.py
+```
+
+Require HEAD exactly:
+
+```text
+51dea04ab95e818680b96769811c3620d36fc912
+```
+
+If install smoke passes and the worktree stays clean, run:
+
+```bash
+.venv/bin/python tools/standalone_s3_live_acceptance.py
+```
+
+Do not reuse the previous candidate's install-smoke or S3 results.
