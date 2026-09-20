@@ -12,7 +12,19 @@ The bridge deliberately fails closed on ambiguous or unsafe Web state.
 
 The project does not increase, bypass, or evade ChatGPT message limits, model entitlements, Work quotas, or rate limits.
 
-Rate-limit handling is bounded detection, acknowledgement cleanup where safe, pacing, and failure classification. It is not quota evasion.
+Rate-limit handling is bounded detection, acknowledgement cleanup where safe, pacing, and failure classification. It is not quota evasion. A rate-limited live acceptance run does not count as positive release evidence.
+
+## No automatic inference fallback in rc.1
+
+The first RC supports one inference path through ChatGPT Web. It does not
+automatically switch to another provider, a local model, or an official API when
+the Web path fails.
+
+If the Web surface is unavailable, rate-limited, quota-blocked, unauthenticated,
+ambiguous, or otherwise unsafe, the current request fails explicitly.
+
+This is a deliberate release-scope decision so route evidence, continuation,
+tool side effects, and failure semantics remain attributable to one backend.
 
 ## Primary live-certified platform
 
