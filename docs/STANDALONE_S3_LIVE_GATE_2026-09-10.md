@@ -1132,6 +1132,55 @@ This changes the release candidate SHA again. Exact-SHA local/CI/live evidence
 must be regenerated before downstream release gates.
 
 
+## 2026-09-20 Affinity-delta function-output provenance marker
+
+The exact candidate `255791ba9c734c20b9aad7250ba8a624264698db`
+again passed restart continuity, remote compaction, and the 180-second
+post-compaction cooldown, then failed the single recovery turn with
+`final_reply_mismatch`.
+
+The visible Web reply retained the durable token `ORBIT-5921` and the pending
+write/readback task, but still claimed that the current ChatGPT session had no
+real callable local `exec_command` interface. The refusal wording already
+matches the existing post-tool unavailable patterns.
+
+The remaining issue was provenance under conversation affinity. After recursive
+compaction, a raw Responses `function_call_output` can arrive without its
+matching assistant `function_call` in the normalized Chat-shaped delta.
+`codex_runtime` converts that tool result into a user-shaped
+`[Function Call Output ...]` fallback. The previous repair inferred provenance
+from the visible fallback text plus compacted continuation state, but an affinity
+delta can omit the compaction summary because that state already lives in the
+open ChatGPT conversation. The repair policy therefore still had no
+authoritative local proof that the fallback came from a real Responses tool
+result.
+
+Generated function-output fallbacks now carry an internal
+`_uwa_function_output_fallback=True` metadata marker plus the call id. The
+marker is added only by Responses normalization, survives internal Chat request
+handling, and is ignored by browser prompt serialization. The client-tool policy
+uses that marker as authoritative prior workspace-tool provenance even when the
+current affinity delta does not replay the compacted summary. Unmarked text that
+merely resembles `[Function Call Output ...]` does not gain this provenance.
+
+Regression coverage verifies the normalization marker, the exact live refusal
+shape, recovery into a real `exec_command` call, the unmarked negative case,
+and that the internal marker is not exposed in browser-visible prompt content.
+
+Implementation commits:
+
+```text
+f34ad2f  Mark generated Responses tool-output fallbacks
+311a7f9  Trust internal Responses tool-output provenance
+7e11350  Cover internal tool-output fallback provenance
+63f0223  Cover affinity-delta tool-output provenance repair
+3511f5e  Verify provenance marker stays browser-internal
+```
+
+This changes the release candidate SHA again. Exact-SHA local/CI/live evidence
+must be regenerated before downstream release gates.
+
+
 ## Gate state
 
 ```text
