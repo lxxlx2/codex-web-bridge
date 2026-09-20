@@ -1,5 +1,5 @@
 # ============================================
-# Universal Web-to-API - Production
+# Codex Web Bridge - Runtime
 # Python: >=3.10
 # ============================================
 
