@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible Codex Web Bridge defect without private runtime data.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste credentials, cookies, browser profiles, private prompts, command/tool bodies, raw conversation URLs, thread/session identifiers, or full wire traces.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened and what did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal steps that reproduce the problem.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or release tag
+      placeholder: v0.1.0-rc.1 or full commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS / Windows / Linux and version
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: python --version
+    validations:
+      required: true
+
+  - type: textarea
+    id: route
+    attributes:
+      label: Sanitized route/status
+      description: Include provider/model/effort and health/status markers if relevant. Remove private identifiers.
+      render: text
+
+  - type: textarea
+    id: failure
+    attributes:
+      label: Sanitized failure markers
+      description: Include FAILURE_CLASS / FAILURE_DETAIL / PASS markers. Do not paste private trace bodies.
+      render: text
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Focused tests already run
+      render: text
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, cookies, private prompts, tool/command bodies, conversation URLs, and raw session/thread identifiers.
+          required: true
