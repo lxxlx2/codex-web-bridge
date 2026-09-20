@@ -2034,3 +2034,51 @@ No final live candidate evidence will be generated on this temporary branch.
 After deterministic tests and PR CI pass, the hardening tree must return to
 `standalone-dev`, creating a new exact candidate for install smoke, repeated
 S3, office soak, Desktop E2E and S4.
+
+
+### Release-hardening local validation passed and tree promoted to standalone-dev
+
+The final temporary hardening head was:
+
+```text
+523fa237815325cbacbd805e1142d51950546834
+```
+
+Local macOS validation on that exact SHA:
+
+```text
+release hardening focused tests:        43 passed
+S3/Desktop release-control regression: 72 passed
+public repository safety:              PASS
+standalone dependency audit:           PASS
+full suite:                            555 passed, 22 warnings
+worktree:                              clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The same SHA also passed the PR Standalone CI:
+
+```text
+run_id=35530908379
+conclusion=success
+```
+
+The hardening tree was then fast-forwarded into the canonical
+`standalone-dev` branch without changing the commit identity:
+
+```text
+standalone-dev=523fa237815325cbacbd805e1142d51950546834
+PR #2=merged/closed
+merge_commit_sha=523fa237815325cbacbd805e1142d51950546834
+```
+
+A push-triggered exact-SHA Standalone CI run is now pending on
+`standalone-dev`:
+
+```text
+run_id=35531749326
+```
+
+No live candidate evidence should start until that canonical-branch CI is green.
