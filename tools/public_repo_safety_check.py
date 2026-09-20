@@ -27,6 +27,17 @@ FORBIDDEN_TRACKED_PATHS = (
     re.compile(r"\.log$", re.IGNORECASE),
 )
 
+PRIVATE_RUNTIME_TEXT_PATTERNS = (
+    (
+        "raw AI conversation URL",
+        re.compile(
+            r"https?://(?:chatgpt\.com|arena\.ai|grok\.com|claude\.ai)"
+            r"/c/[A-Za-z0-9_-]{8,}",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
 SECRET_PATTERNS = (
     ("OpenAI-style secret key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
@@ -97,7 +108,7 @@ def main() -> int:
         except OSError:
             continue
 
-        for label, pattern in SECRET_PATTERNS:
+        for label, pattern in (*SECRET_PATTERNS, *PRIVATE_RUNTIME_TEXT_PATTERNS):
             match = pattern.search(text)
             if match:
                 line = text.count("\n", 0, match.start()) + 1
