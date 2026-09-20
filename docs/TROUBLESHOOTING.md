@@ -239,3 +239,39 @@ messages that happen to say there is no new task are not turned into tool calls.
 Relevant regression coverage:
 
 - `tests/test_client_tool_policy_repeated_refusal.py`
+
+
+## Restart resume returns CONTEXT_PASS after validation only
+
+A live S3 restart-continuity turn can successfully execute the required
+workspace-validation command and then prematurely return:
+
+```text
+CONTEXT_PASS
+```
+
+without creating `context/result.txt`.
+
+This is a false-success model behavior, not a successful acceptance result.
+
+The bridge repair policy now recognizes the repository's exact synthetic
+acceptance success sentinel when real paired tool history proves that workspace
+validation completed but the required result-file write/readback has not.
+
+The S3 runner independently verifies the restart effects from the private
+`restart-resume.jsonl` trace:
+
+```text
+workspace validation completed
+-> result write completed
+-> separate result readback completed
+-> exact file bytes match
+-> CONTEXT_PASS accepted
+```
+
+A missing write fails as `restart_resume/result_write_missing`; a missing
+separate readback fails as `restart_resume/result_readback_missing`.
+
+This repair is intentionally scoped to the synthetic acceptance contract. It
+does not attempt to infer arbitrary business-task success from generic shell
+commands.
