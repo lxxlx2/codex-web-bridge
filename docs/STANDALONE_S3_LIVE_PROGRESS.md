@@ -2305,3 +2305,42 @@ byte-level verification. That is potentially independent product evidence and
 must be checked against the private recovery trace before another S3 attempt.
 
 This run does not count toward the required three successful S3 results.
+
+
+### 0339fad S3 attempt #1 diagnostic closure
+
+Read-only recovery evidence confirmed the malformed intermediate write was
+actually executed before the Web-side failure:
+
+```text
+workspace validation command: completed, exit 0
+result write command:         completed, exit 0
+result bytes:                 b'ORBIT-5921'
+expected bytes:               b'ORBIT-5921\n'
+turn terminal:                failed
+agent final message:          none
+terminal transport error:     remote compact stream disconnected
+outer surface classification: chatgpt_web_rate_limited
+```
+
+The model emitted a no-newline `printf %s` write despite the explicit
+acceptance instruction requiring a trailing LF and later byte-level readback.
+The recovery turn was interrupted before that verification/correction phase
+could complete.
+
+Under the rc.1 reliability contract this does not justify a bridge source change
+by itself:
+
+- the bridge did not report `LARGE_CONTEXT_PASS`;
+- S3 did not report `PASS_LIVE_CLOSED`;
+- the run terminated explicitly and request-manager/browser state returned
+  clean;
+- the malformed effect occurred only inside the disposable synthetic acceptance
+  workspace;
+- generic bridge code cannot safely infer arbitrary business-level shell
+  semantics from every model command.
+
+The candidate therefore remains `0339fad80357f5e41e0ca23b21f5b71fd8053f9e`.
+This attempt counts as zero successful S3 evidence. Do not rerun immediately;
+the next S3 invocation will also honor the persisted recent-rate-limit marker
+and adaptive cooldown/pacing.
