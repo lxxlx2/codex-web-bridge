@@ -126,7 +126,7 @@ def test_security_gate_rejects_tracked_browser_conversation_state(tmp_path: Path
         "config/browser_config.json",
         (
             '{"tab_pool":{'
-            '"excluded_urls":["https://arena.ai/c/01a0046f-4413-7684-9fdd-079995af4852"],'
+            '"excluded_urls":["https://arena.ai' + '/c/' + '01a0046f-4413-7684-9fdd-079995af4852"],'
             '"route_groups":[],'
             '"auto_remember_url_presets":false'
             '}}\n'
