@@ -67,3 +67,16 @@ inspect current evidence
 ```
 
 The assistant should not insert an unnecessary "write a prompt for Codex" step into this loop.
+
+
+## Temporary coordination branch
+
+This file lives only on the temporary `chatgpt-maintenance-handoff` branch.
+
+Do not merge this branch's coordination-only files into `standalone-dev`, `main`, or a release tag.
+
+The canonical product/development branch remains `standalone-dev`. Repository source fixes should be applied there when appropriate. This temporary branch exists only to preserve AI-maintainer operating instructions and active handoff state across ChatGPT conversations.
+
+Before publishing the release, delete the `chatgpt-maintenance-handoff` branch from the remote repository.
+
+When a new ChatGPT conversation takes over this project, read this file and `docs/CHATGPT_ACTIVE_HANDOFF.md` first, then continue the unfinished engineering task directly. Do not hand the task back to Codex unless the user explicitly asks for Codex delegation.
