@@ -2,11 +2,19 @@
 
 [中文](README.md) · [English](README.en.md) · [ไทย](README.th.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让文件、Shell、编辑、测试、Git 等本地工具由 Codex 客户端自身执行。
+Codex Web Bridge 是一个非官方的本地桥接项目，核心目标只有一个：把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让文件、Shell、编辑、测试、Git、sandbox 和审批等本地权限完全由 Codex 客户端自身掌控。
+
+首个 RC 只支持这条推理路径：
+
+```text
+Codex Desktop / CLI -> Codex Web Bridge -> ChatGPT Web
+```
+
+当前不做备用 provider、本地模型或官方 API 自动 fallback。ChatGPT Web、账号额度、浏览器 surface 或路由无法安全继续时，Bridge 明确失败并停止，不会静默换后端继续执行。
 
 > 首个 RC 采用 exact-candidate 发布策略：CI、S3 live、Codex Desktop E2E、clean-install smoke 和 S4 release gate 必须全部绑定到同一个 commit。历史 PASS 不能自动转移到新的代码或文档 commit。
 >
-> 项目已经建立完整的 release/acceptance 流程。开发入口、代码地图、测试矩阵和历史问题索引见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/README.md](docs/README.md)。
+> 项目已经建立完整的 release/acceptance 流程。先读 [项目总览](docs/PROJECT_OVERVIEW.md)；开发入口、代码地图、测试矩阵、可靠性模型和维护交接见 [CONTRIBUTING.md](CONTRIBUTING.md)、[docs/README.md](docs/README.md) 与 [docs/MAINTAINER_HANDOFF.md](docs/MAINTAINER_HANDOFF.md)。
 
 ## 快速开始
 
@@ -98,23 +106,28 @@ reasoning effort = high
 
 ## RC 验收要求
 
-首个 RC 的 release evidence 必须全部绑定到同一个 candidate commit：
+首个 RC 的 release evidence 必须全部绑定到同一个 candidate commit，而且不会把一次偶然成功当成发布可靠性：
 
 ```text
 S1 / S2                                         PASS / CLOSED
-standalone non-live regression                  PASS
-Codex Desktop E2E                               REQUIRED ON EXACT CANDIDATE
-S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
-clean-checkout install smoke                    REQUIRED ON EXACT CANDIDATE
-S4 docs/version/security/provenance gate        REQUIRED ON EXACT CANDIDATE
-CI                                              REQUIRED ON EXACT CANDIDATE
-main CI                                         REQUIRED BEFORE TAG
-tagged-source smoke                             REQUIRED BEFORE GITHUB RELEASE
+standalone deterministic regression             PASS
+exact-SHA CI                                    PASS
+clean-checkout install / rollback smoke         PASS
+S3 full live PASS_LIVE_CLOSED                   >= 3 次，同一 SHA
+S3 successful evidence windows                  >= 2 个两小时 UTC window
+office-work soak + effect verification          PASS，同一 SHA
+release confidence aggregate                    PASS，同一 SHA
+Codex Desktop E2E                               PASS，同一 SHA
+S4 docs/version/security/provenance              PASS，同一 SHA
+main CI                                         PASS BEFORE TAG
+tagged-source smoke                             PASS BEFORE GITHUB RELEASE
 ```
 
-Desktop 与 CLI/live 两条证据互补：Desktop gate 证明真实桌面端同线程上下文、本地文件/Shell 工具和 route；S3 证明 restart、native/remote compaction、post-compaction recovery、route 和 request cleanup。任一证据与当前 release commit SHA 不一致都不能用于发布。
+S3 负责 restart、native/remote compaction、post-compaction recovery、route 和 request cleanup；office-work soak 负责多文件修改、真实失败后修复、Git diff 约束、交互进程等日常工作型任务，并由 checker 独立验证实际文件、测试和 diff 结果；Desktop E2E 再补真实桌面端路径。
 
-完整测试层级和按修改区域选择测试的方法见 [docs/TESTING.md](docs/TESTING.md)。
+外部 ChatGPT Web rate limit/quota/auth/challenge 会让当前 live run 明确 FAIL 并停止。这种外部失败不自动判定 candidate 代码有 bug，但也不计入所需的成功次数。
+
+完整测试层级见 [docs/TESTING.md](docs/TESTING.md)，为什么需要重复 live evidence 与 effect verification 见 [docs/RELIABILITY_MODEL.md](docs/RELIABILITY_MODEL.md)。
 
 ## 连续性与长上下文
 
@@ -154,7 +167,7 @@ RC 发布后进入观察和兼容性反馈阶段；若需要修改 RC 源码则�
 v0.1.0
 ```
 
-参与开发请从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始；本地环境和配置规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，发布后的工作计划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+参与开发请从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始；接手维护建议直接读 [docs/MAINTAINER_HANDOFF.md](docs/MAINTAINER_HANDOFF.md)。本地环境和配置规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，测试文件地图见 [tests/README.md](tests/README.md)，发布/验收工具地图见 [tools/README.md](tools/README.md)，发布后的工作计划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 RC 的平台、浏览器/CDP、账号配额和 retained runtime 限制见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
 
