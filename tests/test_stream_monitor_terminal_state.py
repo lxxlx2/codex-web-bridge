@@ -1,3 +1,5 @@
+import json
+
 from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
 from app.core.stream_monitor import GeneratingStatusCache, _ordinary_text_completion_reason
 from app.core.workflow.executor_send import WorkflowExecutorSendMixin
@@ -134,5 +136,8 @@ def test_pre_send_probe_uses_same_localized_generation_selectors():
 
     harness._probe_send_post_click_state('[data-testid="send-button"]')
 
-    assert 'button[aria-label*="停止"]' in tab.js
-    assert '[data-testid="stop-button"]' in tab.js
+    expected = json.dumps(
+        list(GENERATION_INDICATOR_CSS_SELECTORS),
+        ensure_ascii=False,
+    )
+    assert f"const sharedGenerationSelectors = {expected};" in tab.js
