@@ -39,6 +39,7 @@ REQUIRED_DOCS = (
     "docs/TESTING.md",
     "docs/TROUBLESHOOTING.md",
     "docs/ROADMAP.md",
+    "docs/KNOWN_LIMITATIONS.md",
 )
 
 
