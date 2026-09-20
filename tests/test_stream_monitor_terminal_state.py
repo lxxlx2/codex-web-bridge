@@ -1,5 +1,6 @@
 from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
 from app.core.stream_monitor import GeneratingStatusCache, _ordinary_text_completion_reason
+from app.core.workflow.executor_send import WorkflowExecutorSendMixin
 
 
 def _reason(**overrides):
@@ -95,3 +96,43 @@ def test_stream_generation_cache_detects_chatgpt_stop_testid():
     cache = GeneratingStatusCache(tab)
 
     assert cache.is_generating() is True
+
+
+class _RunJsCaptureTab:
+    def __init__(self):
+        self.js = ""
+
+    def run_js(self, js):
+        self.js = js
+        return {
+            "ok": True,
+            "sendFound": True,
+            "sendDisabled": False,
+            "sendLooksLikeStop": False,
+            "stopBtnFound": False,
+            "configuredGenFound": False,
+            "matchedIndicatorSelector": "",
+            "generating": False,
+            "details": [],
+            "visibleButtons": [],
+        }
+
+
+class _SendProbeHarness(WorkflowExecutorSendMixin):
+    def __init__(self, tab):
+        self.tab = tab
+        self._selectors = {
+            "send_btn": '[data-testid="send-button"]',
+            "generating_indicator": None,
+            "stop_btn": None,
+        }
+
+
+def test_pre_send_probe_uses_same_localized_generation_selectors():
+    tab = _RunJsCaptureTab()
+    harness = _SendProbeHarness(tab)
+
+    harness._probe_send_post_click_state('[data-testid="send-button"]')
+
+    assert 'button[aria-label*="停止"]' in tab.js
+    assert '[data-testid="stop-button"]' in tab.js
