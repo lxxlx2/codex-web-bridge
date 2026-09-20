@@ -1230,3 +1230,27 @@ e107449  Cover live affinity missing-task recovery
 
 Do not run live S3 until focused/full local validation and exact-SHA CI are
 green.
+
+
+### 8344323 local affinity-continuation validation passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+Local validation after carrying compacted continuation state through the
+affinity tool-result delta and extending the missing-task clarification matcher:
+
+```text
+exact affinity continuation regression: 30 passed, 8 warnings
+client tool policy family:               121 passed, 8 warnings
+full suite:                              519 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Next gate: exact-SHA CI must be green before the next candidate-bound live S3
+attempt.
