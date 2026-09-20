@@ -1181,6 +1181,61 @@ This changes the release candidate SHA again. Exact-SHA local/CI/live evidence
 must be regenerated before downstream release gates.
 
 
+## 2026-09-20 Affinity missing-task clarification after tool-availability repair
+
+The exact candidate `23652871f9fc4f901ee68ee7ab9db18ee13a4177`
+again passed restart continuity, remote compaction, and the 180-second
+post-compaction cooldown, then failed the single recovery turn with
+`final_reply_mismatch`.
+
+The visible Web reply now explicitly acknowledged that local client tools such as
+`exec_command` and `write_stdin` were available, proving that the previous
+tool-unavailable contradiction repair had taken effect. It then incorrectly
+asked the user to provide the concrete workspace task again:
+
+```text
+当前已确认 exec_command、write_stdin 等本地客户端工具可用。
+请直接给出要在当前 workspace 中执行的具体任务，我会以实际工具结果为准继续操作。
+```
+
+Two remaining gaps were identified.
+
+First, the missing-task clarification matcher did not cover the observed
+`请直接给出 ... 具体任务` wording because `直接` appeared between the
+optional polite prefix and `给出`.
+
+Second, under a reused ChatGPT affinity delta, the normalized generated
+`[Function Call Output ...]` message carried authoritative tool-result
+provenance but not the compacted `ACTIVE CONTINUATION STATE`. That state was
+present in the fully hydrated Responses history and already represented in the
+open Web conversation, but the policy evaluating the delta could not use it to
+repair a subsequent "please provide the task" response.
+
+The affinity delta now carries the newest compacted continuation text as private
+bridge metadata on generated tool-result fallback messages when the matching
+assistant function call has been compacted out. The metadata is not serialized
+into browser-visible prompt content. `client_tool_policy` consumes that private
+state for compacted-workspace detection and focused repair prompting. The
+missing-task matcher also covers the observed `请直接给出` form.
+
+This allows the bounded three-attempt repair sequence to progress as intended:
+tool-unavailable refusal -> focused repair -> missing-task clarification ->
+focused repair with the actual ACTIVE CONTINUATION STATE -> executable
+`exec_command`.
+
+Implementation commits:
+
+```text
+8afa1a2  Carry compacted state in affinity tool-result metadata
+ec00e1b  Repair affinity missing-task continuation
+86ce841  Cover compacted context on affinity tool-result delta
+e107449  Cover live affinity missing-task recovery
+```
+
+Exact-SHA local/CI/live evidence must be regenerated before downstream release
+gates.
+
+
 ## Gate state
 
 ```text
