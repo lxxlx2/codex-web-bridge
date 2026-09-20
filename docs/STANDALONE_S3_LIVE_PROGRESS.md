@@ -1499,3 +1499,41 @@ Because this batch changes the candidate SHA, previous candidate-bound S3,
 Desktop E2E, install-smoke, and S4 evidence from `8344323...` does not apply to
 this new candidate. Next gate: exact-SHA CI, then regenerate the candidate-bound
 live/release matrix.
+
+
+### 19d66d8 live S3 mid-run diagnostic healthy
+
+Exact candidate:
+
+```text
+19d66d850cb79e1da57b653132a66e66505728fd
+```
+
+During the new candidate-bound S3 run, the terminal was quiet after
+`S3_PHASE=RESTART_CONTINUITY_PASS`. A read-only diagnostic approximately
+25 minutes into the run showed:
+
+```text
+S3 process: alive
+UWA service: healthy
+browser.connected: true
+tab_pool: 1 idle / 0 busy
+request_manager.running_count: 0
+request_manager.status_counts.completed: 12
+chatgpt_web.cooldown_active: false
+chatgpt_web.surface.surface_ready: true
+chatgpt_web.surface.composer_empty: true
+chatgpt_web.surface.rate_limited: false
+chatgpt_web.surface.blocking_reason: none
+```
+
+The latest persisted phase-specific trace was the completed restart-resume
+trace. No remote-compaction probe file existed yet because that probe redirects
+its internal stdout and writes the private probe log only when the probe returns.
+The S3 recovery pacing is still 120 seconds between live turns due to the
+persisted rate-limit streak.
+
+This diagnostic is consistent with an active request-heavy remote compaction
+probe spending time in deliberate inter-turn pacing, not with a stuck UWA
+request or browser failure. Do not interrupt the run solely because the terminal
+is quiet.
