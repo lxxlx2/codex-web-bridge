@@ -1334,3 +1334,21 @@ The repair invariant is now based on the stronger protocol fact: if the current
 request declares a workspace client tool, a text-only claim that the same tool
 is unavailable/not exposed is contradictory and must be repaired. The narrow
 rule continues to respect `tool_choice="none"`.
+
+
+## 2026-09-21 post-compaction no-new-task acknowledgement
+
+Candidate `523fa237815325cbacbd805e1142d51950546834` retained
+`ORBIT-5921` and completed the required workspace-validation
+`exec_command`, but then returned a text-only acknowledgement that the current
+message contained no new concrete execution task. The result file was never
+created.
+
+The outer wrapper also detected a ChatGPT Web rate-limit acknowledgement after
+the core failure. The rate limit explained the final outer classification, but
+the trace independently exposed a product-level policy gap: the exact
+state-only/no-new-task wording was not covered by the existing compacted
+continuation repair matcher.
+
+The repair is intentionally narrow and only activates when authoritative
+compacted workspace intent/provenance remains present.
