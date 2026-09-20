@@ -45,6 +45,7 @@ def _install_common_mocks(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(soak, "_pace", lambda last: None)
     monkeypatch.setattr(soak.core, "_wait_request_cleanup", lambda: None)
     monkeypatch.setattr(soak.core, "_route_gate", lambda marker: None)
+    monkeypatch.setattr(soak, "MIN_RELEASE_SOAK_TURNS", 6)
 
     class GitResult:
         returncode = 0
@@ -80,6 +81,7 @@ def test_happy_path_runs_context_then_all_office_scenarios(
         acceptance_root=tmp_path / "acceptance",
         private_root=tmp_path / "unused",
         turn_timeout_sec=60,
+        work_cycles=1,
     )
 
     assert rc == 0
@@ -95,6 +97,7 @@ def test_happy_path_runs_context_then_all_office_scenarios(
     result = (private / "result.txt").read_text(encoding="utf-8")
     assert "STANDALONE_OFFICE_SOAK=PASS" in result
     assert "OFFICE_SOAK_TURN_COUNT=6" in result
+    assert "OFFICE_SOAK_WORK_CYCLES=1" in result
     assert "candidate_commit=abc123" in result
 
 
@@ -129,6 +132,7 @@ def test_failed_live_turn_stops_without_replaying_later_scenarios(
         acceptance_root=tmp_path / "acceptance",
         private_root=tmp_path / "unused",
         turn_timeout_sec=60,
+        work_cycles=1,
     )
 
     assert rc == 1
@@ -169,6 +173,7 @@ def test_effect_verification_failure_stops_before_next_scenario(
         acceptance_root=tmp_path / "acceptance",
         private_root=tmp_path / "unused",
         turn_timeout_sec=60,
+        work_cycles=1,
     )
 
     assert rc == 1
@@ -195,6 +200,7 @@ def test_context_resume_must_keep_same_thread(
         acceptance_root=tmp_path / "acceptance",
         private_root=tmp_path / "unused",
         turn_timeout_sec=60,
+        work_cycles=1,
     )
 
     assert rc == 1
@@ -249,6 +255,12 @@ def test_surface_rate_limit_reclassifies_live_turn_failure(
 
     assert classified.gate == "chatgpt_web_rate_limited"
     assert classified.detail == "rate_limited"
+
+
+def test_release_default_soak_has_at_least_twenty_live_turns():
+    expected = 2 + soak.DEFAULT_WORK_CYCLES * len(soak.SCENARIOS)
+    assert expected == 22
+    assert expected >= soak.MIN_RELEASE_SOAK_TURNS
 
 
 def test_turn_gap_is_bounded(monkeypatch):
