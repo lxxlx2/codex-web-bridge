@@ -139,6 +139,74 @@ def test_prepare_creates_missing_acceptance_workspace(tmp_path):
     assert (root / ".uwa_codex_acceptance").is_file()
 
 
+def test_multi_file_check_requires_both_expected_implementation_changes(tmp_path):
+    root = tmp_path / "acceptance"
+    assert _run("setup", "--root", str(root)).returncode == 0
+
+    math_ops = root / "multi_file" / "math_ops.py"
+    math_ops.write_text(
+        "def add(a, b):\n    return a + b\n\n\ndef multiply(a, b):\n    return a * b\n",
+        encoding="utf-8",
+    )
+
+    missing_second_change = _run(
+        "check",
+        "--root",
+        str(root),
+        "--scenario",
+        "multi_file",
+    )
+    assert missing_second_change.returncode != 0
+    assert "multi_file: FAIL" in missing_second_change.stdout
+    assert "multi_file/summary.py" in missing_second_change.stdout
+
+    summary = root / "multi_file" / "summary.py"
+    summary.write_text(
+        'def render_total(value):\n    return f"Total: {value}"\n',
+        encoding="utf-8",
+    )
+
+    accepted = _run(
+        "check",
+        "--root",
+        str(root),
+        "--scenario",
+        "multi_file",
+    )
+    assert accepted.returncode == 0, accepted.stdout
+    assert "multi_file: PASS" in accepted.stdout
+
+
+def test_multi_file_check_rejects_test_edits_even_when_suite_is_green(tmp_path):
+    root = tmp_path / "acceptance"
+    assert _run("setup", "--root", str(root)).returncode == 0
+
+    (root / "multi_file" / "math_ops.py").write_text(
+        "def add(a, b):\n    return a + b\n\n\ndef multiply(a, b):\n    return a * b\n",
+        encoding="utf-8",
+    )
+    (root / "multi_file" / "summary.py").write_text(
+        'def render_total(value):\n    return f"Total: {value}"\n',
+        encoding="utf-8",
+    )
+    test_file = root / "multi_file" / "tests" / "test_multi_file.py"
+    test_file.write_text(
+        test_file.read_text(encoding="utf-8") + "\n# unintended edit\n",
+        encoding="utf-8",
+    )
+
+    rejected = _run(
+        "check",
+        "--root",
+        str(root),
+        "--scenario",
+        "multi_file",
+    )
+    assert rejected.returncode != 0
+    assert "multi_file: FAIL" in rejected.stdout
+    assert "multi_file/tests/test_multi_file.py" in rejected.stdout
+
+
 def test_failure_recovery_check_requires_failure_then_success_evidence(tmp_path):
     root = tmp_path / "acceptance"
     assert _run("setup", "--root", str(root)).returncode == 0
