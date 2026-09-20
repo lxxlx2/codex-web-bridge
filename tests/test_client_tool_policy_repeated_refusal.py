@@ -1,6 +1,9 @@
 import pytest
 
-from app.services.client_tool_policy import should_repair_client_workspace_refusal
+from app.services.client_tool_policy import (
+    looks_like_premature_acceptance_success,
+    should_repair_client_workspace_refusal,
+)
 from app.services.tool_calling import complete_tool_calling_roundtrip
 
 
@@ -112,6 +115,166 @@ def test_roundtrip_fails_closed_if_exact_tool_list_refusal_never_recovers(monkey
             round_executor=lambda _messages: refusal,
         )
 
+
+
+def _restart_context_history_after_validation():
+    request = (
+        "这是同一个 Codex 对话的第二轮重启恢复验收。"
+        "第一步必须通过客户端 exec_command 在当前工作区执行 "
+        "pwd && test -f .uwa_codex_acceptance && test -d context。"
+        "校验成功后，只使用上一轮对话上下文中记住的令牌，并且必须通过客户端 exec_command "
+        "创建 context/result.txt，使文件精确包含该令牌和一个换行；随后再次通过客户端 exec_command "
+        "读取并确认该文件。完成后只回复 CONTEXT_PASS。"
+    )
+    return [
+        {"role": "user", "content": request},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_validate",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && test -f .uwa_codex_acceptance '
+                            '&& test -d context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_validate",
+            "name": "exec_command",
+            "content": "Process exited with code 0\nFinal output:\n/acceptance\n",
+        },
+    ]
+
+
+def _append_successful_exec(messages, call_id, command, output="ok"):
+    messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": '{"cmd":' + __import__("json").dumps(command) + "}",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": "exec_command",
+                "content": (
+                    "Process exited with code 0\n"
+                    f"Final output:\n{output}\n"
+                ),
+            },
+        ]
+    )
+
+
+def test_live_context_pass_after_only_validation_is_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    parsed = {
+        "mode": "final",
+        "content": "CONTEXT_PASS",
+        "tool_calls": [],
+    }
+
+    assert looks_like_premature_acceptance_success(
+        "CONTEXT_PASS",
+        messages,
+    ) is True
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="CONTEXT_PASS",
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_context_pass_into_next_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    replies = iter(
+        [
+            "CONTEXT_PASS",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'%s\\n\' \'EMBER-7319\' > context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=_restart_context_history_after_validation(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "success sentinel before" in seen[1][1]["content"]
+
+
+def test_context_pass_allowed_after_successful_write_and_separate_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read",
+        "cat context/result.txt",
+        "EMBER-7319",
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": "CONTEXT_PASS",
+        "tool_calls": [],
+    }
+
+    assert looks_like_premature_acceptance_success(
+        "CONTEXT_PASS",
+        messages,
+    ) is False
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="CONTEXT_PASS",
+        parsed=parsed,
+    ) is False
 
 
 def _compacted_history_with_function_output_fallback():
