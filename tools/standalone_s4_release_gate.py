@@ -226,15 +226,30 @@ def parse_key_values(text: str) -> dict[str, str]:
     return values
 
 
-def latest_s3_result(private_root: Path) -> Path:
+def latest_s3_result(
+    private_root: Path,
+    *,
+    expected_candidate: str | None = None,
+) -> Path:
     matches = sorted(
         private_root.expanduser().glob("*/result.txt"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    if not matches:
-        raise GateFailure("s3_candidate_match", "s3_result_missing")
-    return matches[0]
+    for path in matches:
+        try:
+            values = parse_key_values(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if values.get("STANDALONE_S3") != "PASS_LIVE_CLOSED":
+            continue
+        if (
+            expected_candidate is not None
+            and values.get("candidate_commit", "") != expected_candidate
+        ):
+            continue
+        return path
+    raise GateFailure("s3_candidate_match", "successful_s3_result_missing")
 
 
 def check_s3_candidate(root: Path, result_path: Path) -> None:
@@ -397,9 +412,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    s3_result = args.s3_result or latest_s3_result(args.private_root)
+    root = args.root.expanduser().resolve()
+    candidate = git_head(root)
+    s3_result = args.s3_result or latest_s3_result(
+        args.private_root,
+        expected_candidate=candidate,
+    )
     return run(
-        root=args.root.expanduser().resolve(),
+        root=root,
         s3_result=s3_result.expanduser(),
         desktop_result=args.desktop_result.expanduser(),
         install_smoke_result=args.install_smoke_result.expanduser(),
