@@ -21,6 +21,8 @@ export PATH="$HOME/bin:$PATH"
 
 The bridge expects a Chromium-compatible browser reachable through the configured CDP endpoint. The default browser port is `9222`. The controlled browser must have a usable logged-in ChatGPT Web session for live requests.
 
+The browser is attached in existing-only mode; it is not launched by the bridge. See [BROWSER_SETUP.md](BROWSER_SETUP.md) for setup and verification examples.
+
 ## Run and inspect
 
 Start/switch Codex to the bridge:
