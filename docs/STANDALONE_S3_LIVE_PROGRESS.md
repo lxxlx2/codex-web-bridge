@@ -2366,3 +2366,46 @@ FAILURE_DETAIL=result_file_missing
 No outer rate-limit classification was emitted for this attempt. This is a
 candidate/product-level acceptance failure until proven otherwise and must be
 diagnosed read-only before any rerun.
+
+
+### Restart-resume premature CONTEXT_PASS diagnosed and repaired
+
+Read-only evidence from S3 attempt #2 on
+`0339fad80357f5e41e0ca23b21f5b71fd8053f9e` proved:
+
+```text
+workspace validation: completed, exit 0
+result write:         absent
+result readback:      absent
+assistant final:      CONTEXT_PASS
+turn status:          completed
+result file:          missing
+```
+
+This is an independent false-success model behavior. The existing S3 checker
+caught it because the expected file did not exist, but the bridge should not
+accept the success sentinel once real tool history proves that only the first
+validation step completed.
+
+The repair on `standalone-dev` now:
+
+- recognizes exact synthetic `CONTEXT_PASS` / `LARGE_CONTEXT_PASS`
+  sentinels when paired client-tool history proves workspace validation
+  succeeded but required result effects are still incomplete;
+- issues a focused client-tool repair instead of accepting the premature final;
+- strengthens the restart prompt into three explicit steps: validation, write
+  with trailing LF, separate readback;
+- verifies completed write + later separate readback from the private
+  restart-resume trace before accepting restart continuity;
+- keeps the rule scoped to repository acceptance sentinels rather than trying
+  to infer arbitrary business-task correctness.
+
+Current candidate HEAD after the fix and documentation updates:
+
+```text
+90cdbdfb7b8259f8fb00e7a0e35b57c26f7ba711
+```
+
+All candidate-bound evidence from `0339fad...` is invalidated by the source
+change. Run focused/full deterministic validation and exact-SHA CI before
+regenerating install smoke or live S3 evidence.
