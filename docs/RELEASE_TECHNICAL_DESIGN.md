@@ -1,5 +1,6 @@
 # Codex Web Bridge v0.1.0-rc.1 发布前技术设计
 
+> Approved release-specification record. Descriptions of a gate being “current” are historical context from the planning stage; publishability is determined only by exact-candidate evidence and the release sequence in `docs/RELEASE_PROCESS.md`.\n\n
 **文档状态**：Approved v1.0  
 **需求文档**：`docs/RELEASE_REQUIREMENTS.md` Approved v1.0  
 **需求冻结提交**：`29609358de73c9ff3dbcd49da98172ce24ee66cd`  
