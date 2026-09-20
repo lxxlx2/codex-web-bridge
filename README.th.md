@@ -4,9 +4,9 @@
 
 Codex Web Bridge เป็นโปรเจกต์ local bridge แบบไม่เป็นทางการ สำหรับส่งคำขอ reasoning ของ Codex Desktop / Codex CLI ไปยัง ChatGPT Web ที่ล็อกอินไว้แล้ว โดยยังคงให้การเข้าถึงไฟล์, Shell, การแก้ไขโค้ด, การทดสอบ, Git, sandbox และ approval ทำงานผ่าน Codex client ในเครื่องของผู้ใช้
 
-> สถานะ release candidate: S1/S2 ปิดแล้ว และ real Codex Desktop E2E ของ standalone ได้พิสูจน์ same-thread context, local-tool execution จริง, route `uwa / chatgpt / high` และ request cleanup แล้ว จะสร้าง tag ของ RC แรกก็ต่อเมื่อ final S3 live, Desktop E2E, clean-install smoke, CI และ S4 release gate ผ่านบน candidate SHA เดียวกันทั้งหมด
+> RC แรกใช้ exact-candidate policy: deterministic regression, clean-install/rollback smoke, Codex Desktop E2E, S4 และ CI ต้องผูกกับ candidate SHA เดียวกัน นอกจากนี้ต้องมี full S3 `PASS_LIVE_CLOSED` อย่างน้อย 3 ครั้ง ครอบคลุมอย่างน้อย 2 ช่วงเวลา UTC แบบ 2 ชั่วโมง และต้องผ่าน office-work soak + release-confidence gate
 >
-> เอกสารนี้ไม่ยึด blocker ชั่วคราวจาก live run ใด run หนึ่ง การตัดสิน release ใช้ candidate-bound gate evidence เท่านั้น เมื่อ HEAD เปลี่ยนต้องสร้าง live evidence ที่เกี่ยวข้องใหม่
+> RC นี้ไม่มี automatic fallback ไปยัง provider อื่น, local model หรือ official API ถ้า ChatGPT Web ถูก rate-limit, quota หมด, auth/challenge ผิดปกติ หรือ surface ไม่ปลอดภัย ระบบจะ fail อย่างชัดเจนและหยุด run นั้น ไม่ถือเป็น PASS
 
 
 ## เริ่มต้นใช้งานอย่างรวดเร็ว
