@@ -1238,11 +1238,14 @@ gates.
 
 ## Gate state
 
+This file is the chronological engineering record for S3. It documents the real failures that shaped the current lifecycle, compaction, affinity, rate-limit, and client-tool protections.
+
+Release status is no longer inferred from this historical file. For any current candidate:
+
 ```text
-S1 dependency / import / runtime audit       PASS / CLOSED
-S2 extraction / decoupling / minimal tree    PASS / CLOSED
-S3 CI + CLI/Desktop/live parity              CURRENT / LIVE RUN READY
-S4 release candidate / first release         PENDING
+S3 is valid only when its private result records
+STANDALONE_S3=PASS_LIVE_CLOSED
+and candidate_commit == current release commit.
 ```
 
-S3 must remain open until the standalone live runner completes successfully. No release tag is created before that result is recorded and the S4 release-candidate checks are prepared.
+Any later code or documentation commit requires the candidate-bound release evidence required by the release policy to be regenerated. See [TESTING.md](TESTING.md) for the current execution order and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for a compact symptom-to-root-cause index.
