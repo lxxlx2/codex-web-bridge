@@ -188,9 +188,14 @@ def build_final_prompt() -> str:
         "任何自动 compaction 都必须保留它的精确值。"
         f"校验成功后，只使用你从第一轮对话上下文保留的合成令牌，创建 "
         f"{RESULT_RELATIVE.as_posix()}，文件必须精确包含该令牌和一个换行。"
-        "随后必须再次通过客户端 exec_command 实际读取该文件并确认内容。"
+        "写入时必须使用明确保留末尾换行的方式，例如 printf '%s\\n' 的等价形式；"
+        "禁止使用 echo -n、printf '%s' 或任何只写令牌但不写末尾换行的方式。"
+        "写入后必须再单独调用一次客户端 exec_command 做字节级校验："
+        f"读取 {RESULT_RELATIVE.as_posix()} 的 bytes，确认最后一个字节是 0x0a，"
+        "确认文件中只有这一处末尾换行，并再次读取确认令牌内容。"
+        "仅用 cat 看到令牌文本不能证明末尾换行存在，因此不能据此直接回复 PASS。"
         "不要读取任何其他可能保存会话或提示历史的路径。"
-        "完成全部步骤后只回复 LARGE_CONTEXT_PASS。"
+        "只有字节级校验和令牌内容都正确后，才只回复 LARGE_CONTEXT_PASS。"
     )
 
     if TOKEN in prompt:
@@ -344,6 +349,21 @@ def _workspace_contains_token(root: Path) -> list[str]:
         if token_bytes in data:
             hits.append(path.relative_to(root).as_posix())
     return hits
+
+
+def _result_mismatch_reason(data: bytes) -> str:
+    """Return a precise reason when the final synthetic result bytes differ."""
+
+    expected_token = TOKEN.encode("utf-8")
+    expected = expected_token + b"\n"
+
+    if data == expected:
+        return ""
+    if data == expected_token:
+        return "missing_trailing_newline"
+    if data.startswith(expected_token):
+        return "token_format_mismatch"
+    return "token_value_mismatch"
 
 
 def _final_commands_safe(commands: Iterable[str]) -> bool:
