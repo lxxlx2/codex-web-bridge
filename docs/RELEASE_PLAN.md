@@ -27,6 +27,11 @@ The standalone tree must pass CI and local parity checks covering Responses comp
 
 ## S4 exit criteria
 
-Only after S3 passes may the standalone development branch be merged to `main` and tagged. The first candidate tag should be `v0.1.0-rc.1`. A stable `v0.1.0` follows only after the release candidate is installed from a clean checkout and passes the documented smoke test.
+Only after S3 and the remaining candidate-bound release matrix pass may the standalone development branch be fast-forwarded to `main` and tagged. The first candidate tag should be `v0.1.0-rc.1`. Before the GitHub Release, main CI and tagged-source smoke must also pass. A stable `v0.1.0` follows the RC observation period once no release blocker remains and the stable candidate passes the required matrix.
 
 Release notes should include the validated platform/Python/Codex ranges, known limitations, upgrade/install instructions, source baseline, upstream attribution and checksums for any attached binary/archive artifacts.
+
+
+## Post-release work
+
+The first RC intentionally avoids broad runtime refactoring. After release, follow [ROADMAP.md](ROADMAP.md) for RC observation, stable promotion, cross-platform certification, dependency reproducibility, runtime slimming, and later directory/module restructuring.
