@@ -159,9 +159,9 @@ def test_standalone_start_enforces_loopback_launcher_boundary():
 
 def test_public_repo_safety_rejects_raw_conversation_urls():
     samples = [
-        "https://chatgpt.com/c/6aaf937d-8174-83ec-b696-a4376db7d1b0",
-        "https://arena.ai/c/01a0046f-4413-7684-9fdd-079995af4852",
-        "https://grok.com/c/79789b04-1484-4b65-b766-782b020ae0c0",
+        "https://chatgpt.com" + "/c/" + "6aaf937d-8174-83ec-b696-a4376db7d1b0",
+        "https://arena.ai" + "/c/" + "01a0046f-4413-7684-9fdd-079995af4852",
+        "https://grok.com" + "/c/" + "79789b04-1484-4b65-b766-782b020ae0c0",
     ]
 
     for sample in samples:
