@@ -11,6 +11,7 @@ Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Deskt
 ## 快速开始
 
 首个 RC 的主要 live 验证平台是 macOS。运行需要 Python 3.10+、Codex Desktop/CLI，以及一个可通过本地 CDP 连接、已经登录 ChatGPT Web 的 Chromium 兼容浏览器。默认 CDP 端口为 `9222`。
+Bridge 只连接已经运行的浏览器，不负责自动启动浏览器；首次配置见 [docs/BROWSER_SETUP.md](docs/BROWSER_SETUP.md)。
 
 普通用户从 `main` 或 Release tag 安装；参与开发时再切换到 `standalone-dev`。
 
