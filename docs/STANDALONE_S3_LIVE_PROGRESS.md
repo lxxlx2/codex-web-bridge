@@ -998,3 +998,39 @@ fix closed the prior `send_blocked_by_preexisting_generation` blocker. Do not
 change candidate code until the exact `post-compaction-recovery.jsonl` is
 classified: inspect final agent text, client commands/results, and whether
 `large_context/result.txt` exists with the expected token.
+
+
+### df0ffa0 post-compaction provenance gap fixed
+
+The post-compaction recovery trace showed that multiple real client workspace
+commands completed successfully, but the final model reply incorrectly claimed
+that the declared workspace tool was unavailable. The existing refusal-language
+matcher already covered the wording.
+
+The actual gap was provenance after recursive compaction. A Responses
+continuation can retain a completed client tool result as the bridge-generated
+`[Function Call Output ...]` user fallback after the matching structured
+assistant function call has been compacted out. The main repair path previously
+required structured tool history and therefore missed this case.
+
+The policy now accepts that generated fallback as prior workspace-tool
+provenance only when the same request also contains a compacted unresolved
+workspace continuation. A fallback-shaped user message without compacted
+workspace state remains insufficient.
+
+Current `standalone-dev` head:
+
+```text
+255791ba9c734c20b9aad7250ba8a624264698db
+```
+
+Commits:
+
+```text
+fbd47d5  Repair compacted function-output tool refusals
+9073f9c  Cover compacted function-output refusal recovery
+255791b  Record compacted function-output refusal fix
+```
+
+Do not run live S3 until focused/full local validation and exact-SHA CI are
+green.
