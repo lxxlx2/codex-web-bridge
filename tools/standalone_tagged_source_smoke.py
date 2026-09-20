@@ -30,6 +30,7 @@ REQUIRED_FILES = (
     "docs/TESTING.md",
     "docs/TROUBLESHOOTING.md",
     "docs/ROADMAP.md",
+    "docs/KNOWN_LIMITATIONS.md",
     "manifests/README.md",
     "tools/public_repo_safety_check.py",
     "tools/standalone_dependency_audit.py",
