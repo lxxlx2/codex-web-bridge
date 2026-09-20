@@ -1250,3 +1250,29 @@ and candidate_commit == current release commit.
 ```
 
 Any later code or documentation commit requires the candidate-bound release evidence required by the release policy to be regenerated. See [TESTING.md](TESTING.md) for the current execution order and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for a compact symptom-to-root-cause index.
+
+
+## 2026-09-20 Byte-exact large-context result verification
+
+Candidate `19d66d850cb79e1da57b653132a66e66505728fd` completed restart continuity,
+remote compaction, cooldown, and the final post-compaction recovery turn. The
+visible Web reply was exactly `LARGE_CONTEXT_PASS`, but S3 rejected the result
+file.
+
+Private read-only diagnosis showed:
+
+```text
+result bytes = b"ORBIT-5921"
+expected     = b"ORBIT-5921\n"
+retained token value = correct
+wrong-token contamination = not observed
+```
+
+The final client command contained `ORBIT-5921` and the result-file path, so the
+failure was a missing trailing newline, not durable-state loss or cross-thread
+token contamination.
+
+The recovery contract now requires a newline-preserving write plus a separate
+byte-level verification that the final byte is `0x0a`. S3 also reports this
+class as `result_missing_trailing_newline` rather than a generic
+`token_mismatch`.
