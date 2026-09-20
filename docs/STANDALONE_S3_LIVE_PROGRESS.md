@@ -757,3 +757,20 @@ work on the exact candidate. Since the per-turn gap is already at the 120-second
 design cap, further code churn is not justified by this evidence. The remaining
 release blocker is the account's longer rolling request-limit window. Keep the
 candidate frozen and retry only after a materially longer quiet period.
+
+
+### Operator helper import mismatch while reading rate-limit marker
+
+A non-live inline diagnostic attempted to import
+`tools.standalone_s3_live_acceptance` from repository root and failed because
+that release script intentionally imports sibling modules as top-level modules
+when executed from `tools/`:
+
+```text
+ModuleNotFoundError: No module named 'standalone_s3_live_core'
+```
+
+This is an operator helper-command issue, not a candidate runtime failure. Keep
+`standalone-dev` frozen. Read the marker with `PYTHONPATH="$PWD/tools"` and
+import `standalone_s3_live_acceptance` as a top-level module, matching normal
+script execution semantics.
