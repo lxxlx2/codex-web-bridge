@@ -375,6 +375,30 @@ class StreamContext:
         return active_len
 
 
+def _final_settle_generation_transition(
+    *,
+    was_generating: bool,
+    still_generating: bool,
+    active_since: Optional[float],
+    now: float,
+) -> tuple[Optional[float], bool]:
+    """Track generation that reappears during final settle.
+
+    Returns (active_since, reset_stability_window). A generation that
+    reappears after ordinary completion invalidates the previous stability
+    window; clearing that generation also starts a fresh stability window so a
+    transient idle gap cannot release a still-live ChatGPT turn.
+    """
+
+    if still_generating:
+        return (
+            active_since if active_since is not None else now,
+            True,
+        )
+    if was_generating:
+        return None, True
+    return None, False
+
 class GeneratingStatusCache:
     """生成状态缓存"""
 
@@ -412,6 +436,71 @@ class GeneratingStatusCache:
                 ele = self.tab.ele(selector, timeout=0.05)
                 if ele and ele.states.is_displayed:
                     self._found_selector = selector
+                    self._last_result = True
+                    return True
+            except Exception:
+                pass
+
+        # ChatGPT can transiently keep the composer submit control while
+        # changing its semantics to Stop. Some UI revisions expose that state
+        # through button metadata rather than one of the stable stop selectors.
+        # Scope this fallback to the active composer so unrelated page-level
+        # Stop controls cannot hold the stream open.
+        if hasattr(self.tab, "run_js"):
+            try:
+                composer_stop = bool(
+                    self.tab.run_js(
+                        r'''
+                        return (function() {
+                            try {
+                                const input = document.querySelector('#prompt-textarea');
+                                if (!input) return false;
+                                const root = input.closest('form') || input.parentElement;
+                                if (!root) return false;
+
+                                const visible = (node) => {
+                                    if (!node) return false;
+                                    const style = window.getComputedStyle
+                                        ? window.getComputedStyle(node)
+                                        : null;
+                                    if (
+                                        style
+                                        && (
+                                            style.display === 'none'
+                                            || style.visibility === 'hidden'
+                                        )
+                                    ) return false;
+                                    const rect = node.getBoundingClientRect
+                                        ? node.getBoundingClientRect()
+                                        : null;
+                                    return !rect || (rect.width > 0 && rect.height > 0);
+                                };
+
+                                for (const btn of root.querySelectorAll('button, [role="button"]')) {
+                                    if (!visible(btn)) continue;
+                                    const meta = [
+                                        btn.getAttribute ? btn.getAttribute('aria-label') : '',
+                                        btn.getAttribute ? btn.getAttribute('title') : '',
+                                        btn.getAttribute ? btn.getAttribute('data-testid') : '',
+                                        typeof btn.className === 'string' ? btn.className : '',
+                                        btn.innerText || '',
+                                        btn.textContent || ''
+                                    ].join(' ').toLowerCase();
+
+                                    if (
+                                        /\bstop\b|\bstopping\b|\bcancel\b|\babort\b/.test(meta)
+                                        || /停止|中止|取消/.test(meta)
+                                    ) return true;
+                                }
+                                return false;
+                            } catch (error) {
+                                return false;
+                            }
+                        })();
+                        '''
+                    )
+                )
+                if composer_stop:
                     self._last_result = True
                     return True
             except Exception:
@@ -2471,19 +2560,47 @@ class StreamMonitor:
         snapshot_changing = False
 
         last_snap = self._get_snapshot_prefer_anchor(selector, ctx.output_target_anchor)
+        last_generating = bool(last_snap.get('is_generating'))
+        generation_active_since: Optional[float] = (
+            start if last_generating else None
+        )
+        if last_generating:
+            stable_start = start
+            snapshot_changing = True
 
         while True:
             if self._should_stop():
                 break
             now = time.time()
             effective_hardcap = extended_hardcap if snapshot_changing else hardcap
-            if now - start > effective_hardcap:
-                break
-            if now - stable_start >= settle_time:
-                break
+
+            if generation_active_since is not None:
+                if now - generation_active_since > extended_hardcap:
+                    raise RuntimeError("stream_final_settle_generation_active")
+            else:
+                if now - start > effective_hardcap:
+                    break
+                if now - stable_start >= settle_time:
+                    break
 
             time.sleep(0.15)
             snap = self._get_snapshot_prefer_anchor(selector, ctx.output_target_anchor)
+
+            now = time.time()
+            still_generating = bool(snap.get('is_generating'))
+            (
+                generation_active_since,
+                reset_stability_window,
+            ) = _final_settle_generation_transition(
+                was_generating=last_generating,
+                still_generating=still_generating,
+                active_since=generation_active_since,
+                now=now,
+            )
+            if reset_stability_window:
+                stable_start = now
+                snapshot_changing = True
+            last_generating = still_generating
 
             changed = False
             if snap['groups_count'] > last_snap['groups_count']:
@@ -2512,6 +2629,8 @@ class StreamMonitor:
             last_snap = snap
 
         final_snap = self._get_snapshot_prefer_anchor(selector, ctx.output_target_anchor)
+        if bool(final_snap.get('is_generating')):
+            raise RuntimeError("stream_final_settle_generation_active")
         final_text = final_snap.get('text', "") or ""
         final_image_urls = [
             url
