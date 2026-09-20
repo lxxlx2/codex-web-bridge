@@ -38,6 +38,16 @@ PRIVATE_RUNTIME_TEXT_PATTERNS = (
     ),
 )
 
+BROWSER_CONFIG_PRIVATE_PATTERNS = (
+    (
+        "raw UUID-like browser/session identifier",
+        re.compile(
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
 SECRET_PATTERNS = (
     ("OpenAI-style secret key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
@@ -113,6 +123,13 @@ def main() -> int:
             if match:
                 line = text.count("\n", 0, match.start()) + 1
                 findings.append(f"{label}: {normalized}:{line}")
+
+        if normalized == "config/browser_config.json":
+            for label, pattern in BROWSER_CONFIG_PRIVATE_PATTERNS:
+                match = pattern.search(text)
+                if match:
+                    line = text.count("\n", 0, match.start()) + 1
+                    findings.append(f"{label}: {normalized}:{line}")
 
     if findings:
         print("Public repository safety check FAILED")
