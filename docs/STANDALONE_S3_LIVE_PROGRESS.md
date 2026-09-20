@@ -2211,3 +2211,31 @@ Current candidate HEAD:
 All candidate-bound evidence from `523fa23...` is invalidated by this source
 change. Re-run deterministic local validation and exact-SHA CI before any new
 install smoke or live S3 attempt.
+
+
+### 0339fad full deterministic validation passed
+
+Exact candidate:
+
+```text
+0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+```
+
+Local validation after the post-compaction no-new-task repair:
+
+```text
+client tool policy:               64 passed
+continuation / compaction:        75 passed, 8 warnings
+release hardening:                28 passed
+public repository safety:        PASS
+standalone dependency audit:     PASS
+full suite:                       557 passed, 22 warnings
+worktree:                        clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Candidate-bound install/live evidence from `523fa23...` remains invalidated by
+the source change. After exact-SHA CI is green, regenerate install/rollback
+smoke, then begin a new S3 success attempt on this exact candidate.
