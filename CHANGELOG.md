@@ -17,6 +17,7 @@ Release-candidate scope for Codex Web Bridge:
 - Strengthened S4 documentation consistency checks so stale release-state snapshots cannot silently pass the final local gate.
 - Added a dedicated tagged-source smoke runner and durable known-limitations/roadmap documentation for the RC-to-stable path.
 - Hardened post-compaction large-context recovery to require byte-exact trailing-newline verification and added precise result-mismatch classification.
+- Hardened stream terminal completion against a final-settle generation reappearance race and added composer-scoped Stop-state detection plus diagnostic source logging.
 - Release evidence is exact-candidate-bound: final S3 live closure, Desktop E2E, clean-install smoke, CI, S4, main CI, and tagged-source smoke are required in the documented order before the GitHub Release.
 
 ## Unreleased
