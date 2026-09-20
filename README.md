@@ -4,19 +4,19 @@
 
 Codex Web Bridge 是一个非官方的本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让文件、Shell、编辑、测试、Git 等本地工具由 Codex 客户端自身执行。
 
-> 发布候选状态：S1/S2 已关闭，standalone 真实 Codex Desktop E2E 已证明同线程上下文、真实本地工具执行、`uwa / chatgpt / high` 路由和 request cleanup。首个 RC 只会在同一个 candidate SHA 上同时通过最终 S3 live、Desktop E2E、clean-install smoke、CI 和 S4 release gate 后打 tag。
+> 首个 RC 采用 exact-candidate 发布策略：CI、S3 live、Codex Desktop E2E、clean-install smoke 和 S4 release gate 必须全部绑定到同一个 commit。历史 PASS 不能自动转移到新的代码或文档 commit。
 >
-> 当前文档不再记录某一次临时 live blocker。发布判断只以 candidate-bound gate 结果为准，任何代码或文档提交改变 HEAD 后，都必须重新生成对应的 live evidence。
-
+> 项目已经建立完整的 release/acceptance 流程。开发入口、代码地图、测试矩阵和历史问题索引见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/README.md](docs/README.md)。
 
 ## 快速开始
 
-当前开发阶段使用 `standalone-dev`。正式 Release 后会以 `main` 和 Release tag 为准。
+首个 RC 的主要 live 验证平台是 macOS。运行需要 Python 3.10+、Codex Desktop/CLI，以及一个可通过本地 CDP 连接、已经登录 ChatGPT Web 的 Chromium 兼容浏览器。默认 CDP 端口为 `9222`。
+
+普通用户从 `main` 或 Release tag 安装；参与开发时再切换到 `standalone-dev`。
 
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
 cd codex-web-bridge
-git switch standalone-dev
 python3 tools/install_codex_uwa_commands.py
 export PATH="$HOME/bin:$PATH"
 ```
@@ -57,6 +57,8 @@ http://127.0.0.1:8199
 curl -sS http://127.0.0.1:8199/health
 ```
 
+第一次启动可能需要创建项目虚拟环境并安装依赖。浏览器/CDP、ChatGPT 登录状态或页面 surface 不满足要求时，Bridge 会 fail closed，而不会把请求静默发送到错误页面。
+
 ## 架构
 
 ```text
@@ -81,6 +83,8 @@ model = chatgpt
 reasoning effort = high
 ```
 
+主调用链、continuation/affinity/compaction、compatibility facade 和 inherited runtime 的边界见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
 ## 核心边界
 
 1. Codex 客户端始终是本地执行 authority，Bridge 不越过客户端直接操作用户工作区。
@@ -88,7 +92,8 @@ reasoning effort = high
 3. 显式要求真实工具调用时，文本模拟不能算成功，必须形成真实 `function_call -> local execution -> function_call_output` 往返。
 4. same-thread continuation、UWA restart、Web conversation affinity、native/remote compaction 都必须保持逻辑连续性，并在无法证明安全时 fail closed。
 5. tool side effect 状态不确定时，不允许无条件自动重放本地工具。
-6. private trace 默认只保存验收所需 metadata，公开仓库不接收私人 prompt、命令正文、工具输出、cookies、浏览器 profile 或完整 wire trace。
+6. private trace 默认只保存验收所需 metadata，公开仓库不接收私人 prompt、命令正文、工具输出、cookies、浏览器 profile、原始 conversation/thread/session identifier 或完整 wire trace。
+7. tracked `config/` 只保存可复用默认配置；机器自己的 conversation URL、route group、tab exclusion 等本地状态不得提交。
 
 ## RC 验收要求
 
@@ -97,14 +102,18 @@ reasoning effort = high
 ```text
 S1 / S2                                         PASS / CLOSED
 standalone non-live regression                  PASS
-Codex Desktop E2E                               REQUIRED ON CANDIDATE
+Codex Desktop E2E                               REQUIRED ON EXACT CANDIDATE
 S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
-clean-checkout install smoke                    REQUIRED
-S4 docs/version/security/provenance gate        REQUIRED
-CI                                              REQUIRED
+clean-checkout install smoke                    REQUIRED ON EXACT CANDIDATE
+S4 docs/version/security/provenance gate        REQUIRED ON EXACT CANDIDATE
+CI                                              REQUIRED ON EXACT CANDIDATE
+main CI                                         REQUIRED BEFORE TAG
+tagged-source smoke                             REQUIRED BEFORE GITHUB RELEASE
 ```
 
-Desktop 与 CLI/live 两条证据互补：Desktop gate 证明真实桌面端同线程上下文、本地文件/Shell 工具和 route；S3 证明 restart、native/remote compaction、post-compaction recovery、route 和 request cleanup。任一证据与当前 HEAD SHA 不一致都不能用于发布。
+Desktop 与 CLI/live 两条证据互补：Desktop gate 证明真实桌面端同线程上下文、本地文件/Shell 工具和 route；S3 证明 restart、native/remote compaction、post-compaction recovery、route 和 request cleanup。任一证据与当前 release commit SHA 不一致都不能用于发布。
+
+完整测试层级和按修改区域选择测试的方法见 [docs/TESTING.md](docs/TESTING.md)。
 
 ## 连续性与长上下文
 
@@ -112,7 +121,9 @@ Desktop 与 CLI/live 两条证据互补：Desktop gate 证明真实桌面端同�
 
 Remote V2 compaction 使用受控 envelope，并保留内部 compaction lineage。required-tool completion 只在能够证明属于同一个 compaction lineage 和同一用户轮次时才会复用，避免 compaction 删除 function-call history 后重复强制执行已经完成的本地工具，也避免不同 thread 之间发生状态污染。
 
-当前 standalone catalog 使用经过 live 验证调优的长上下文边界。相关参数仍属于开发期实现细节，后续 Release 可能随着 Codex / ChatGPT Web 行为变化继续调整。
+当前 standalone catalog 使用经过 live 验证调优的长上下文边界。相关参数仍属于实现细节，后续 Release 可能随着 Codex / ChatGPT Web 行为变化继续调整。
+
+历史 live 问题、真实根因和对应回归测试的索引见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
 ## 已验证的集成基线
 
@@ -122,23 +133,27 @@ Remote V2 compaction 使用受控 envelope，并保留内部 compaction lineage�
 lxxlx2/universal-web-api@a140002e65a02a3323abcde3e1fdb8674710c996
 ```
 
-该集成基线已经通过 Stage A-F、真实 client-tool round trip、same-thread/restart continuity、native/remote compaction、Desktop acceptance、stream cancellation cleanup、final regression 和 M1-M7 integrated release gates。
+该集成基线通过了 Stage A-F、真实 client-tool round trip、same-thread/restart continuity、native/remote compaction、Desktop acceptance、stream cancellation cleanup、final regression 和 M1-M7 integrated release gates。
 
-standalone 仓库仍必须独立完成自己的 S3，不能把集成仓库历史结果直接当作 standalone release 证据。
+这些历史结果只用于 provenance 和设计基线。standalone 每个 release candidate 都必须在自己的 exact commit 上重新生成 release evidence。
+
+仓库中仍保留一部分经过 dependency/runtime closure 证明必要的 upstream browser/config/media runtime；这不代表所有 upstream provider 都是 Codex Web Bridge 的公开支持面。后续精简计划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 开发与发布
 
-开发全部在 `standalone-dev` 进行，`main` 保持发布边界。首个计划版本：
+普通开发在 `standalone-dev` 进行，`main` 是发布边界，Release tag 是不可变公开 checkpoint。首个计划版本：
 
 ```text
 v0.1.0-rc.1
 ```
 
-只有 RC 在独立仓库通过完整 S3 live parity、安全检查、依赖/provenance 审计和 release artifact 校验后，才会进入正式：
+RC 发布后进入观察和兼容性反馈阶段；若需要修改 RC 源码则递增 RC 后缀。没有未解决 release blocker 后再进入：
 
 ```text
 v0.1.0
 ```
+
+参与开发请从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始；本地环境和配置规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，发布后的工作计划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 安全与隐私
 
@@ -152,7 +167,7 @@ unsafe Python  关闭
 private state  ~/.uwa
 ```
 
-不要提交账号凭据、cookies、浏览器 profile、私人 prompt、command/tool body、private Responses persistence、原始 browser/session identifier 或完整 wire trace。
+不要提交账号凭据、cookies、浏览器 profile、私人 prompt、command/tool body、private Responses persistence、原始 conversation/thread/session identifier、conversation URL 或完整 wire trace。
 
 安全策略见 [SECURITY.md](SECURITY.md)。
 
