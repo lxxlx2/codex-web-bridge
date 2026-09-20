@@ -195,7 +195,14 @@ README.th.md
 README.ja.md
 README.ko.md
 README.zh-CN.md
+CONTRIBUTING.md
 CHANGELOG.md
+docs/README.md
+docs/ARCHITECTURE.md
+docs/DEVELOPMENT.md
+docs/TESTING.md
+docs/TROUBLESHOOTING.md
+docs/ROADMAP.md
 docs/RELEASE_PROCESS.md
 SECURITY.md
 NOTICE.md
@@ -229,7 +236,7 @@ CI 与 live gate 必须针对同一 candidate commit。
 
 ### R14. 安全与隐私
 
-Release tree 不得包含 cookies、token/API key、浏览器 profile、私人 prompt、tool/command body、私人 workspace 内容、private Responses state、raw thread/session ID、完整 wire trace 或 `~/.uwa` runtime 文件。
+Release tree 不得包含 cookies、token/API key、浏览器 profile、私人 prompt、tool/command body、私人 workspace 内容、private Responses state、raw conversation URL、raw thread/session ID、完整 wire trace 或 `~/.uwa` runtime 文件。tracked `config/` 只能包含可复用的公共默认值，不得携带机器自己的 remembered route group、tab exclusion 或 conversation state。
 
 默认网络边界保持：
 
