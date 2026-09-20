@@ -389,24 +389,28 @@ MAIN_CANDIDATE_MATCH=PASS
 4. 技术实现不得自行降低验收标准来让 gate 通过。
 5. 外部平台限流、额度、页面异常必须被分类和报告，不能通过放宽正确性条件伪装成 PASS。
 
-## 10. 当前状态快照
+## 10. 当前状态解释
+
+S1/S2 已作为抽取与解耦历史阶段关闭。S3/S4、Desktop、install smoke 和 CI 都是 candidate-bound release evidence，不能在需求文档里用一个长期不变的“当前 PASS/OPEN”快照代替真实结果。
+
+允许 tag 的状态只能由当前 exact candidate 的证据共同证明：
 
 ```text
 S1 = PASS / CLOSED
 S2 = PASS / CLOSED
-S3 = OPEN
-S4 = PENDING
-approved baseline = de41c61347a71901b8116617e805de8e02aed372
-local throttle-focused gate = PASS
-request manager after aborted run = RUNNING_COUNT=0
+S3 = PASS_LIVE_CLOSED on current candidate
+DESKTOP_E2E = PASS on current candidate
+INSTALL_SMOKE = PASS on current candidate
+S4 = PASS on current candidate
+CI = GREEN on current candidate
+main == candidate
+main CI = GREEN
+tagged-source smoke = PASS
 ```
 
-当前已知需要在技术设计阶段解决的 S3 环境准备缺口：
+任何代码或文档 commit 改变 candidate SHA 后，受影响的 candidate-bound evidence 必须重新生成。
 
-```text
-fresh target 不能只验证“存在一个 chatgpt.com page”
-还必须验证“普通聊天 surface + 空 composer + 无 Work/usage/throttle 阻断”
-```
+S3 的 Web surface 准备要求已经正式固化为：唯一受控普通 Chat surface、空 composer、无 Work/usage/rate-limit/auth/challenge 阻断；该要求属于 R6/R8，不再作为“待解决缺口”描述。
 
 ## 11. 已批准的关键决策
 
