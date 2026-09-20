@@ -1640,3 +1640,23 @@ closure passes and no release change should prune additional code at this stage.
 
 Next gate: exact-SHA CI must be green before the next single candidate-bound S3
 live attempt.
+
+
+### 8c3e76f exact-SHA CI passed
+
+Exact candidate:
+
+```text
+8c3e76f05d61c910d5c6b9d64ad0531a565129da
+```
+
+GitHub Standalone CI completed successfully on the same candidate:
+
+```text
+run_id=35520152649
+status=completed
+conclusion=success
+```
+
+Local focused/full/safety/dependency validation is already green, so this
+candidate is cleared for the next single full S3 live attempt.
