@@ -155,6 +155,8 @@ v0.1.0
 
 参与开发请从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始；本地环境和配置规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)，发布后的工作计划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
+RC 的平台、浏览器/CDP、账号配额和 retained runtime 限制见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)。
+
 ## 安全与隐私
 
 发布目标保持保守默认值：
