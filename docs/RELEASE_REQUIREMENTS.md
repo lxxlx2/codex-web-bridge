@@ -1,7 +1,7 @@
 # Codex Web Bridge v0.1.0-rc.1 发布前剩余需求
 
 > Approved release-specification record. Descriptions of a gate being “current” are historical context from the planning stage; publishability is determined only by exact-candidate evidence and the release sequence in `docs/RELEASE_PROCESS.md`.\n\n
-**文档状态**：Approved v1.0  
+**文档状态**：Approved v1.1  
 **目标分支**：`standalone-dev`  
 **批准基线**：`de41c61347a71901b8116617e805de8e02aed372`  
 **目标版本**：`v0.1.0-rc.1`  
@@ -273,6 +273,83 @@ codex-uwa-stop
 
 必须证明 wrapper 指向 standalone repo、official 配置可恢复、authentication 不被修改、listener owner 校验正常。
 
+### R18. 重复 Live 稳定性证据
+
+单次 `S3=PASS_LIVE_CLOSED` 只能证明完整链路成功过一次，不能单独作为发布可靠性结论。
+
+首个 RC 的最终 candidate 必须满足：
+
+```text
+同一 exact candidate SHA
+>= 3 次完整 STANDALONE_S3=PASS_LIVE_CLOSED
+成功证据覆盖 >= 2 个两小时 UTC time window
+```
+
+外部 rate limit、quota、auth/challenge 或临时 Web 不可用：
+
+- 当前 run 必须明确 FAIL 并停止；
+- 不自动切换其他 inference backend；
+- 不计入成功次数；
+- 若没有代码缺陷证据，不要求仅为了外部失败修改 candidate。
+
+重复成功证据由 versioned release-confidence 工具聚合验证。
+
+### R19. Office-work soak 与 effect verification
+
+首个 RC 必须在隔离的 synthetic acceptance workspace 上完成一次 office-like live soak。
+
+至少覆盖：
+
+```text
+same-thread context continuity
+multi-file implementation edit
+真实失败 -> 修复 -> 重新测试
+requirements-driven config edit
+Git diff scope
+long-running process + stdin continuation
+route verification
+request cleanup
+```
+
+验收不得只相信模型最终回复。必须通过独立 checker 验证真实副作用，例如：
+
+- 文件内容或精确 bytes；
+- 实际测试结果；
+- 首次失败和最终成功；
+- changed-path scope；
+- 交互进程 result file；
+- route metadata；
+- request-manager cleanup。
+
+必须输出：
+
+```text
+STANDALONE_OFFICE_SOAK=PASS
+OFFICE_SOAK_EFFECT_VERIFICATION=PASS
+```
+
+并绑定当前 candidate SHA。
+
+### R20. 单一 inference backend 与明确失败
+
+`v0.1.0-rc.1` 只支持：
+
+```text
+Codex -> Codex Web Bridge -> ChatGPT Web
+```
+
+本 RC 不实现自动 fallback 到：
+
+```text
+其他 provider
+本地模型
+官方 API
+```
+
+ChatGPT Web surface、route、账号 quota/rate、auth/challenge 或 continuation 无法安全继续时，必须明确失败并停止。
+
+不得为了提升“可用率”而静默改变 inference backend，因为这样会破坏 route evidence、continuation attribution 和 release acceptance 的可解释性。
+
 ### R17. Merge / Tag / Release 顺序
 
 固定顺序：
@@ -310,7 +387,8 @@ codex-uwa-stop
 - 新模型路由策略；
 - 新长上下文阈值实验；
 - 与发布无关的性能优化；
-- `v0.1.0` stable release。
+- `v0.1.0` stable release；
+- 备用 provider、本地模型或官方 API 自动 fallback。
 
 ## 7. 发布前工作分解
 
@@ -378,7 +456,10 @@ candidate freeze
 ```text
 S1=CLOSED
 S2=CLOSED
-S3=PASS_LIVE_CLOSED
+S3=PASS_LIVE_CLOSED x3 on same candidate
+S3_TIME_WINDOWS>=2
+OFFICE_SOAK=PASS
+RELEASE_CONFIDENCE=PASS
 S4=PASS
 CI=GREEN
 LIVE_GATE=GREEN
@@ -410,7 +491,10 @@ S1/S2 已作为抽取与解耦历史阶段关闭。S3/S4、Desktop、install smo
 ```text
 S1 = PASS / CLOSED
 S2 = PASS / CLOSED
-S3 = PASS_LIVE_CLOSED on current candidate
+S3 = PASS_LIVE_CLOSED at least 3 times on current candidate
+S3 successful evidence windows >= 2
+OFFICE_SOAK = PASS on current candidate
+RELEASE_CONFIDENCE = PASS on current candidate
 DESKTOP_E2E = PASS on current candidate
 INSTALL_SMOKE = PASS on current candidate
 S4 = PASS on current candidate
