@@ -298,6 +298,97 @@ def test_generated_function_output_marker_roundtrip_recovers_exec_command(monkey
     assert "prior workspace client tool call/result" in seen[1][0]["content"].lower()
 
 
+
+
+def _generated_affinity_delta_with_compacted_context():
+    compacted = (
+        "[Compacted prior context]\n"
+        "[DURABLE EXACT STATE]\n"
+        "ORBIT-5921\n"
+        "[ACTIVE CONTINUATION STATE]\n"
+        "Workspace validation is complete. Use exec_command to write "
+        "large_context/result.txt with ORBIT-5921, read it back, then return "
+        "LARGE_CONTEXT_PASS."
+    )
+    return [
+        {
+            "role": "user",
+            "content": (
+                "[Function Call Output (call_post_compact_live)]\n"
+                "Process exited with code 0\n"
+                "Final output: large_context/result.txt: MISSING\n"
+            ),
+            "_uwa_function_output_fallback": True,
+            "_uwa_function_output_call_id": "call_post_compact_live",
+            "_uwa_compacted_continuation_context": compacted,
+        }
+    ]
+
+
+def test_live_missing_task_clarification_is_repaired_from_private_compacted_context(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    clarification = (
+        "当前已确认 exec_command、write_stdin 等本地客户端工具可用。"
+        "请直接给出要在当前 workspace 中执行的具体任务，"
+        "我会以实际工具结果为准继续操作。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": clarification,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=clarification,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_missing_task_clarification_into_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    clarification = (
+        "当前已确认 exec_command、write_stdin 等本地客户端工具可用。"
+        "请直接给出要在当前 workspace 中执行的具体任务，"
+        "我会以实际工具结果为准继续操作。"
+    )
+    replies = iter(
+        [
+            clarification,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt && cat large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "_uwa_compacted_continuation_context" not in str(seen[0])
+    assert "ORBIT-5921" in seen[1][1]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+    assert "Do not ask for the task" not in seen[1][1]["content"]
+
 def test_unmarked_function_output_text_does_not_gain_authoritative_provenance(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     refusal = (
