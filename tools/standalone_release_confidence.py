@@ -25,6 +25,7 @@ from pathlib import Path
 
 MIN_S3_PASS_COUNT = 3
 MIN_S3_TIME_WINDOWS = 2
+MIN_S3_SPAN_SECONDS = 2 * 60 * 60
 S3_WINDOW_SECONDS = 2 * 60 * 60
 DEFAULT_S3_ROOT = Path.home() / ".uwa" / "standalone-s3"
 DEFAULT_SOAK_ROOT = Path.home() / ".uwa" / "standalone-office-soak"
@@ -117,13 +118,19 @@ def check_s3_stability(
     candidate: str,
     min_passes: int = MIN_S3_PASS_COUNT,
     min_windows: int = MIN_S3_TIME_WINDOWS,
-) -> tuple[int, int]:
+    min_span_seconds: int = MIN_S3_SPAN_SECONDS,
+) -> tuple[int, int, int]:
     results = successful_s3_results(
         private_root,
         candidate=candidate,
     )
     pass_count = len(results)
     window_count = len(s3_time_windows(results))
+    span_seconds = (
+        int(results[-1][1] - results[0][1])
+        if len(results) >= 2
+        else 0
+    )
 
     if pass_count < min_passes:
         raise GateFailure(
@@ -135,7 +142,12 @@ def check_s3_stability(
             "release_confidence_s3",
             f"time_windows={window_count} required={min_windows}",
         )
-    return pass_count, window_count
+    if span_seconds < min_span_seconds:
+        raise GateFailure(
+            "release_confidence_s3",
+            f"span_seconds={span_seconds} required={min_span_seconds}",
+        )
+    return pass_count, window_count, span_seconds
 
 
 def latest_successful_office_soak(
@@ -203,6 +215,7 @@ def _write_result(
     candidate: str,
     s3_pass_count: int,
     s3_window_count: int,
+    s3_span_seconds: int,
 ) -> None:
     path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -210,6 +223,7 @@ def _write_result(
         "STANDALONE_RELEASE_CONFIDENCE=PASS\n"
         f"RELEASE_CONFIDENCE_S3_PASS_COUNT={s3_pass_count}\n"
         f"RELEASE_CONFIDENCE_S3_TIME_WINDOWS={s3_window_count}\n"
+        f"RELEASE_CONFIDENCE_S3_SPAN_SECONDS={s3_span_seconds}\n"
         "RELEASE_CONFIDENCE_OFFICE_SOAK=PASS\n"
         f"candidate_commit={candidate}\n",
         encoding="utf-8",
@@ -231,7 +245,7 @@ def run(
 ) -> int:
     try:
         candidate = _git_head(root)
-        pass_count, window_count = check_s3_stability(
+        pass_count, window_count, span_seconds = check_s3_stability(
             s3_root,
             candidate=candidate,
         )
@@ -241,6 +255,10 @@ def run(
         )
         print(
             f"RELEASE_CONFIDENCE_S3_TIME_WINDOWS={window_count}",
+            flush=True,
+        )
+        print(
+            f"RELEASE_CONFIDENCE_S3_SPAN_SECONDS={span_seconds}",
             flush=True,
         )
 
@@ -263,6 +281,7 @@ def run(
             candidate=candidate,
             s3_pass_count=pass_count,
             s3_window_count=window_count,
+            s3_span_seconds=span_seconds,
         )
         print("STANDALONE_RELEASE_CONFIDENCE=PASS", flush=True)
         print(f"candidate_commit={candidate}", flush=True)
@@ -292,6 +311,11 @@ def main() -> int:
         type=Path,
     )
     parser.add_argument(
+        "--office-soak-root",
+        type=Path,
+        default=DEFAULT_SOAK_ROOT,
+    )
+    parser.add_argument(
         "--result",
         type=Path,
         default=DEFAULT_RESULT,
@@ -306,7 +330,7 @@ def main() -> int:
             if args.office_soak_result is not None
             else None
         ),
-        office_soak_root=DEFAULT_SOAK_ROOT,
+        office_soak_root=args.office_soak_root.expanduser(),
         result_path=args.result.expanduser(),
     )
 
