@@ -934,3 +934,25 @@ df0ffa0  Assert serialized shared generation selectors
 ```
 
 Re-run the localized lifecycle regression and full suite before any live S3.
+
+
+### df0ffa0 local lifecycle validation passed
+
+Exact candidate:
+
+```text
+df0ffa0384bb3ba976299cde85169a7c6aabc6ed
+```
+
+Local validation after the localized generation-state fix and corrected serialized-selector assertion:
+
+```text
+generation lifecycle: 10 passed
+related runtime:       63 passed, 22 warnings
+full suite:            509 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Next gate: exact-SHA CI must finish successfully before another live S3 run.
