@@ -282,6 +282,8 @@ tools/standalone_s4_release_gate.py
 git diff --check
 public_repo_safety_check
 standalone_dependency_audit --check
+tracked browser_config has no machine-specific conversation URLs,
+route groups, remembered tab exclusions, or auto-remember state
 ```
 
 ### G0-04 Security defaults
@@ -779,12 +781,15 @@ S4 gate 必须验证：
 
 ```text
 README 多语言状态一致
-README quick start 可执行
+README quick start 面向 main / Release，不要求普通用户切开发分支
+CONTRIBUTING + docs/README/ARCHITECTURE/DEVELOPMENT/TESTING/TROUBLESHOOTING/ROADMAP 存在
+历史 S3/S4 文档不再伪装成当前 release 状态
 CHANGELOG 与版本一致
 VERSION == 0.1.0-rc.1
 planned tag == v0.1.0-rc.1
 RELEASE_PROCESS 状态正确
 SECURITY 默认边界正确
+tracked browser config 不含 machine-specific conversation state
 LICENSE 存在且完整
 NOTICE provenance/acknowledgement 正确
 public repo safety PASS
@@ -1169,9 +1174,13 @@ candidate commit
 tag
 verified primary environment
 known limitations
-CI green
+candidate CI green
+main CI green
 S3 PASS
+Desktop E2E PASS
+install smoke PASS
 S4 PASS
+tagged-source smoke PASS
 ```
 
 不上传 private S3 evidence。
