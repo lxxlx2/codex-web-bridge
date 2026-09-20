@@ -216,6 +216,7 @@ Before S4, the exact candidate needs:
 ```text
 >= 3 full S3 PASS_LIVE_CLOSED results
 >= 2 two-hour UTC evidence windows
+>= 7200 seconds first-to-last successful S3 span
 STANDALONE_OFFICE_SOAK=PASS
 STANDALONE_RELEASE_CONFIDENCE=PASS
 STANDALONE_DESKTOP_E2E=PASS
