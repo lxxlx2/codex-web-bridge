@@ -713,6 +713,17 @@ def should_repair_client_workspace_refusal(
     if _specific_required_workspace_tool_name(tool_choice, tools):
         return True
 
+    # The current request's declared client-tool schema is itself authoritative
+    # evidence that those tools are exposed to the Codex client. Recursive
+    # compaction can legitimately remove the immediately preceding
+    # function_call/function_call_output items and private provenance markers.
+    # Do not let that lossy history shape turn an explicit "exec_command is not
+    # exposed/available in this environment" claim into an accepted final
+    # answer. This branch is intentionally limited to the strong post-tool
+    # unavailability patterns and still respects tool_choice='none' above.
+    if looks_like_post_tool_unavailable_claim(assistant_text):
+        return True
+
     compacted_workspace_request = (
         _looks_like_compacted_workspace_continuation(
             messages
