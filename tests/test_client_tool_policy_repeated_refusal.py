@@ -111,3 +111,114 @@ def test_roundtrip_fails_closed_if_exact_tool_list_refusal_never_recovers(monkey
             parallel_tool_calls=False,
             round_executor=lambda _messages: refusal,
         )
+
+
+
+def _compacted_history_with_function_output_fallback():
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[DURABLE EXACT STATE]\n"
+                "ORBIT-5921\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Workspace validation already succeeded. Continue the unresolved "
+                "large_context task by using exec_command to create "
+                "large_context/result.txt with the retained token and then read it "
+                "back before returning LARGE_CONTEXT_PASS."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "[Function Call Output (call_post_compact_3)]\n"
+                "Process exited with code 0\n"
+                "Final output:\n"
+                "large_context/result.txt: MISSING\n"
+            ),
+        },
+    ]
+
+
+def test_compacted_function_output_fallback_proves_post_tool_workspace_history(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    refusal = (
+        "无法执行 `exec_command`：当前实际可调用工具集中没有这个工具，"
+        "因此不能伪造客户端工具调用或结果。"
+    )
+    parsed = {"mode": "final", "content": refusal, "tool_calls": []}
+
+    assert should_repair_client_workspace_refusal(
+        messages=_compacted_history_with_function_output_fallback(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_post_compaction_function_output_refusal(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    refusal = (
+        "无法执行 `exec_command`：当前实际可调用工具集中没有这个工具，"
+        "因此不能伪造客户端工具调用或结果。"
+    )
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=_compacted_history_with_function_output_fallback(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "prior workspace client tool call/result" in seen[1][0]["content"].lower()
+
+
+def test_function_output_fallback_without_compacted_workspace_state_is_not_enough(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    refusal = (
+        "无法执行 `exec_command`：当前实际可调用工具集中没有这个工具，"
+        "因此不能伪造客户端工具调用或结果。"
+    )
+    parsed = {"mode": "final", "content": refusal, "tool_calls": []}
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "[Function Call Output (call_unknown)]\n"
+                "Process exited with code 0\n"
+                "Final output: ok\n"
+            ),
+        }
+    ]
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is False
