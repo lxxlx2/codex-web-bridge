@@ -21,6 +21,8 @@ logged-in ChatGPT Web session
 
 The browser is not given direct filesystem or shell authority.
 
+The first RC has one supported inference backend: ChatGPT Web. The architecture intentionally does not add an automatic provider/local-model/API fallback. If the controlled Web path cannot continue safely, the request fails explicitly. This keeps route evidence, continuation state, and side-effect reasoning attributable to one backend.
+
 ## Primary request path
 
 The main standalone request path is:
@@ -91,6 +93,22 @@ The key invariant is that a completed local tool is reused only when its thread/
 - `app/services/request_manager.py`: request lifecycle, cancellation, terminal cleanup, sanitized monitoring.
 
 Stream completion and pre-send guards intentionally share generation-state selectors. A localized Stop button must not be visible to one guard but invisible to the other.
+
+## Release and acceptance tooling
+
+The release path is implemented as ordinary versioned Python tools rather than undocumented operator steps:
+
+- `tools/standalone_s3_live_acceptance.py`: synthetic continuity/compaction stress;
+- `tools/standalone_office_soak.py`: safe office-like client-tool workflows with independent effect checks;
+- `tools/standalone_release_confidence.py`: candidate-bound repeated-live evidence aggregation;
+- `tools/standalone_desktop_e2e_gate.py`: real Codex Desktop path;
+- `tools/standalone_install_smoke.py`: clean install, lifecycle, rollback;
+- `tools/standalone_s4_release_gate.py`: release-tree/evidence consistency;
+- `tools/standalone_tagged_source_smoke.py`: final tagged-source verification.
+
+These tools store raw live evidence under `~/.uwa` and write only sanitized result markers. See [../tools/README.md](../tools/README.md).
+
+The office acceptance fixtures live under an isolated synthetic workspace. Their checkers verify actual files, changed-path scope, tests, command history, and exact output rather than accepting assistant prose as proof of completion.
 
 ## State and privacy
 
