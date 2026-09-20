@@ -1,5 +1,6 @@
 # S1 dependency/import/runtime audit findings
 
+> Historical engineering evidence. This file preserves the state and reasoning from its recorded stage; current release status is determined by exact-candidate gates. See [docs/README.md](README.md) for the current documentation map.\n\n
 Source baseline: `lxxlx2/universal-web-api@a140002e65a02a3323abcde3e1fdb8674710c996`.
 
 The S1 audit combines a static local-import closure, import-only runtime tracing, symbol-level slicing of the shared `app/api/chat.py` Responses path, non-Python asset scanning and public-repository safety checks.
