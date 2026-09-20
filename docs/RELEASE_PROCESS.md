@@ -26,7 +26,7 @@ Do not create a GitHub Release from a temporary hardening or development branch.
 2. S2 standalone extraction and decoupling is closed.
 3. Deterministic focused/full regression, public-repository safety, dependency audit, and exact-SHA CI are green.
 4. Clean-checkout install / official rollback smoke passes on the exact candidate.
-5. The exact candidate has at least three full `STANDALONE_S3=PASS_LIVE_CLOSED` results spanning at least two two-hour UTC evidence windows.
+5. The exact candidate has at least three full `STANDALONE_S3=PASS_LIVE_CLOSED` results spanning at least two two-hour UTC evidence windows, with at least 7200 seconds between the first and last successful run.
 6. The exact candidate passes the office-work soak with independent effect verification.
 7. `tools/standalone_release_confidence.py` passes and binds repeated S3 + soak evidence to the current candidate.
 8. Codex Desktop E2E passes on the same candidate.
