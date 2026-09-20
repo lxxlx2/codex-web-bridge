@@ -138,15 +138,30 @@ def check_s3_stability(
     return pass_count, window_count
 
 
-def latest_result(root: Path) -> Path:
+def latest_successful_office_soak(
+    root: Path,
+    *,
+    candidate: str,
+) -> Path:
     matches = sorted(
         root.expanduser().glob("*/result.txt"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    if not matches:
-        raise GateFailure("release_confidence_office_soak", "result_missing")
-    return matches[0]
+    for path in matches:
+        try:
+            values = parse_key_values(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if values.get("STANDALONE_OFFICE_SOAK") != "PASS":
+            continue
+        if values.get("candidate_commit") != candidate:
+            continue
+        return path
+    raise GateFailure(
+        "release_confidence_office_soak",
+        "successful_result_missing",
+    )
 
 
 def check_office_soak(
@@ -210,7 +225,8 @@ def run(
     *,
     root: Path,
     s3_root: Path,
-    office_soak_result: Path,
+    office_soak_result: Path | None,
+    office_soak_root: Path,
     result_path: Path,
 ) -> int:
     try:
@@ -228,8 +244,16 @@ def run(
             flush=True,
         )
 
+        selected_soak = (
+            office_soak_result
+            if office_soak_result is not None
+            else latest_successful_office_soak(
+                office_soak_root,
+                candidate=candidate,
+            )
+        )
         check_office_soak(
-            office_soak_result,
+            selected_soak,
             candidate=candidate,
         )
         print("RELEASE_CONFIDENCE_OFFICE_SOAK=PASS", flush=True)
@@ -274,15 +298,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    soak_result = (
-        args.office_soak_result.expanduser()
-        if args.office_soak_result is not None
-        else latest_result(DEFAULT_SOAK_ROOT)
-    )
     return run(
         root=args.root.expanduser().resolve(),
         s3_root=args.s3_root.expanduser(),
-        office_soak_result=soak_result,
+        office_soak_result=(
+            args.office_soak_result.expanduser()
+            if args.office_soak_result is not None
+            else None
+        ),
+        office_soak_root=DEFAULT_SOAK_ROOT,
         result_path=args.result.expanduser(),
     )
 
