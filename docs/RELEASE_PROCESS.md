@@ -26,8 +26,10 @@ Do not create a GitHub Release from the current extraction branch. A tag is publ
 2. S2 standalone extraction and decoupling is closed.
 3. S3 unit/regression CI plus real Codex CLI/Desktop/live parity is PASS.
 4. Public-repository safety, provenance, LICENSE/NOTICE and dependency checks are PASS.
-5. The release tree is clean and the candidate commit is merged to `main`.
-6. `VERSION`, `CHANGELOG.md`, README status and release notes agree with the tag.
+5. The release tree is clean and `main` points to the exact validated candidate commit.
+6. The main-branch CI run for that exact commit is green.
+7. `VERSION`, `CHANGELOG.md`, README status and release notes agree with the tag.
+8. A fresh checkout of the tag passes the documented tagged-source smoke before the GitHub Release is published.
 
 ## Planned release contents
 
