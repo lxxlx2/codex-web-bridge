@@ -31,6 +31,7 @@ For the first RC, release confidence requires more than one successful live run:
 same exact candidate SHA
 >= 3 full S3 PASS_LIVE_CLOSED results
 >= 2 two-hour UTC evidence windows
+>= 7200 seconds first-to-last successful S3 span
 office-work soak PASS
 release-confidence aggregate PASS
 Codex Desktop E2E PASS
