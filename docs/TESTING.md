@@ -155,7 +155,8 @@ The exact candidate must accumulate:
 
 ```text
 >= 3 S3 PASS_LIVE_CLOSED results
->= 2 distinct two-hour UTC evidence windows
+ >= 2 distinct two-hour UTC evidence windows
+>= 7200 seconds between the first and last successful S3 evidence
 ```
 
 The positive evidence is checked later by
@@ -310,7 +311,7 @@ focused tests
 -> exact-SHA CI
 -> clean install/rollback smoke
 -> S3 success #1
--> S3 success #2/#3 across >= 2 evidence windows
+-> S3 success #2/#3 across >= 2 evidence windows and >= 7200s real span
 -> office-work soak
 -> release confidence aggregator
 -> Codex Desktop E2E
