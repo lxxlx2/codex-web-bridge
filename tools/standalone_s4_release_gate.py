@@ -41,6 +41,11 @@ REQUIRED_DOCS = (
     "docs/TROUBLESHOOTING.md",
     "docs/ROADMAP.md",
     "docs/KNOWN_LIMITATIONS.md",
+    "docs/PROJECT_OVERVIEW.md",
+    "docs/RELIABILITY_MODEL.md",
+    "docs/MAINTAINER_HANDOFF.md",
+    "tests/README.md",
+    "tools/README.md",
 )
 
 
