@@ -1,5 +1,6 @@
 # Standalone S2 runtime seam checkpoint
 
+> Historical engineering evidence. This file preserves the state and reasoning from its recorded stage; current release status is determined by exact-candidate gates. See [docs/README.md](README.md) for the current documentation map.\n\n
 Date: 2026-09-10
 
 ## Scope
