@@ -1,5 +1,6 @@
 # Standalone S3 live parity gate
 
+> Historical engineering evidence. This file preserves the state and reasoning from its recorded stage; current release status is determined by exact-candidate gates. See [docs/README.md](README.md) for the current documentation map.\n\n
 Date: 2026-09-10
 
 S1 and S2 are closed. S3 now has a one-shot live acceptance runner for the standalone repository itself:
