@@ -276,12 +276,14 @@ codex-uwa-stop
 
 1. `standalone-dev` 完成 S3/S4；
 2. 冻结 candidate commit；
-3. 最终 CI + live gate 全绿；
-4. 合并到 `main`；
-5. 确认 `main` 与已验收 candidate 一致；
-6. 创建 `v0.1.0-rc.1` tag；
-7. 创建 GitHub Release；
-8. 发布 Release Notes 和已知限制。
+3. 最终 candidate CI + live gate 全绿；
+4. fast-forward `main` 到已验收 candidate；
+5. 确认 `main` 与 candidate 完全一致；
+6. 等待同 SHA 的 main-branch CI 全绿；
+7. 创建 `v0.1.0-rc.1` tag；
+8. 从 tag 做 fresh checkout tagged-source smoke；
+9. 创建 GitHub Release；
+10. 发布 Release Notes、verified environment 和已知限制。
 
 不得从未合并的开发分支直接创建正式 RC Release。
 
