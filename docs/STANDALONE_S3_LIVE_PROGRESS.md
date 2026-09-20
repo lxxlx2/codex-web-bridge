@@ -1940,3 +1940,30 @@ tests/test_client_tool_policy_repeated_refusal.py
 
 Next: validate related continuation/affinity/runtime tests, release hygiene,
 public safety, dependency audit, and the full suite on this exact candidate.
+
+
+### 590b7d9 full local validation passed
+
+Exact candidate:
+
+```text
+590b7d9b79a75e3aaa0d745ed74effc5d533f517
+```
+
+Local validation after the declared-tool repair alignment:
+
+```text
+continuation / affinity runtime: 44 passed, 8 warnings
+large-context + S3 regression:   38 passed
+release hygiene regression:      27 passed
+public repository safety:        PASS
+standalone dependency audit:     PASS
+full suite:                      535 passed, 22 warnings
+worktree:                        clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The exact-SHA Standalone CI is already green, so this candidate is cleared for
+one full S3 live attempt.
