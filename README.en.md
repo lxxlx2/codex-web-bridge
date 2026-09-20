@@ -11,6 +11,7 @@ Codex Web Bridge is an unofficial local bridge that routes Codex Desktop / Codex
 ## Quick start
 
 The first RC is live-certified primarily on macOS. Runtime requirements are Python 3.10+, Codex Desktop/CLI, and a Chromium-compatible browser reachable through local CDP with a logged-in ChatGPT Web session. The default CDP port is `9222`.
+The bridge attaches to an already running browser and does not launch it automatically; see [docs/BROWSER_SETUP.md](docs/BROWSER_SETUP.md) for first-time setup.
 
 Regular users should install from `main` or a Release tag. Contributors use `standalone-dev`.
 
