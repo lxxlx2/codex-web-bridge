@@ -14,6 +14,8 @@ Codex Web Bridge 是一个非官方本地桥接项目，用于把 Codex Desktop 
 
 ## 快速开始
 
+普通用户使用 `main` 或 Release tag；参与开发时使用 `standalone-dev`。首个 RC 主要 live 验证平台为 macOS，运行需要 Python 3.10+、Codex Desktop/CLI，以及可通过本地 CDP 连接且已登录 ChatGPT Web 的 Chromium 兼容浏览器。
+
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
 cd codex-web-bridge
