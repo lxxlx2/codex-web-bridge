@@ -2172,3 +2172,42 @@ Do not rerun immediately. Inspect the post-compaction recovery trace
 read-only to determine whether the inner final-reply mismatch was merely the
 rate-limited Web surface becoming visible or an independent product behavior.
 No source change is justified from the outer rate-limit classification alone.
+
+
+### Post-compaction no-new-task acknowledgement diagnosed and repaired
+
+Read-only evidence from the failed `523fa23...` S3 attempt showed an
+independent product issue in addition to the outer ChatGPT Web rate limit:
+
+```text
+durable token retained: ORBIT-5921
+workspace validation exec_command: completed, exit 0
+result file: missing
+final assistant text:
+  已接收当前上下文。可继续使用的精确测试值为 ORBIT-5921。
+  当前消息没有包含新的具体执行任务。
+```
+
+The existing compacted-continuation repair covered explicit requests to resend
+or provide the task, but not this negative phrasing ("the current message does
+not contain a new concrete execution task"). Because authoritative private
+compacted workspace state still required writing and verifying
+`large_context/result.txt`, accepting that final was incorrect.
+
+Fix on `standalone-dev`:
+
+- recognize the observed no-new-task wording as a missing-task clarification;
+- activate it only when authoritative compacted workspace intent/provenance is
+  present;
+- add direct policy and roundtrip regressions using the exact live wording;
+- document the failure mode in troubleshooting and the historical S3 gate.
+
+Current candidate HEAD:
+
+```text
+0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+```
+
+All candidate-bound evidence from `523fa23...` is invalidated by this source
+change. Re-run deterministic local validation and exact-SHA CI before any new
+install smoke or live S3 attempt.
