@@ -128,3 +128,29 @@ Private evidence belongs under `~/.uwa`, not in the repository.
 ## Historical details
 
 The long S3 record is retained because each unusual defensive rule has a real failure behind it. Use this troubleshooting index first, then open the matching dated section in [STANDALONE_S3_LIVE_GATE_2026-09-10.md](STANDALONE_S3_LIVE_GATE_2026-09-10.md) when deeper context is needed.
+
+
+## `LARGE_CONTEXT_PASS` followed by `result_missing_trailing_newline`
+
+A live S3 recovery once retained the correct large-context token and even returned
+`LARGE_CONTEXT_PASS`, but wrote `large_context/result.txt` as the token bytes
+without the required trailing newline.
+
+This is not a context-loss failure. The retained token value was correct; the
+local file-format contract was not.
+
+Current protection:
+
+- the final large-context prompt explicitly requires a newline-preserving write;
+- it forbids newline-dropping forms such as `echo -n` and `printf '%s'`;
+- it requires a separate byte-level readback proving the final byte is `0x0a`;
+- plain `cat` output is explicitly insufficient because it does not prove a
+  trailing newline;
+- S3 classifies the mismatch precisely instead of reporting a generic token
+  mismatch.
+
+Relevant code/tests:
+
+- `tools/codex_large_context_acceptance.py`
+- `tools/standalone_s3_live_core.py`
+- `tests/test_codex_large_context_acceptance.py`
