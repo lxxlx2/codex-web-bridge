@@ -20,6 +20,7 @@ Release-candidate scope for Codex Web Bridge:
 - Hardened stream terminal completion against a final-settle generation reappearance race and added composer-scoped Stop-state detection plus diagnostic source logging.
 - Repaired recursive-compaction tool-availability contradictions directly from the current declared client-tool schema, even when immediate function-call provenance has been compacted away.
 - Repaired post-compaction state-only/no-new-task acknowledgements when authoritative compacted workspace intent still requires client-tool execution.
+- Repaired restart-resume false success where the model returned `CONTEXT_PASS` after workspace validation without creating and independently reading back `context/result.txt`; S3 now verifies those concrete effects from the private trace.
 - Added release-hardening documentation for the project core goal, single-backend fail-closed policy, maintainer handoff, test ownership, tooling ownership, and release reliability model.
 - Added an office-work live soak covering context continuity, multi-file edits, real failure recovery, Git diff discipline, and interactive processes with independent effect verification.
 - Added a release-confidence aggregator that requires at least three successful full S3 runs on the exact candidate across at least two two-hour UTC evidence windows, plus a candidate-bound office-work soak.
