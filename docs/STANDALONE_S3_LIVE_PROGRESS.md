@@ -2267,3 +2267,41 @@ worktree=clean
 This candidate is now cleared to begin a new S3 success attempt. The previous
 `523fa23...` live attempt remains invalidated and does not count toward the
 three required successful S3 results.
+
+
+### 0339fad S3 attempt #1 blocked during post-compaction recovery
+
+Exact candidate:
+
+```text
+0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+```
+
+The first new S3 success attempt passed release/browser/repository preflight,
+local gates, restart continuity, the compaction probe, and the 180-second
+post-probe cooldown.
+
+The recovery turn then failed inside the Codex client path:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=codex_turn_runtime_error
+```
+
+Immediately afterward the outer passive Web-surface check detected a stable
+ChatGPT Web rate-limit notice and safely dismissed the acknowledgement-only
+dialog:
+
+```text
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+The browser screenshot captured during this attempt also shows the model emitted
+an `exec_command` write using a no-newline `printf %s` form for
+`ORBIT-5921`, despite the recovery contract requiring a trailing LF and
+byte-level verification. That is potentially independent product evidence and
+must be checked against the private recovery trace before another S3 attempt.
+
+This run does not count toward the required three successful S3 results.
