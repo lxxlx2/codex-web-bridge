@@ -333,6 +333,22 @@ def _latest_user_is_function_output_fallback(
     )
 
 
+def _latest_user_is_generated_function_output_fallback(
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Recognize only bridge-generated Responses tool-result fallbacks."""
+
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").strip().lower()
+        if role != "user":
+            continue
+        return message.get("_uwa_function_output_fallback") is True
+
+    return False
+
+
 def _looks_like_compacted_workspace_continuation(
     messages: List[Dict[str, Any]],
 ) -> bool:
@@ -667,6 +683,11 @@ def should_repair_client_workspace_refusal(
             messages
         )
     )
+    generated_function_output_fallback = (
+        _latest_user_is_generated_function_output_fallback(
+            messages
+        )
+    )
     workspace_tool_provenance = (
         _has_workspace_tool_call_history(
             messages
@@ -674,17 +695,22 @@ def should_repair_client_workspace_refusal(
     )
     if (
         not workspace_tool_provenance
+        and generated_function_output_fallback
+    ):
+        # This private marker is attached only while normalizing an actual
+        # Responses function_call_output/tool_result that cannot be paired with
+        # its assistant function_call after compaction. It is internal
+        # provenance, not browser-visible prompt text, so it is authoritative
+        # even when affinity sends only the current delta and the compacted
+        # summary remains solely in the already-open ChatGPT conversation.
+        workspace_tool_provenance = True
+    elif (
+        not workspace_tool_provenance
         and function_output_fallback
         and compacted_workspace_request
     ):
-        # Responses continuation can legitimately carry a completed client
-        # function result as the bridge-generated user-shaped
-        # "[Function Call Output ...]" fallback when recursive compaction has
-        # removed the matching assistant function_call from the local
-        # Chat-shaped history. The compacted ACTIVE CONTINUATION STATE still
-        # proves this is an unresolved workspace task, so that generated
-        # fallback is sufficient post-tool provenance for rejecting a later
-        # "exec_command is unavailable" contradiction.
+        # Backward-compatible path for older in-memory normalized messages that
+        # predate the private provenance marker.
         workspace_tool_provenance = True
 
     if (
@@ -698,6 +724,7 @@ def should_repair_client_workspace_refusal(
 
     if (
         has_history
+        or generated_function_output_fallback
         or (
             function_output_fallback
             and compacted_workspace_request
@@ -797,6 +824,9 @@ def build_client_workspace_repair_messages(
 
     has_prior_workspace_call = (
         _has_workspace_tool_call_history(
+            messages
+        )
+        or _latest_user_is_generated_function_output_fallback(
             messages
         )
         or (
