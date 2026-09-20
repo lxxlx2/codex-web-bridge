@@ -16,7 +16,6 @@ Codex Web Bridge は、Codex Desktop / Codex CLI のモデル推論リクエス�
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
 cd codex-web-bridge
-git switch standalone-dev
 python3 tools/install_codex_uwa_commands.py
 export PATH="$HOME/bin:$PATH"
 ```
