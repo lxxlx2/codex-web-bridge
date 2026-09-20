@@ -825,3 +825,37 @@ outer post-failure surface classification. Do not classify this specific run as
 account-side rate limiting until either the outer wrapper reports
 `chatgpt_web_rate_limited` or the private probe/browser evidence shows it.
 No candidate code change is justified yet.
+
+
+### 673ca45 live S3: failure is not currently classified as rate limiting
+
+The operator inspected the exact outer result for the latest run. It remained:
+
+```text
+STANDALONE_S3=FAIL
+FAILURE_CLASS=remote_compaction_probe
+DETAIL=rc=1
+candidate_commit=673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa
+```
+
+The probe summary shows the seed succeeded and the very first coarse filler turn
+failed despite the maximum 120-second recovery pacing:
+
+```text
+CONTEXT_WINDOW=77000
+TRIGGER_TARGET_LIMIT=73150
+COARSE_BYTES=46000
+COARSE_PROMPT_CHARS=15767
+SEED_REPLY_EXACT=YES
+S3_INTER_TURN_COOLDOWN_SEC=120.0
+RUN_FAIL coarse_turn_failed round=1 rc=1
+```
+
+There was no `rate-limit-failure-cleanup.json`, and the outer wrapper did not
+promote the result to `chatgpt_web_rate_limited`. Therefore this specific run
+must not be treated as an account-side rate-limit failure yet.
+
+The previously shown restart trace is not the failing compaction trace. The next
+diagnostic must locate the probe's emitted `PRIVATE_TRACE_DIR` and inspect only
+the exact `trigger-probe-01-coarse.jsonl` plus matching UWA error/status lines.
+No candidate code change and no new live retry until that failure is classified.
