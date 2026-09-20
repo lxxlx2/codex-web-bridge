@@ -1057,3 +1057,31 @@ The warnings remain the known FastAPI/Python 3.14
 
 Next gate: exact-SHA CI must be green before the next candidate-bound live S3
 attempt.
+
+
+### 255791b live S3 cooldown completed normally
+
+During the next candidate-bound S3 run on
+`255791ba9c734c20b9aad7250ba8a624264698db`, the operator initially reported a
+long quiet interval after:
+
+```text
+S3_COMPACTION_COOLDOWN_SEC=180
+```
+
+Read-only diagnostics showed the S3 process still alive, UWA healthy,
+`running_count=0`, no active ChatGPT rate limit, and the remote compaction flow
+had completed successfully. The UWA log showed the last compaction/probe request
+completed at approximately 14:59:14.
+
+The terminal then advanced at 15:02:16 with:
+
+```text
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+```
+
+This matches the configured 180-second quiet period plus surface recheck and is
+not a hang. After this point the runner enters the single post-compaction
+recovery turn, whose configured timeout is 900 seconds. No intervention or
+candidate change is justified while that recovery turn is still within its
+timeout window.
