@@ -321,9 +321,7 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"python3 -c \"from pathlib import Path; '
-                "data=Path('context/result.txt').read_bytes(); "
-                "assert data.endswith(b'\\\\n'); print(data.decode())\""}"
+                '{"cmd":"cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1"}'
                 ']]></arguments></call></adapter_calls>'
             ),
         ]
