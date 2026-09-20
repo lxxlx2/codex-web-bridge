@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from security_guard import ensure_safe_defaults, validate_runtime_security
+from tools.public_repo_safety_check import PRIVATE_RUNTIME_TEXT_PATTERNS
 
 
 def test_safe_defaults(monkeypatch):
@@ -153,3 +154,45 @@ def test_standalone_start_enforces_loopback_launcher_boundary():
     assert start._loopback_host("192.168.1.8") is False
     assert not hasattr(start, "_build_service_env")
     assert not hasattr(start, "_normalize_python_proxy_url")
+
+
+
+def test_public_repo_safety_rejects_raw_conversation_urls():
+    samples = [
+        "https://chatgpt.com/c/6aaf937d-8174-83ec-b696-a4376db7d1b0",
+        "https://arena.ai/c/01a0046f-4413-7684-9fdd-079995af4852",
+        "https://grok.com/c/79789b04-1484-4b65-b766-782b020ae0c0",
+    ]
+
+    for sample in samples:
+        assert any(
+            pattern.search(sample)
+            for _, pattern in PRIVATE_RUNTIME_TEXT_PATTERNS
+        )
+
+
+def test_public_repo_safety_allows_generic_service_urls():
+    samples = [
+        "https://chatgpt.com/",
+        "https://arena.ai/image/direct",
+        "https://grok.com/",
+    ]
+
+    for sample in samples:
+        assert not any(
+            pattern.search(sample)
+            for _, pattern in PRIVATE_RUNTIME_TEXT_PATTERNS
+        )
+
+
+def test_tracked_browser_config_has_no_machine_specific_conversation_state():
+    import json
+
+    config = json.loads(
+        Path("config/browser_config.json").read_text(encoding="utf-8")
+    )
+    tab_pool = config["tab_pool"]
+
+    assert tab_pool["excluded_urls"] == []
+    assert tab_pool["route_groups"] == []
+    assert tab_pool["auto_remember_url_presets"] is False
