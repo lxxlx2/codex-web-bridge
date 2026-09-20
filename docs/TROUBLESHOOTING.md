@@ -154,3 +154,35 @@ Relevant code/tests:
 - `tools/codex_large_context_acceptance.py`
 - `tools/standalone_s3_live_core.py`
 - `tests/test_codex_large_context_acceptance.py`
+
+
+## `send_blocked_by_preexisting_generation` after a completed seed/reply
+
+A live S3 run on 2026-09-20 exposed a terminal-state race: Codex had already
+received the exact `LARGE_CONTEXT_READY` reply and emitted `turn.completed`,
+but two minutes later the next coarse turn found the ChatGPT page still showing
+an active generation/Stop state. The pre-send guard correctly refused to submit
+and eventually failed with `send_blocked_by_preexisting_generation`.
+
+This means the earlier stream completion was unsafe even though the later guard
+worked correctly.
+
+Current protection:
+
+- `GeneratingStatusCache` still uses the shared stable generation selectors;
+- ChatGPT also gets a composer-scoped metadata fallback for Stop/Cancel/Abort
+  controls when the UI does not expose a stable stop selector;
+- the final settle phase now re-validates generation state continuously;
+- if generation reappears during final settle, the prior stability window is
+  discarded;
+- generation must clear and remain clear for a fresh settle window;
+- if generation remains active through the bounded final-settle grace, the turn
+  fails instead of being released as completed;
+- pre-send timeout logs include the detector source for future diagnosis.
+
+Relevant code/tests:
+
+- `app/core/generation_state.py`
+- `app/core/stream_monitor.py`
+- `app/core/workflow/executor_send.py`
+- `tests/test_stream_monitor_terminal_state.py`
