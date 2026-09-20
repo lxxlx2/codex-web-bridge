@@ -774,3 +774,22 @@ This is an operator helper-command issue, not a candidate runtime failure. Keep
 `standalone-dev` frozen. Read the marker with `PYTHONPATH="$PWD/tools"` and
 import `standalone_s3_live_acceptance` as a top-level module, matching normal
 script execution semantics.
+
+
+### Rate-limit quiet window fully expired
+
+For frozen candidate `673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa`,
+the persisted rate-limit marker now reports:
+
+```text
+RATE_LIMIT_STREAK=3
+REMAINING_COOLDOWN_SEC=0.0
+```
+
+This is the desired condition before the next live attempt: the cross-run quiet
+window has fully expired, while the persisted streak will still force the
+maximum configured recovery pacing of 120 seconds between live turns.
+
+Next action: run exactly one full candidate-bound S3 attempt. Do not manually
+clear the marker and do not immediately retry again if the account-side limiter
+returns.
