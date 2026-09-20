@@ -38,3 +38,5 @@ The following files are detailed implementation/acceptance records. They are int
 - [DESKTOP_E2E_GATE.md](DESKTOP_E2E_GATE.md)
 
 For day-to-day development, use the durable guides above instead of reading the historical files linearly.
+
+Extraction manifests under [../manifests/](../manifests/) are provenance/history inputs rather than a live current-tree inventory; see [../manifests/README.md](../manifests/README.md).
