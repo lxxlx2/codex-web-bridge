@@ -425,12 +425,107 @@ def _restart_context_prompt() -> str:
     return (
         "这是同一个 Codex 对话的第二轮重启恢复验收。不要向我询问上一轮令牌，也不要从 "
         "~/.codex、~/.uwa、日志、SQLite、PROMPTS.md 或其他会话文件中搜索令牌。"
-        f"第一步必须通过客户端 exec_command 在当前工作区执行 pwd && test -f {marker} && test -d context。"
-        "如果工作区校验失败，只回复 ACCEPTANCE_WORKSPACE_MISMATCH。"
-        "校验成功后，只使用上一轮对话上下文中记住的令牌，并且必须通过客户端 exec_command "
-        "创建 context/result.txt，使文件精确包含该令牌和一个换行；随后再次通过客户端 exec_command "
-        "读取并确认该文件。不要调用网页侧工具代替本地工具。完成后只回复 CONTEXT_PASS。"
+        f"第一步必须单独通过客户端 exec_command 在当前工作区执行 "
+        f"pwd && test -f {marker} && test -d context。"
+        "如果这条完整工作区校验命令退出码非 0，只回复 ACCEPTANCE_WORKSPACE_MISMATCH。"
+        "如果退出码为 0，工作区校验只代表第一步完成，绝不能直接回复 CONTEXT_PASS。"
+        "第二步必须单独调用客户端 exec_command，只使用上一轮对话上下文中记住的令牌创建 "
+        "context/result.txt，使文件精确包含该令牌和一个末尾换行。"
+        "写入必须使用明确保留末尾换行的方式，例如 printf '%s\\n' 的等价形式；"
+        "禁止使用 echo -n、printf '%s' 或其他缺少末尾换行的写法。"
+        "第三步必须再次单独调用客户端 exec_command 读取并确认 context/result.txt，"
+        "确认令牌内容正确且文件包含末尾换行。"
+        "不要调用网页侧工具代替本地工具。"
+        "只有工作区校验、写入、独立读取确认三步都成功后，才只回复 CONTEXT_PASS。"
     )
+
+
+def _completed_exec_commands_from_trace(
+    trace_path: Path,
+) -> list[str]:
+    """Return exit-zero completed command_execution commands from a private trace."""
+
+    commands: list[str] = []
+    try:
+        lines = trace_path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        ).splitlines()
+    except OSError:
+        return commands
+
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("type") or "") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "") != "command_execution":
+            continue
+        if str(item.get("status") or "") != "completed":
+            continue
+        if item.get("exit_code") != 0:
+            continue
+        command = item.get("command")
+        if isinstance(command, str) and command:
+            commands.append(command)
+
+    return commands
+
+
+def _restart_result_effects_observed(
+    trace_path: Path,
+) -> tuple[bool, bool]:
+    """Prove a successful result write followed by a separate readback."""
+
+    result_path = "context/result.txt"
+    commands = _completed_exec_commands_from_trace(
+        trace_path
+    )
+
+    write_index: int | None = None
+    for index, command in enumerate(commands):
+        if result_path not in command:
+            continue
+        if any(
+            marker in command
+            for marker in (
+                ">",
+                "write_text",
+                "write_bytes",
+                "tee ",
+            )
+        ):
+            write_index = index
+            break
+
+    if write_index is None:
+        return False, False
+
+    readback = any(
+        index > write_index
+        and result_path in command
+        and any(
+            marker in command
+            for marker in (
+                "cat ",
+                "read_text",
+                "read_bytes",
+                "xxd ",
+                "od ",
+                "hexdump ",
+                "open(",
+            )
+        )
+        for index, command in enumerate(commands)
+    )
+    return True, readback
 
 
 def _run_restart_continuity(
@@ -456,11 +551,12 @@ def _run_restart_continuity(
     _restart_standalone_listener()
     _health_ready(require_clean=True)
 
+    restart_trace = private_dir / "restart-resume.jsonl"
     resumed = _run_paced_codex_turn(
         codex=codex,
         cwd=root,
         prompt=_restart_context_prompt(),
-        trace_path=private_dir / "restart-resume.jsonl",
+        trace_path=restart_trace,
         thread_id=thread_id,
         timeout_sec=timeout_sec,
     )
@@ -472,6 +568,13 @@ def _run_restart_continuity(
         raise GateFailure("restart_resume", "final_reply_mismatch")
     if resumed.command_count < 1:
         raise GateFailure("restart_resume", "real_exec_command_not_observed")
+    write_observed, readback_observed = _restart_result_effects_observed(
+        restart_trace
+    )
+    if not write_observed:
+        raise GateFailure("restart_resume", "result_write_missing")
+    if not readback_observed:
+        raise GateFailure("restart_resume", "result_readback_missing")
     result_path = root / "context" / "result.txt"
     try:
         actual = result_path.read_text(encoding="utf-8")
