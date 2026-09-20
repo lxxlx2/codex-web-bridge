@@ -23,11 +23,26 @@ The result must have a standalone entrypoint, explicit dependency file, private-
 
 ## S3 exit criteria
 
-The standalone tree must pass CI and local parity checks covering Responses compatibility, real client-tool calls, continuation, restart recovery, remote/native compaction, stream cancellation cleanup, route verification and request-manager cleanup. At least one real Codex Desktop/CLI live run must verify the standalone repository rather than the integration tree.
+The standalone tree must pass CI and local parity checks covering Responses compatibility, real client-tool calls, continuation, restart recovery, remote/native compaction, stream cancellation cleanup, route verification and request-manager cleanup.
+
+For the first RC, release confidence requires more than one successful live run:
+
+```text
+same exact candidate SHA
+>= 3 full S3 PASS_LIVE_CLOSED results
+>= 2 two-hour UTC evidence windows
+office-work soak PASS
+release-confidence aggregate PASS
+Codex Desktop E2E PASS
+```
+
+External Web failures stop the affected run and do not count as positive evidence. The RC does not silently switch to another inference backend.
 
 ## S4 exit criteria
 
-Only after S3 and the remaining candidate-bound release matrix pass may the standalone development branch be fast-forwarded to `main` and tagged. The first candidate tag should be `v0.1.0-rc.1`. Before the GitHub Release, main CI and tagged-source smoke must also pass. A stable `v0.1.0` follows the RC observation period once no release blocker remains and the stable candidate passes the required matrix.
+Only after repeated S3 evidence, office-work soak, release-confidence aggregation, Desktop E2E, install/rollback smoke, and the remaining candidate-bound release matrix pass may the standalone development branch be fast-forwarded to `main` and tagged.
+
+The first candidate tag should be `v0.1.0-rc.1`. Before the GitHub Release, main CI and tagged-source smoke must also pass. A stable `v0.1.0` follows the RC observation period once no release blocker remains and the stable candidate passes the required matrix.
 
 Release notes should include the validated platform/Python/Codex ranges, known limitations, upgrade/install instructions, source baseline, upstream attribution and checksums for any attached binary/archive artifacts.
 
