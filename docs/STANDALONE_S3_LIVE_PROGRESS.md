@@ -956,3 +956,45 @@ The warnings remain the known FastAPI/Python 3.14
 `asyncio.iscoroutinefunction` deprecations.
 
 Next gate: exact-SHA CI must finish successfully before another live S3 run.
+
+
+### df0ffa0 live S3 reached post-compaction recovery
+
+Exact candidate:
+
+```text
+df0ffa0384bb3ba976299cde85169a7c6aabc6ed
+```
+
+Local validation and exact-SHA CI were green before this live run:
+
+```text
+generation lifecycle: 10 passed
+related runtime:       63 passed, 22 warnings
+full suite:            509 passed, 22 warnings
+Standalone CI:         PASS
+```
+
+The live run materially advanced past the previously failing first coarse turn.
+It reached:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_COMPACTION_COOLDOWN_SEC=180
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+```
+
+and then failed only in the final same-thread post-compaction recovery:
+
+```text
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+This is strong live evidence that the shared localized generation-state selector
+fix closed the prior `send_blocked_by_preexisting_generation` blocker. Do not
+change candidate code until the exact `post-compaction-recovery.jsonl` is
+classified: inspect final agent text, client commands/results, and whether
+`large_context/result.txt` exists with the expected token.
