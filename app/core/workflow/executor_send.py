@@ -754,7 +754,10 @@ class WorkflowExecutorSendMixin:
             )
         logger.warning(
             "[SEND] 发送前检测到页面仍处于旧生成/停止态，"
-            f"等待其结束后再提交本次消息 (timeout={wait_timeout:.1f}s)"
+            f"等待其结束后再提交本次消息 (timeout={wait_timeout:.1f}s, "
+            f"matched_indicator={state.get('matchedIndicatorSelector')!r}, "
+            f"send_stop={bool(state.get('sendLooksLikeStop'))}, "
+            f"stop_btn={bool(state.get('stopBtnFound'))})"
         )
         deadline = time.time() + wait_timeout
         while time.time() < deadline:
@@ -768,7 +771,10 @@ class WorkflowExecutorSendMixin:
 
         logger.error(
             "[SEND] 等待旧生成态结束超时，本次发送动作尚未执行，"
-            "不会把旧生成状态误判为发送成功"
+            "不会把旧生成状态误判为发送成功 "
+            f"(matched_indicator={state.get('matchedIndicatorSelector')!r}, "
+            f"send_stop={bool(state.get('sendLooksLikeStop'))}, "
+            f"stop_btn={bool(state.get('stopBtnFound'))})"
         )
         raise WorkflowError("send_blocked_by_preexisting_generation")
 
