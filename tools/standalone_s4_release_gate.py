@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -26,6 +28,13 @@ REQUIRED_DOCS = (
     "docs/RELEASE_REQUIREMENTS.md",
     "docs/RELEASE_TECHNICAL_DESIGN.md",
     "docs/RELEASE_TEST_PLAN.md",
+    "CONTRIBUTING.md",
+    "docs/README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DEVELOPMENT.md",
+    "docs/TESTING.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/ROADMAP.md",
 )
 
 
@@ -81,9 +90,12 @@ def check_docs(root: Path) -> None:
 
     stale_phrases = (
         "S3 = OPEN",
+        "S4 = PENDING",
+        "CURRENT / LIVE RUN READY",
         "S3 current",
         "post-compaction blocker",
         "remain in progress",
+        "release remains in S4 clean-checkout install smoke validation",
     )
     release_docs = [
         "README.md",
@@ -93,12 +105,31 @@ def check_docs(root: Path) -> None:
         "README.ko.md",
         "README.zh-CN.md",
         "CHANGELOG.md",
+        "docs/RELEASE_PROCESS.md",
+        "docs/RELEASE_REQUIREMENTS.md",
+        "docs/STANDALONE_S3_LIVE_GATE_2026-09-10.md",
+        "docs/STANDALONE_S4_INSTALL_SMOKE_2026-09-17.md",
     ]
     for relative in release_docs:
         text = _read(root, relative)
         for phrase in stale_phrases:
             if phrase.casefold() in text.casefold():
                 raise GateFailure("docs_sync", f"stale_text={relative}:{phrase}")
+
+
+    for relative in (
+        "README.md",
+        "README.en.md",
+        "README.th.md",
+        "README.ja.md",
+        "README.ko.md",
+        "README.zh-CN.md",
+    ):
+        if "git switch standalone-dev" in _read(root, relative):
+            raise GateFailure(
+                "docs_sync",
+                f"release_quick_start_uses_dev_branch={relative}",
+            )
 
 
 def check_version(root: Path) -> None:
@@ -115,10 +146,37 @@ def check_version(root: Path) -> None:
 
 def check_security(root: Path) -> None:
     text = _read(root, "SECURITY.md").casefold()
-    required = ("127.0.0.1", "cors", "unsafe")
+    required = ("127.0.0.1", "cors", "unsafe", "conversation url")
     missing = [value for value in required if value not in text]
     if missing:
         raise GateFailure("security", "missing=" + ",".join(missing))
+
+    config_path = root / "config" / "browser_config.json"
+    if not config_path.is_file():
+        raise GateFailure("security", "missing=config/browser_config.json")
+    try:
+        browser_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise GateFailure("security", f"browser_config_invalid={type(exc).__name__}") from exc
+
+    tab_pool = browser_config.get("tab_pool")
+    if not isinstance(tab_pool, dict):
+        raise GateFailure("security", "browser_config_tab_pool_missing")
+    if tab_pool.get("excluded_urls") not in ([], None):
+        raise GateFailure("security", "tracked_excluded_urls_not_empty")
+    if tab_pool.get("route_groups") not in ([], None):
+        raise GateFailure("security", "tracked_route_groups_not_empty")
+    if tab_pool.get("auto_remember_url_presets") is not False:
+        raise GateFailure("security", "tracked_auto_remember_url_presets_not_false")
+
+    raw = config_path.read_text(encoding="utf-8")
+    if re.search(
+        r"https?://(?:chatgpt\.com|arena\.ai|grok\.com|claude\.ai)"
+        r"/c/[A-Za-z0-9_-]{8,}",
+        raw,
+        re.IGNORECASE,
+    ):
+        raise GateFailure("security", "tracked_raw_conversation_url")
 
 
 def check_provenance(root: Path) -> None:
