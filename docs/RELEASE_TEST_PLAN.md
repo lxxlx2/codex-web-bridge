@@ -827,7 +827,7 @@ candidate SHA 固定
 
 必须针对 frozen candidate SHA 全绿。
 
-### G7-02 Live Gate B
+### G7-02 Live Gate B（v1.1 仍保留 candidate confirmation，但不再代表全部 S3 成功次数要求）
 
 对 frozen candidate 再执行一次完整 S3。
 
@@ -982,7 +982,7 @@ GitHub 自动 source ZIP/tar.gz 不需要重复构建。
 | R16 | G3 clean checkout/rollback |
 | R17 | G7 + G8 |
 
-任何 R1-R17 如果没有至少一个明确 release-blocking test，不允许发布。
+任何 R1-R20 如果没有至少一个明确 release-blocking test，不允许发布。
 
 ---
 
@@ -1296,7 +1296,7 @@ T-D8 Windows/Linux live parity 不作为 rc.1 blocker。
 本方案已批准并冻结：
 
 ```text
-文档状态：Approved v1.0
+文档状态：Approved v1.1
 TEST_PLAN_APPROVED=YES
 ```
 
