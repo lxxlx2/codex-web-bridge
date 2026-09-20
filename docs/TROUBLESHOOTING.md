@@ -215,3 +215,27 @@ Relevant code/tests:
 
 - `app/services/client_tool_policy.py`
 - `tests/test_client_tool_policy_repeated_refusal.py`
+
+
+## Post-compaction reply says no new concrete task
+
+A live S3 recovery can retain the durable token and successfully execute the
+workspace-validation `exec_command`, then return a text-only acknowledgement
+such as:
+
+```text
+已接收当前上下文。可继续使用的精确测试值为 <token>。
+当前消息没有包含新的具体执行任务。
+```
+
+This is a contradiction when the bridge still carries authoritative private
+compacted continuation state saying that the result file must be written and
+verified.
+
+The client-tool policy now treats this wording as a missing-task clarification
+only when compacted workspace intent/provenance is present. Ordinary chat
+messages that happen to say there is no new task are not turned into tool calls.
+
+Relevant regression coverage:
+
+- `tests/test_client_tool_policy_repeated_refusal.py`
