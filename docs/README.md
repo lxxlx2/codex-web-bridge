@@ -9,6 +9,7 @@ This directory separates durable contributor guidance from release-specific desi
 - [Testing](TESTING.md): focused test map, CI layers, live gates, and exact-candidate rules.
 - [Troubleshooting](TROUBLESHOOTING.md): common failure signatures, root causes, and the regression tests that protect them.
 - [Roadmap](ROADMAP.md): post-RC stabilization and the planned structural cleanup after the first stable release.
+- [Known limitations](KNOWN_LIMITATIONS.md): platform, browser/CDP, account-limit, Web-UI, and RC scope constraints.
 - [Contributing](../CONTRIBUTING.md): pull-request workflow and repository hygiene.
 
 ## Release specification
