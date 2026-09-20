@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from app.core.config import BrowserConstants, WorkflowError, logger
 from app.core.elements import ElementFinder
+from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
 from app.services.arena_image_generation import is_arena_page_url
 from .attachment_monitor import AttachmentMonitor
 
@@ -962,20 +963,21 @@ class WorkflowExecutorSendMixin:
             )
         generating_selector_json = json.dumps(generating_selector, ensure_ascii=False)
         stop_btn_selector_json = json.dumps(stop_btn_selector, ensure_ascii=False)
+        shared_generation_selectors_json = json.dumps(
+            list(GENERATION_INDICATOR_CSS_SELECTORS),
+            ensure_ascii=False,
+        )
         js = f"""
         return (function() {{
             try {{
                 const sendSelector = {selector_json};
                 const configuredGeneratingSelector = {generating_selector_json};
                 const configuredStopSelector = {stop_btn_selector_json};
+                const sharedGenerationSelectors = {shared_generation_selectors_json};
                 const indicators = [
                     configuredGeneratingSelector,
                     configuredStopSelector,
-                    'button[aria-label*="Stop"]',
-                    'button[aria-label*="stop"]',
-                    'button[aria-label*="停止"]',
-                    '[data-state="streaming"]',
-                    '.stop-generating'
+                    ...sharedGenerationSelectors
                 ].filter(Boolean);
 
                 function lowered(value) {{
