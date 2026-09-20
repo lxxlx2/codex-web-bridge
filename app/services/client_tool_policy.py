@@ -762,7 +762,13 @@ def _acceptance_contract_from_messages(
             ("CONTEXT_PASS", "context/result.txt"),
             ("LARGE_CONTEXT_PASS", "large_context/result.txt"),
         )
-        if marker in combined and result_path in combined
+        if (
+            re.search(
+                rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])",
+                combined,
+            )
+            and result_path in combined
+        )
     ]
     return matches[0] if len(matches) == 1 else None
 
