@@ -662,6 +662,31 @@ def should_repair_client_workspace_refusal(
     )
 
     has_history = _has_tool_history(messages)
+    function_output_fallback = (
+        _latest_user_is_function_output_fallback(
+            messages
+        )
+    )
+    workspace_tool_provenance = (
+        _has_workspace_tool_call_history(
+            messages
+        )
+    )
+    if (
+        not workspace_tool_provenance
+        and function_output_fallback
+        and compacted_workspace_request
+    ):
+        # Responses continuation can legitimately carry a completed client
+        # function result as the bridge-generated user-shaped
+        # "[Function Call Output ...]" fallback when recursive compaction has
+        # removed the matching assistant function_call from the local
+        # Chat-shaped history. The compacted ACTIVE CONTINUATION STATE still
+        # proves this is an unresolved workspace task, so that generated
+        # fallback is sufficient post-tool provenance for rejecting a later
+        # "exec_command is unavailable" contradiction.
+        workspace_tool_provenance = True
+
     if (
         has_history
         and looks_like_false_acceptance_workspace_mismatch(
@@ -671,14 +696,20 @@ def should_repair_client_workspace_refusal(
     ):
         return True
 
-    if has_history:
+    if (
+        has_history
+        or (
+            function_output_fallback
+            and compacted_workspace_request
+        )
+    ):
         # Once a workspace tool has really appeared in the conversation, an
         # explicit later claim that the same declared tool is absent is a direct
         # contradiction. Do not depend on the latest user-shaped message still
         # looking like the original coding request: Codex follow-up turns often
         # encode tool output as the newest user item.
         if (
-            _has_workspace_tool_call_history(messages)
+            workspace_tool_provenance
             and looks_like_post_tool_unavailable_claim(assistant_text)
         ):
             return True
@@ -764,7 +795,19 @@ def build_client_workspace_repair_messages(
         messages
     )
 
-    has_prior_workspace_call = _has_workspace_tool_call_history(messages)
+    has_prior_workspace_call = (
+        _has_workspace_tool_call_history(
+            messages
+        )
+        or (
+            _latest_user_is_function_output_fallback(
+                messages
+            )
+            and _looks_like_compacted_workspace_continuation(
+                messages
+            )
+        )
+    )
     root_workdir_repair = bool(_ROOT_WORKDIR_TEXT_PATTERN.search(str(assistant_text or "")))
     prior_history_rule = (
         "A prior workspace client tool call/result is already present in the conversation. "
