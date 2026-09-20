@@ -197,7 +197,7 @@ def test_roundtrip_repairs_live_post_compaction_function_output_refusal(monkeypa
     assert "prior workspace client tool call/result" in seen[1][0]["content"].lower()
 
 
-def test_function_output_fallback_without_compacted_workspace_state_is_not_enough(monkeypatch):
+def test_declared_tool_absence_repairs_even_without_compacted_workspace_state(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     refusal = (
         "无法执行 `exec_command`：当前实际可调用工具集中没有这个工具，"
@@ -221,7 +221,7 @@ def test_function_output_fallback_without_compacted_workspace_state_is_not_enoug
         tool_choice="auto",
         assistant_text=refusal,
         parsed=parsed,
-    ) is False
+    ) is True
 
 
 
