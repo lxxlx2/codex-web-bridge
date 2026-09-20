@@ -11,7 +11,7 @@ Codex Web Bridge เป็นโปรเจกต์ local bridge แบบไ�
 
 ## เริ่มต้นใช้งานอย่างรวดเร็ว
 
-ระหว่างการพัฒนาให้ใช้สาขา `standalone-dev`
+ผู้ใช้ทั่วไปควรใช้ `main` หรือ Release tag ส่วนผู้ร่วมพัฒนาให้ใช้ `standalone-dev`
 
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
