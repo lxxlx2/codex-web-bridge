@@ -1352,3 +1352,44 @@ continuation repair matcher.
 
 The repair is intentionally narrow and only activates when authoritative
 compacted workspace intent/provenance remains present.
+
+## 2026-09-21 restart continuation stopped at ACCEPTANCE_INCOMPLETE
+
+Candidate `90cdbdfb7b8259f8fb00e7a0e35b57c26f7ba711` passed release/browser/repository
+preflight, standalone listener startup, local deterministic gates, and the first
+two restart-resume workspace effects.
+
+Read-only private evidence showed:
+
+```text
+workspace validation: completed, exit 0
+result write:         completed, exit 0
+result file:          exact expected token + trailing LF
+separate readback:    missing
+turn terminal:        completed
+assistant final:      ACCEPTANCE_INCOMPLETE
+trace error:          none
+```
+
+S3 correctly rejected the turn with:
+
+```text
+FAILURE_CLASS=restart_resume
+DETAIL=final_reply_mismatch
+```
+
+The result file itself was correct, but the acceptance contract requires a later
+independent client-tool readback before `CONTEXT_PASS` is valid. The existing
+workspace repair policy covered premature PASS sentinels and several false
+workspace/tool refusal shapes, but exact `ACCEPTANCE_INCOMPLETE` was accepted as
+ordinary final text.
+
+The repair is intentionally limited to the repository's synthetic
+`CONTEXT_PASS -> context/result.txt` and
+`LARGE_CONTEXT_PASS -> large_context/result.txt` contracts. It requires a real
+successful acceptance workspace validation and derives progress only from paired
+successful client exec-command results. If the write already succeeded, repair
+continues directly to the missing independent readback and explicitly forbids a
+rewrite. If both write and a later readback already succeeded, this unfinished
+effect detector does not activate.
+

@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.client_tool_policy import (
+    looks_like_incomplete_acceptance_continuation,
     looks_like_premature_acceptance_success,
     should_repair_client_workspace_refusal,
 )
@@ -275,6 +276,265 @@ def test_context_pass_allowed_after_successful_write_and_separate_readback(monke
         assistant_text="CONTEXT_PASS",
         parsed=parsed,
     ) is False
+
+
+
+def test_acceptance_incomplete_after_write_requires_readback_repair(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_INCOMPLETE",
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="ACCEPTANCE_INCOMPLETE",
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    replies = iter(
+        [
+            "ACCEPTANCE_INCOMPLETE",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"python3 -c \"from pathlib import Path; '
+                "data=Path('context/result.txt').read_bytes(); "
+                "assert data.endswith(b'\\\\n'); print(data.decode())\""}"
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    arguments = result["tool_calls"][0]["function"]["arguments"]
+    assert "context/result.txt" in arguments
+    assert "read_bytes" in arguments
+    assert len(seen) == 2
+    assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
+    assert "separate client-tool readback" in seen[1][1]["content"]
+
+
+def test_acceptance_incomplete_after_validation_continues_to_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    replies = iter(
+        [
+            "ACCEPTANCE_INCOMPLETE",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'%s\\\\n\' \'EMBER-7319\' > context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is True
+    assert result["mode"] == "tool_calls"
+    assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "successful write of context/result.txt has not yet been proven" in seen[1][1]["content"]
+    assert "do not repeat the successful workspace validation" in seen[1][1]["content"].lower()
+
+
+def test_acceptance_incomplete_after_write_and_readback_is_not_unfinished(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read",
+        "cat context/result.txt",
+        "EMBER-7319",
+    )
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_INCOMPLETE",
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is False
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="ACCEPTANCE_INCOMPLETE",
+        parsed=parsed,
+    ) is False
+
+
+def test_unrelated_acceptance_incomplete_text_is_not_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = [
+        {
+            "role": "user",
+            "content": "Return the literal text ACCEPTANCE_INCOMPLETE as an example.",
+        }
+    ]
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_INCOMPLETE",
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is False
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="ACCEPTANCE_INCOMPLETE",
+        parsed=parsed,
+    ) is False
+
+
+def test_acceptance_incomplete_respects_tool_choice_none(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_INCOMPLETE",
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="none",
+        assistant_text="ACCEPTANCE_INCOMPLETE",
+        parsed=parsed,
+    ) is False
+
+
+def _large_context_history_after_validation():
+    request = (
+        "Continue the synthetic large-context acceptance task. "
+        "First run pwd && test -f .uwa_codex_acceptance && test -d large_context. "
+        "Then create large_context/result.txt with the retained token and a trailing newline, "
+        "perform a separate client exec_command readback, and only then reply LARGE_CONTEXT_PASS."
+    )
+    return [
+        {"role": "user", "content": request},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_large_validate",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": (
+                            '{"cmd":"pwd && test -f .uwa_codex_acceptance '
+                            '&& test -d large_context"}'
+                        ),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_large_validate",
+            "name": "exec_command",
+            "content": "Process exited with code 0\nFinal output:\n/acceptance\n",
+        },
+    ]
+
+
+def test_large_context_acceptance_incomplete_uses_shared_unfinished_effect_policy(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _large_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_large_write",
+        "printf '%s\\n' 'ORBIT-5921' > large_context/result.txt",
+    )
+    parsed = {
+        "mode": "final",
+        "content": "ACCEPTANCE_INCOMPLETE",
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="ACCEPTANCE_INCOMPLETE",
+        parsed=parsed,
+    ) is True
 
 
 def _compacted_history_with_function_output_fallback():

@@ -586,6 +586,8 @@ def _tool_result_exit_zero(message: Dict[str, Any]) -> bool:
 
 def _successful_acceptance_workspace_validation_observed(
     messages: List[Dict[str, Any]],
+    *,
+    result_path: str | None = None,
 ) -> bool:
     """Return True only for a real successful acceptance workspace probe."""
 
@@ -626,10 +628,15 @@ def _successful_acceptance_workspace_validation_observed(
             "pwd",
             "test -f .uwa_codex_acceptance",
         )
-        acceptance_dirs = (
-            "test -d large_context",
-            "test -d context",
-        )
+        if result_path:
+            acceptance_dirs = (
+                f"test -d {result_path.split('/', 1)[0]}",
+            )
+        else:
+            acceptance_dirs = (
+                "test -d large_context",
+                "test -d context",
+            )
         if (
             all(
                 fragment in command
@@ -731,6 +738,84 @@ def _acceptance_success_contract(
     if final not in combined or result_path not in combined:
         return None
     return final, result_path
+
+
+
+def _acceptance_contract_from_messages(
+    messages: List[Dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Return one unambiguous synthetic acceptance contract from request history."""
+
+    searchable: List[str] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        searchable.append(_message_content_text(message))
+        private = message.get("_uwa_compacted_continuation_context")
+        if isinstance(private, str):
+            searchable.append(private)
+
+    combined = "\n".join(searchable)
+    matches = [
+        (marker, result_path)
+        for marker, result_path in (
+            ("CONTEXT_PASS", "context/result.txt"),
+            ("LARGE_CONTEXT_PASS", "large_context/result.txt"),
+        )
+        if marker in combined and result_path in combined
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _acceptance_effect_progress(
+    messages: List[Dict[str, Any]],
+    result_path: str,
+) -> tuple[bool, bool]:
+    """Return successful write and later separate readback state for one result path."""
+
+    commands = _successful_workspace_commands(messages)
+    write_indexes = [
+        index
+        for index, command in enumerate(commands)
+        if _command_writes_result_path(command, result_path)
+    ]
+    if not write_indexes:
+        return False, False
+
+    last_write_index = write_indexes[-1]
+    readback_after_write = any(
+        index > last_write_index
+        and _command_reads_result_path(command, result_path)
+        for index, command in enumerate(commands)
+    )
+    return True, readback_after_write
+
+
+def looks_like_incomplete_acceptance_continuation(
+    assistant_text: str,
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Detect exact ACCEPTANCE_INCOMPLETE while required synthetic effects remain."""
+
+    if str(assistant_text or "").strip() != "ACCEPTANCE_INCOMPLETE":
+        return False
+
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None:
+        return False
+
+    _marker, result_path = contract
+    if not _successful_acceptance_workspace_validation_observed(
+        messages,
+        result_path=result_path,
+    ):
+        return False
+
+    write_observed, readback_observed = _acceptance_effect_progress(
+        messages,
+        result_path,
+    )
+    return not (write_observed and readback_observed)
 
 
 def _command_writes_result_path(command: str, result_path: str) -> bool:
@@ -939,6 +1024,12 @@ def should_repair_client_workspace_refusal(
         # predate the private provenance marker.
         workspace_tool_provenance = True
 
+    if looks_like_incomplete_acceptance_continuation(
+        assistant_text,
+        messages,
+    ):
+        return True
+
     if (
         has_history
         and looks_like_premature_acceptance_success(
@@ -1144,6 +1235,55 @@ def build_client_workspace_repair_messages(
             "Use the command/action required by the Original user request. "
             "Do not invent a result; the client will execute the emitted call."
         )
+    elif looks_like_incomplete_acceptance_continuation(
+        assistant_text,
+        messages,
+    ):
+        contract = _acceptance_contract_from_messages(
+            messages
+        )
+        result_path = (
+            contract[1]
+            if contract is not None
+            else "the acceptance result file"
+        )
+        write_observed, _readback_observed = _acceptance_effect_progress(
+            messages,
+            result_path,
+        )
+        if write_observed:
+            correction = (
+                "The previous reply returned exact ACCEPTANCE_INCOMPLETE even though the synthetic acceptance "
+                "request still has one demonstrably unfinished workspace effect. The result-file write already "
+                f"completed successfully. Do not rewrite {result_path}. The next required effect is a separate "
+                "client-tool readback/verification of the existing result file, including the trailing-newline "
+                "requirement from the original acceptance request."
+            )
+            if repeated:
+                correction += (
+                    " This incomplete acknowledgement has already repeated. Do not repeat the write or return "
+                    "another acknowledgement before the independent readback completes."
+                )
+            action = (
+                f"Call {preferred_name} now to independently read and verify the existing {result_path}. "
+                "Return only the corrected tool-call output."
+            )
+        else:
+            correction = (
+                "The previous reply returned exact ACCEPTANCE_INCOMPLETE while the synthetic acceptance request "
+                "still has unfinished workspace effects. The workspace validation already completed successfully, "
+                f"but a successful write of {result_path} has not yet been proven. Continue from that next "
+                "unfinished step; do not repeat the successful workspace validation."
+            )
+            if repeated:
+                correction += (
+                    " This incomplete acknowledgement has already repeated. Continue the pending effect instead "
+                    "of returning another acknowledgement."
+                )
+            action = (
+                f"Call {preferred_name} now to create {result_path} exactly as required by the Original user "
+                "request. Return only the corrected tool-call output."
+            )
     elif looks_like_premature_acceptance_success(
         assistant_text,
         messages,
@@ -1280,6 +1420,7 @@ __all__ = [
     "looks_like_compacted_state_only_acknowledgement",
     "looks_like_post_tool_unavailable_claim",
     "looks_like_false_acceptance_workspace_mismatch",
+    "looks_like_incomplete_acceptance_continuation",
     "looks_like_premature_acceptance_success",
     "should_repair_client_workspace_refusal",
     "user_explicitly_requested_root_workdir",
