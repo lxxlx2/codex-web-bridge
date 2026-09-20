@@ -1852,3 +1852,44 @@ speculative. The next diagnostic should inspect the metadata-only Codex wire
 summaries for the final few Responses turns to determine whether the final
 function-output continuation still declared workspace tools and whether
 required-tool/provenance metadata survived the affinity delta.
+
+
+### Recursive-compaction declared-tool contradiction fixed after cd220a9 final refusal
+
+Metadata-only wire evidence from the failed `cd220a9...` S3 recovery proved:
+
+```text
+final request still declared exec_command and write_stdin
+earlier post-compaction exec_command calls completed successfully
+recursive compaction later removed immediate function_call/output history
+final request contained no function_call_output item
+final Web answer falsely claimed exec_command/write_stdin were not exposed
+```
+
+The existing policy already recognized the live refusal wording, but it required
+surviving local-workspace intent or tool-history provenance before applying the
+repair. Recursive compaction can legitimately remove that history while the
+current request's tool schema still authoritatively declares the real client
+tools.
+
+Fix on `standalone-dev`:
+
+- a strong declared-workspace-tool absence/unavailability claim is repaired
+  directly from the current request tool schema;
+- the repair no longer depends on previous function-call provenance surviving
+  compaction;
+- `tool_choice="none"` still disables the repair;
+- unmarked user text that merely resembles function output still does not gain
+  authoritative provenance;
+- focused tests cover the exact live refusal and the provenance boundary.
+
+Current candidate HEAD:
+
+```text
+ada4fad93be429051fbac9bd970ae30b929284f4
+```
+
+Prior candidate-bound live evidence is invalidated by this source change. Run
+focused client-tool-policy regressions, related runtime/affinity tests, release
+hygiene, full suite, public safety, and dependency audit before the next single
+S3 live attempt.
