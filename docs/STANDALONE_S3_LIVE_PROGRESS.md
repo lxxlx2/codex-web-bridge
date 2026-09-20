@@ -1183,3 +1183,50 @@ The warnings remain the known FastAPI/Python 3.14
 
 Next gate: exact-SHA CI must be green before the next candidate-bound live S3
 attempt.
+
+
+### 2365287 live S3 exposed an affinity missing-task clarification loop
+
+Exact candidate:
+
+```text
+23652871f9fc4f901ee68ee7ab9db18ee13a4177
+```
+
+The live run again passed restart continuity, remote compaction, and the
+180-second cooldown, then failed post-compaction recovery with
+`final_reply_mismatch`.
+
+The visible Web reply showed that the prior provenance fix changed behavior as
+intended: the model now acknowledged that `exec_command` and `write_stdin`
+were available. It then incorrectly asked the user to provide the concrete
+workspace task again instead of continuing the retained large-context recovery.
+
+Two gaps were fixed:
+
+1. The missing-task clarification matcher now covers the observed
+   `请直接给出 ... 具体任务` wording.
+2. When a generated tool-result fallback is sent as an affinity delta after
+   recursive compaction, the newest compacted continuation text from the fully
+   hydrated state is carried as private internal metadata. The client-tool
+   policy uses it for compacted-workspace detection and focused repair prompts.
+   The private state is not serialized into browser-visible prompt content.
+
+Current `standalone-dev` head:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+Implementation commits:
+
+```text
+8afa1a2  Carry compacted state in affinity tool-result metadata
+ec00e1b  Repair affinity missing-task continuation
+86ce841  Cover compacted context on affinity tool-result delta
+e107449  Cover live affinity missing-task recovery
+8344323  Record affinity missing-task continuation fix
+```
+
+Do not run live S3 until focused/full local validation and exact-SHA CI are
+green.
