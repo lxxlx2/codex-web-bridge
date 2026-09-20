@@ -37,6 +37,14 @@ Each Release should identify the exact commit and verified environment, summariz
 
 The project may later add generated convenience bundles and SHA-256 checksums, but those artifacts must be produced from the tagged `main` commit and must not contain browser profiles, cookies, credentials, private Responses state, prompts, tool bodies, wire traces or other local state.
 
+After creating the RC tag, clone/check out that tag in a fresh directory, create its project environment, and run:
+
+```bash
+.venv/bin/python tools/standalone_tagged_source_smoke.py
+```
+
+Do not publish the GitHub Release unless it ends with `TAGGED_SOURCE_SMOKE=PASS`.
+
 ## Current state
 
 `standalone-dev` is the development/candidate branch and `main` is the release boundary. A release commit is publishable only when CI, S3 live closure, Desktop E2E, clean-install smoke, and S4 all bind to that exact commit, `main` is fast-forwarded to the same commit, main-branch CI succeeds, and tagged-source smoke passes. Any source or documentation change before tagging creates a new candidate and invalidates older candidate-bound evidence.
