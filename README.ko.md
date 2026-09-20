@@ -4,9 +4,9 @@
 
 Codex Web Bridge는 Codex Desktop / Codex CLI의 모델 추론 요청을 로그인된 ChatGPT Web 세션으로 라우팅하는 비공식 로컬 브리지입니다. 파일 접근, Shell, 코드 편집, 테스트, Git, sandbox, approval은 계속 Codex 클라이언트가 로컬에서 담당합니다.
 
-> Release candidate 상태: S1/S2는 종료되었고 standalone의 실제 Codex Desktop E2E에서 same-thread context, 실제 local-tool execution, `uwa / chatgpt / high` route, request cleanup을 확인했습니다. 첫 RC는 final S3 live, Desktop E2E, clean-install smoke, CI, S4 release gate가 모두 동일한 candidate SHA에서 PASS한 경우에만 tag를 생성합니다.
+> 첫 RC는 exact-candidate policy를 사용합니다. deterministic regression, clean-install/rollback smoke, Codex Desktop E2E, S4, CI가 모두 동일한 candidate SHA에 묶여야 합니다. 또한 동일 SHA에서 full S3 `PASS_LIVE_CLOSED`를 최소 3회 확보하고, 최소 2개의 2-hour UTC evidence window를 포함하며, office-work soak와 release-confidence gate도 PASS해야 합니다.
 >
-> 이 README는 특정 임시 live blocker를 현재 상태로 고정하지 않습니다. release 판단은 candidate-bound gate evidence만 사용하며 HEAD가 바뀌면 관련 live evidence를 다시 생성해야 합니다.
+> 이 RC는 다른 provider, local model, official API로 자동 fallback하지 않습니다. ChatGPT Web rate limit, quota, auth/challenge, 안전하지 않은 surface가 발생하면 해당 run은 명확히 FAIL하고 중단되며 PASS로 계산하지 않습니다.
 
 
 ## 빠른 시작
