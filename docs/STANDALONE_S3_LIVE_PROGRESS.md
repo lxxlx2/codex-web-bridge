@@ -1085,3 +1085,42 @@ not a hang. After this point the runner enters the single post-compaction
 recovery turn, whose configured timeout is 900 seconds. No intervention or
 candidate change is justified while that recovery turn is still within its
 timeout window.
+
+
+### 255791b live S3: post-compaction tool refusal persists in affinity delta
+
+Exact candidate:
+
+```text
+255791ba9c734c20b9aad7250ba8a624264698db
+```
+
+The live run again passed restart continuity, the full remote compaction probe,
+and the configured 180-second cooldown, then failed at the single
+post-compaction recovery turn:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+The visible final Web reply retained the durable token `ORBIT-5921` and the
+pending write/readback task, but still claimed that the current ChatGPT session
+had no real callable local `exec_command` interface and refused to return
+`LARGE_CONTEXT_PASS`.
+
+Source inspection shows the refusal wording is already matched by the existing
+post-tool unavailable patterns. The remaining gap is provenance in a reused
+ChatGPT affinity delta: a raw Responses `function_call_output` can be normalized
+to the bridge-generated user-shaped `[Function Call Output ...]` fallback after
+its matching assistant function call has been compacted out. The repair policy
+cannot reliably distinguish that generated fallback from arbitrary user text
+because normalization currently preserves provenance only in the text marker.
+
+Next fix: carry an internal non-prompt metadata marker on generated
+function-output fallback messages, and let the post-tool repair policy treat
+that marker as authoritative workspace-tool provenance. The marker must remain
+internal and must not be serialized into browser-visible prompt content.
