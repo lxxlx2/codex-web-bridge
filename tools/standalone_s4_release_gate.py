@@ -92,7 +92,7 @@ def check_docs(root: Path) -> None:
         if marker not in _read(root, relative):
             raise GateFailure("docs_sync", f"missing_marker={relative}:{marker}")
 
-    stale_phrases = (
+    current_state_stale_phrases = (
         "S3 = OPEN",
         "S4 = PENDING",
         "CURRENT / LIVE RUN READY",
@@ -101,7 +101,7 @@ def check_docs(root: Path) -> None:
         "remain in progress",
         "release remains in S4 clean-checkout install smoke validation",
     )
-    release_docs = [
+    current_state_docs = [
         "README.md",
         "README.en.md",
         "README.th.md",
@@ -111,12 +111,24 @@ def check_docs(root: Path) -> None:
         "CHANGELOG.md",
         "docs/RELEASE_PROCESS.md",
         "docs/RELEASE_REQUIREMENTS.md",
-        "docs/STANDALONE_S3_LIVE_GATE_2026-09-10.md",
-        "docs/STANDALONE_S4_INSTALL_SMOKE_2026-09-17.md",
     ]
-    for relative in release_docs:
+    for relative in current_state_docs:
         text = _read(root, relative)
-        for phrase in stale_phrases:
+        for phrase in current_state_stale_phrases:
+            if phrase.casefold() in text.casefold():
+                raise GateFailure("docs_sync", f"stale_text={relative}:{phrase}")
+
+    historical_status_docs = {
+        "docs/STANDALONE_S3_LIVE_GATE_2026-09-10.md": (
+            "CURRENT / LIVE RUN READY",
+        ),
+        "docs/STANDALONE_S4_INSTALL_SMOKE_2026-09-17.md": (
+            "release remains in S4 clean-checkout install smoke validation",
+        ),
+    }
+    for relative, phrases in historical_status_docs.items():
+        text = _read(root, relative)
+        for phrase in phrases:
             if phrase.casefold() in text.casefold():
                 raise GateFailure("docs_sync", f"stale_text={relative}:{phrase}")
 
