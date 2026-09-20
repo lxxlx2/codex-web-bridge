@@ -1787,3 +1787,38 @@ The warnings remain the known FastAPI/Python 3.14
 `asyncio.iscoroutinefunction` deprecations.
 
 Next gate: exact-SHA CI must be green before another single full S3 live run.
+
+
+### cd220a9 S3 passed remote compaction path but failed final reply contract
+
+Exact candidate:
+
+```text
+cd220a98f5630f8fffc8995aa6cfc2168c499d14
+```
+
+The candidate-bound live run passed release/browser/repository/local preflight,
+restart continuity, the full remote-compaction probe, and the 180-second
+post-probe cooldown:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_COMPACTION_COOLDOWN_SEC=180
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+```
+
+The run then failed only at the post-compaction recovery final-message contract:
+
+```text
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+This means the prior final-settle generation race did not recur in the compaction
+probe. The next diagnostic must inspect the post-compaction recovery trace and
+the exact local result-file bytes before changing code or rerunning S3. In
+particular, determine whether the required local byte-exact file was created and
+whether the assistant final message was a near-match, a refusal, or an
+additional verification/status message.
