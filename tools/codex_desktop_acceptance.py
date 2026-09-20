@@ -375,6 +375,32 @@ def _changed_paths(root: Path) -> List[str]:
     return changed
 
 
+def _check_multi_file(root: Path) -> Tuple[bool, str]:
+    suite_green, suite_output = _unit_test(root, "multi_file")
+    diff = _run(["git", "diff", "--name-only", "--", "multi_file"], cwd=root)
+    tracked_changes = [line.strip() for line in diff.stdout.splitlines() if line.strip()]
+    expected_changes = {
+        "multi_file/math_ops.py",
+        "multi_file/summary.py",
+    }
+    changed_set = set(tracked_changes)
+    unexpected_tracked = sorted(changed_set - expected_changes)
+    missing_expected = sorted(expected_changes - changed_set)
+
+    ok = (
+        suite_green
+        and not unexpected_tracked
+        and not missing_expected
+    )
+    detail = (
+        f"suite_green={suite_green} tracked_changes={tracked_changes} "
+        f"missing_expected={missing_expected} unexpected_tracked={unexpected_tracked}"
+    )
+    if not suite_green:
+        detail += "\n" + suite_output.rstrip()
+    return ok, detail
+
+
 def _check_failure_recovery(root: Path) -> Tuple[bool, str]:
     suite_green, suite_output = _unit_test(root, "failure_recovery")
     history_path = root / "failure_recovery" / ".run_history"
@@ -449,7 +475,7 @@ def _check_context(root: Path) -> Tuple[bool, str]:
 def check(root: Path, scenario: str | None = None) -> int:
     _guard_root(root, allow_create=False)
     checks = {
-        "multi_file": lambda: _unit_test(root, "multi_file"),
+        "multi_file": lambda: _check_multi_file(root),
         "failure_recovery": lambda: _check_failure_recovery(root),
         "git_diff": lambda: _check_git_diff(root),
         "interactive": lambda: _check_interactive(root),
