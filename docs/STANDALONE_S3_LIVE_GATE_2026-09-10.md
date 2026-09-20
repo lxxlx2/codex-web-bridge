@@ -1276,3 +1276,30 @@ The recovery contract now requires a newline-preserving write plus a separate
 byte-level verification that the final byte is `0x0a`. S3 also reports this
 class as `result_missing_trailing_newline` rather than a generic
 `token_mismatch`.
+
+
+## 2026-09-20 Final-settle generation reappearance
+
+Candidate `8c3e76f05d61c910d5c6b9d64ad0531a565129da` passed restart continuity and
+started the Remote V2 compaction probe. The seed returned exactly
+`LARGE_CONTEXT_READY`, but coarse round 1 failed before submission:
+
+```text
+RUN_FAIL coarse_turn_failed round=1 rc=1
+turn.failed = stream disconnected before completion:
+              send_blocked_by_preexisting_generation
+```
+
+The UWA log showed the next request entering the pre-fill idle guard, detecting
+the previous generation/Stop state, waiting the full 300 seconds, and refusing
+to submit. The browser screenshot also showed the Stop control after the seed
+had already been reported complete.
+
+The correct invariant is stronger than “ordinary completion observed
+`not still_generating` once”. Final settle must prove that generation remains
+idle throughout a fresh settle window. A transient idle gap followed by a
+reappearing Stop state cannot release the previous turn as completed.
+
+The runtime now re-validates generation during final settle, adds a
+composer-scoped ChatGPT Stop metadata fallback, and fails closed if generation
+remains active through the bounded settle grace.
