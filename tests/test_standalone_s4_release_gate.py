@@ -89,6 +89,16 @@ def _desktop_text(candidate: str = "abc123") -> str:
     )
 
 
+def _confidence_text(candidate: str = "abc123") -> str:
+    return (
+        "STANDALONE_RELEASE_CONFIDENCE=PASS\n"
+        "RELEASE_CONFIDENCE_S3_PASS_COUNT=3\n"
+        "RELEASE_CONFIDENCE_S3_TIME_WINDOWS=2\n"
+        "RELEASE_CONFIDENCE_OFFICE_SOAK=PASS\n"
+        f"candidate_commit={candidate}\n"
+    )
+
+
 def test_docs_gate_rejects_missing_file(tmp_path: Path):
     with pytest.raises(gate.GateFailure, match="missing=README.md"):
         gate.check_docs(tmp_path)
@@ -193,6 +203,35 @@ def test_desktop_candidate_requires_all_markers_and_same_head(tmp_path: Path, mo
         gate.check_desktop_candidate(tmp_path, result)
 
 
+def test_release_confidence_requires_repeated_s3_soak_and_candidate(tmp_path: Path):
+    result = tmp_path / "confidence.txt"
+    result.write_text(_confidence_text("abc123"), encoding="utf-8")
+    gate.check_release_confidence(
+        result,
+        expected_candidate="abc123",
+    )
+
+    result.write_text(
+        _confidence_text("abc123").replace(
+            "RELEASE_CONFIDENCE_S3_PASS_COUNT=3",
+            "RELEASE_CONFIDENCE_S3_PASS_COUNT=2",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(gate.GateFailure, match="s3_pass_count=2"):
+        gate.check_release_confidence(
+            result,
+            expected_candidate="abc123",
+        )
+
+    result.write_text(_confidence_text("old"), encoding="utf-8")
+    with pytest.raises(gate.GateFailure, match="candidate_sha_mismatch"):
+        gate.check_release_confidence(
+            result,
+            expected_candidate="abc123",
+        )
+
+
 def test_install_smoke_requires_all_release_markers_and_candidate(tmp_path: Path):
     result = tmp_path / "install.txt"
     result.write_text(_smoke_text("abc123"), encoding="utf-8")
@@ -219,6 +258,8 @@ def test_full_release_checks_accept_clean_fixture(tmp_path: Path, monkeypatch):
     desktop.write_text(_desktop_text("abc123"), encoding="utf-8")
     smoke = tmp_path / "smoke.txt"
     smoke.write_text(_smoke_text("abc123"), encoding="utf-8")
+    confidence = tmp_path / "confidence.txt"
+    confidence.write_text(_confidence_text("abc123"), encoding="utf-8")
     monkeypatch.setattr(gate, "require_clean_worktree", lambda root: None)
     monkeypatch.setattr(gate, "git_head", lambda root: "abc123")
 
@@ -228,6 +269,7 @@ def test_full_release_checks_accept_clean_fixture(tmp_path: Path, monkeypatch):
             s3_result=s3,
             desktop_result=desktop,
             install_smoke_result=smoke,
+            release_confidence_result=confidence,
         )
         == 0
     )
