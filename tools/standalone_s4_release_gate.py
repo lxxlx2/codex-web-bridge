@@ -36,6 +36,7 @@ REQUIRED_DOCS = (
     "docs/README.md",
     "docs/ARCHITECTURE.md",
     "docs/DEVELOPMENT.md",
+    "docs/BROWSER_SETUP.md",
     "docs/TESTING.md",
     "docs/TROUBLESHOOTING.md",
     "docs/ROADMAP.md",
