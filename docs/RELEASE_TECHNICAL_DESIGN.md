@@ -1,8 +1,8 @@
 # Codex Web Bridge v0.1.0-rc.1 发布前技术设计
 
 > Approved release-specification record. Descriptions of a gate being “current” are historical context from the planning stage; publishability is determined only by exact-candidate evidence and the release sequence in `docs/RELEASE_PROCESS.md`.\n\n
-**文档状态**：Approved v1.0  
-**需求文档**：`docs/RELEASE_REQUIREMENTS.md` Approved v1.0  
+**文档状态**：Approved v1.1  
+**需求文档**：`docs/RELEASE_REQUIREMENTS.md` Approved v1.1  
 **需求冻结提交**：`29609358de73c9ff3dbcd49da98172ce24ee66cd`  
 **生产代码基线**：`de41c61347a71901b8116617e805de8e02aed372`  
 **目标分支**：`standalone-dev`  
@@ -57,6 +57,9 @@
 | R15 License/provenance | C8 | LICENSE/NOTICE | provenance gate |
 | R16 安装回退 | C7、C8 | installer/lifecycle/provider | clean-checkout smoke |
 | R17 Merge/tag/release | C9 | release process | final release checklist |
+| R18 重复 Live 稳定性 | C10 | repeated S3 evidence + confidence aggregator | 3x S3 / 2 time windows |
+| R19 Office-work soak | C11 | acceptance workspace + office soak runner | effect verification |
+| R20 单一 backend / 明确失败 | C10/C11 + existing surface guards | live runners / docs | no silent fallback |
 
 ---
 
@@ -1468,3 +1471,173 @@ requirements-dev.txt
 ```
 
 Because these changes alter the candidate commit, all exact-candidate release evidence required by the release policy must be regenerated before tagging.
+
+---
+
+## 24. Approved v1.1 reliability hardening amendment
+
+本节在不改变既有 R1-R17 安全边界的前提下实现 R18-R20。若与前文“最终只需要两次 S3”的旧 planning wording 冲突，以本节为准。
+
+### C10：Repeated S3 release-confidence aggregation
+
+新增：
+
+```text
+tools/standalone_release_confidence.py
+tests/test_standalone_release_confidence.py
+docs/RELIABILITY_MODEL.md
+```
+
+release-confidence 工具不访问 ChatGPT Web，只读取 private sanitized result marker。
+
+要求：
+
+```text
+same candidate_commit == git HEAD
+successful S3 count >= 3
+successful S3 evidence windows >= 2
+office soak result == PASS
+office soak candidate_commit == git HEAD
+```
+
+S3 time window 定义为 two-hour UTC bucket。目的不是性能 SLA，而是避免把短时间内同一瞬时 Web 状态下的单次偶然成功当作稳定性结论。
+
+外部 Web failure：
+
+```text
+rate limit
+quota
+auth/challenge
+temporary Web unavailability
+```
+
+不计入成功次数，也不自动使 source candidate 失效。若 candidate 未修改，可在外部条件恢复后生成新的独立证据。
+
+### C11：Office-work soak + effect verification
+
+新增：
+
+```text
+tools/standalone_office_soak.py
+tests/test_standalone_office_soak.py
+```
+
+复用：
+
+```text
+tools/codex_desktop_acceptance.py
+```
+
+并强化 acceptance checker，使 multi-file scenario 不仅要求测试变绿，还必须验证：
+
+```text
+multi_file/math_ops.py changed
+multi_file/summary.py changed
+no unexpected tracked path under multi_file
+```
+
+office soak 按固定顺序执行：
+
+```text
+context seed/resume
+multi_file
+failure_recovery
+git_diff
+interactive
+route check
+cleanup
+repo cleanliness
+```
+
+每个任务都在 synthetic acceptance workspace 内进行。失败后立即停止，不自动 replay 已失败的 side-effecting turn。
+
+结果必须包含：
+
+```text
+STANDALONE_OFFICE_SOAK=PASS
+OFFICE_SOAK_EFFECT_VERIFICATION=PASS
+OFFICE_SOAK_ROUTE_UWA_CHATGPT_HIGH=PASS
+OFFICE_SOAK_REQUEST_MANAGER_CLEAN=PASS
+candidate_commit=<HEAD>
+```
+
+### C12：S4 confidence binding
+
+S4 新增：
+
+```text
+S4_RELEASE_CONFIDENCE=PASS
+```
+
+并要求：
+
+```text
+STANDALONE_RELEASE_CONFIDENCE=PASS
+RELEASE_CONFIDENCE_S3_PASS_COUNT>=3
+RELEASE_CONFIDENCE_S3_TIME_WINDOWS>=2
+RELEASE_CONFIDENCE_OFFICE_SOAK=PASS
+candidate_commit == git HEAD
+```
+
+因此单个最新 S3 PASS 仍会用于 exact-candidate sanity check，但不再足以单独满足 release confidence。
+
+### C13：Single-backend fail-closed policy
+
+rc.1 不增加 provider/local-model/official-API fallback。
+
+runtime/live gate 对外部 Web blocker 的行为保持：
+
+```text
+classify
+fail explicitly
+cleanup
+stop
+```
+
+禁止：
+
+```text
+silent backend substitution
+account rotation
+quota bypass
+automatic replay of uncertain side effects
+```
+
+### v1.1 文件结构与维护性
+
+首个 RC 不做高风险物理目录搬迁。保持现有 `app/`、`tests/`、`tools/` 路径，新增逻辑地图：
+
+```text
+docs/PROJECT_OVERVIEW.md
+docs/RELIABILITY_MODEL.md
+docs/MAINTAINER_HANDOFF.md
+tests/README.md
+tools/README.md
+```
+
+这样可以提高交接可读性，同时避免 release 前大规模 path/import/CI 迁移。
+
+### v1.1 frozen candidate sequence
+
+最终候选执行：
+
+```text
+deterministic local validation
+-> exact-SHA CI
+-> clean install/rollback smoke
+-> S3 successful evidence until >=3 passes across >=2 windows
+-> office-work soak
+-> standalone_release_confidence
+-> Codex Desktop E2E
+-> S4
+-> fast-forward main
+-> main CI
+-> tag
+-> tagged-source smoke
+-> GitHub Release
+```
+
+S3 与 office soak 可为尊重账号可用性而交错执行，但每个 positive result 必须绑定同一个 candidate SHA。
+
+TECH_DESIGN_APPROVED=YES
+
