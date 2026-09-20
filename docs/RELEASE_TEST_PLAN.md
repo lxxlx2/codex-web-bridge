@@ -1,9 +1,9 @@
 # Codex Web Bridge v0.1.0-rc.1 发布前测试方案
 
 > Approved release-specification record. Descriptions of a gate being “current” are historical context from the planning stage; publishability is determined only by exact-candidate evidence and the release sequence in `docs/RELEASE_PROCESS.md`.\n\n
-**文档状态**：Approved v1.0  
-**需求基线**：`docs/RELEASE_REQUIREMENTS.md` Approved v1.0  
-**技术设计基线**：`docs/RELEASE_TECHNICAL_DESIGN.md` Approved v1.0  
+**文档状态**：Approved v1.1  
+**需求基线**：`docs/RELEASE_REQUIREMENTS.md` Approved v1.1  
+**技术设计基线**：`docs/RELEASE_TECHNICAL_DESIGN.md` Approved v1.1  
 **技术设计提交**：`c0819d22a9a28e34414457cd8938f8c44e58199f`  
 **目标分支**：`standalone-dev`  
 **目标版本**：`v0.1.0-rc.1`  
@@ -1305,3 +1305,209 @@ TEST_PLAN_APPROVED=YES
 ```text
 docs/RELEASE_TEST_PLAN.md
 ```
+
+---
+
+## 24. Approved v1.1 release-confidence test amendment
+
+本节新增 release-blocking 测试资产，覆盖 R18-R20。若与前文“计划内只跑 Gate A/Gate B 两次 S3”冲突，以本节为准。
+
+### G5A：Repeated S3 positive evidence
+
+最终 exact candidate 必须取得：
+
+```text
+STANDALONE_S3=PASS_LIVE_CLOSED >= 3 次
+candidate_commit == git HEAD
+successful evidence windows >= 2
+```
+
+time window 定义：
+
+```text
+two-hour UTC bucket
+```
+
+允许成功 run 与 office soak 交错执行。
+
+以下 run 不计入成功次数：
+
+```text
+rate limit
+usage/quota exhausted
+auth/challenge
+temporary Web unavailable
+任何 product failure
+```
+
+外部失败的 candidate 处理：
+
+```text
+source SHA 不自动失效
+不自动 fallback
+不自动重放 side-effecting turn
+等待外部条件恢复后启动新的独立 attempt
+```
+
+### G5B：Office-work soak
+
+新增 live gate：
+
+```bash
+.venv/bin/python tools/standalone_office_soak.py
+```
+
+固定场景：
+
+```text
+context seed/resume
+multi_file
+failure_recovery
+git_diff
+interactive
+```
+
+要求每个 scenario 通过独立 postcondition checker。
+
+至少证明：
+
+```text
+context/result.txt exact
+multi_file 两个预期 implementation file 均改变
+multi_file tests PASS
+failure_recovery 首次真实失败 + 最终 PASS
+failure_recovery 只改 parser.py
+git_diff values correct
+git diff --check PASS
+git_diff changed path only config.py
+interactive/result.txt exact
+route uwa/chatgpt/high
+RUNNING_COUNT=0
+release repo clean
+```
+
+必须输出：
+
+```text
+STANDALONE_OFFICE_SOAK=PASS
+OFFICE_SOAK_EFFECT_VERIFICATION=PASS
+```
+
+任一 live turn 失败立即停止；runner 不进行 provider fallback，也不 replay 失败的 side-effecting turn。
+
+### G5C：Release confidence aggregation
+
+新增 deterministic gate：
+
+```bash
+.venv/bin/python tools/standalone_release_confidence.py
+```
+
+输入：
+
+```text
+~/.uwa/standalone-s3/*/result.txt
+~/.uwa/standalone-office-soak/*/result.txt
+current git HEAD
+```
+
+要求：
+
+```text
+S3 pass count >= 3
+S3 time windows >= 2
+office soak PASS
+all positive evidence candidate_commit == HEAD
+```
+
+输出：
+
+```text
+STANDALONE_RELEASE_CONFIDENCE=PASS
+RELEASE_CONFIDENCE_S3_PASS_COUNT>=3
+RELEASE_CONFIDENCE_S3_TIME_WINDOWS>=2
+RELEASE_CONFIDENCE_OFFICE_SOAK=PASS
+candidate_commit=<HEAD>
+```
+
+### G6 v1.1：S4 绑定 release confidence
+
+S4 除原有 docs/version/security/provenance/install/S3/Desktop 检查外，新增：
+
+```text
+S4_RELEASE_CONFIDENCE=PASS
+```
+
+S4 必须拒绝：
+
+```text
+confidence result missing
+confidence result != PASS
+S3 count < 3
+S3 windows < 2
+office soak missing/fail
+confidence candidate SHA mismatch
+```
+
+### Focused deterministic tests
+
+新增/扩展：
+
+```text
+tests/test_codex_desktop_acceptance_harness.py
+tests/test_standalone_office_soak.py
+tests/test_standalone_release_confidence.py
+tests/test_standalone_s4_release_gate.py
+```
+
+重点断言：
+
+```text
+effect verification does not trust assistant prose
+failed live turn stops later soak scenarios
+no replay loop after failed turn
+three exact candidate S3 results required
+two evidence windows required
+office soak candidate must match
+S4 requires confidence evidence
+```
+
+### v1.1 final execution order
+
+```text
+1. static / focused / full deterministic tests
+2. public safety + dependency audit
+3. exact-SHA CI
+4. clean checkout install/rollback smoke
+5. S3 successful evidence collection
+6. office-work soak
+7. release-confidence aggregator
+8. Codex Desktop E2E
+9. S4 exact-candidate gate
+10. fast-forward main
+11. main CI
+12. tag
+13. tagged-source smoke
+14. GitHub Release
+```
+
+S3 successful evidence collection must end with at least three successful runs across at least two time windows. External Web failures may occur between successful runs and do not count.
+
+### v1.1 exit criteria
+
+```text
+S3_PASS_COUNT>=3
+S3_TIME_WINDOWS>=2
+OFFICE_SOAK=PASS
+EFFECT_VERIFICATION=PASS
+RELEASE_CONFIDENCE=PASS
+S4_RELEASE_CONFIDENCE=PASS
+```
+
+This amendment is approved:
+
+```text
+文档状态：Approved v1.1
+TEST_PLAN_APPROVED=YES
+```
+
