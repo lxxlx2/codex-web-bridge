@@ -389,6 +389,69 @@ def test_roundtrip_repairs_live_missing_task_clarification_into_exec(monkeypatch
     assert "large_context/result.txt" in seen[1][1]["content"]
     assert "Do not ask for the task" not in seen[1][1]["content"]
 
+def test_live_no_new_task_ack_is_repaired_from_private_compacted_context(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    acknowledgement = (
+        "已接收当前上下文。可继续使用的精确测试值为 `ORBIT-5921`。"
+        "当前消息没有包含新的具体执行任务。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": acknowledgement,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=acknowledgement,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_no_new_task_ack_into_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    acknowledgement = (
+        "已接收当前上下文。可继续使用的精确测试值为 `ORBIT-5921`。"
+        "当前消息没有包含新的具体执行任务。"
+    )
+    replies = iter(
+        [
+            acknowledgement,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "_uwa_compacted_continuation_context" not in str(seen[0])
+    assert "ORBIT-5921" in seen[1][1]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+
+
 def test_declared_workspace_tool_absence_claim_is_repaired_without_surviving_history(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
 
