@@ -294,6 +294,7 @@ def test_generated_function_output_marker_roundtrip_recovers_exec_command(monkey
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
     assert len(seen) == 2
+    assert "_uwa_function_output_fallback" not in str(seen[0])
     assert "prior workspace client tool call/result" in seen[1][0]["content"].lower()
 
 
