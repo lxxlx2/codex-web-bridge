@@ -4,13 +4,15 @@
 
 > 主中文文档维护在 [README.md](README.md)。本文件保留简体中文入口，并同步当前 standalone 状态。
 
-Codex Web Bridge 是一个非官方本地桥接项目，用于把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让工作区访问、Shell、编辑、测试、Git、sandbox 和审批由 Codex 客户端自身负责。
+Codex Web Bridge 是一个非官方本地桥接项目，核心目标是把 Codex Desktop / Codex CLI 的模型推理请求路由到已登录的 ChatGPT Web，同时继续让工作区访问、Shell、编辑、测试、Git、sandbox 和审批完全由 Codex 客户端自身负责。
+
+首个 RC 不做备用 provider、本地模型或官方 API 自动 fallback。ChatGPT Web 路径无法安全继续时，Bridge 明确失败并停止。
 
 ## 当前状态
 
-首个 RC 采用 exact-candidate 发布策略。CI、S3 live、Codex Desktop E2E、clean-install smoke 和 S4 release gate 必须全部对应同一个 release commit；代码或文档改变 HEAD 后，受影响的 candidate-bound evidence 必须重新生成。
+首个 RC 采用 exact-candidate 发布策略。除 CI、Desktop E2E、clean-install smoke 和 S4 外，同一 candidate SHA 还必须取得至少 3 次完整 `S3 PASS_LIVE_CLOSED`、覆盖至少 2 个两小时 UTC evidence window，并通过 office-work soak 与 release-confidence 聚合。外部 rate limit/quota/auth/challenge 会让当前 run 明确失败并停止，但不会被伪装成 PASS。
 
-开发入口、架构、测试矩阵和历史问题索引见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/README.md](docs/README.md)。
+开发入口、架构、测试矩阵、可靠性模型和维护交接见 [CONTRIBUTING.md](CONTRIBUTING.md)、[docs/README.md](docs/README.md)、[docs/RELIABILITY_MODEL.md](docs/RELIABILITY_MODEL.md) 与 [docs/MAINTAINER_HANDOFF.md](docs/MAINTAINER_HANDOFF.md)。
 
 ## 快速开始
 
