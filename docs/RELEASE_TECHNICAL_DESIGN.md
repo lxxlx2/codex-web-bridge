@@ -838,7 +838,7 @@ broad Codex regression
 
 GitHub hosted CI 不执行需要已登录 ChatGPT browser 的 live S3。
 
-### 13.2 为什么最终需要两次计划内 full S3
+### 13.2 历史 v1.0 方案：两次计划内 full S3（已由 §24 v1.1 替代）
 
 为了同时满足：
 
@@ -847,7 +847,7 @@ R11: S3 关闭后文档必须更新为真实状态
 R13: 最终 candidate commit 必须有同 commit 的 live parity evidence
 ```
 
-采用固定两次、非循环式 S3：
+v1.0 曾采用固定两次、非循环式 S3；v1.1 release confidence 已将其扩展为同一 candidate 至少三次成功 S3，并以 §24 为最终要求：
 
 #### Live Gate A：S3 Closure
 
@@ -1411,7 +1411,7 @@ docs/RELEASE_TECHNICAL_DESIGN.md
 批准状态：
 
 ```text
-文档状态：Approved v1.0
+文档状态：Approved v1.1
 TECH_DESIGN_APPROVED=YES
 ```
 
