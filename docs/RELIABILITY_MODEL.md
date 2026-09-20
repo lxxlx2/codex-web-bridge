@@ -51,6 +51,8 @@ Each successful S3 must independently prove:
 - request-manager cleanup;
 - clean release repository.
 
+The actual elapsed-span requirement prevents a pair of runs close to a UTC bucket boundary from looking more independent than they are.
+
 The positive evidence gate is implemented by:
 
 ```bash
