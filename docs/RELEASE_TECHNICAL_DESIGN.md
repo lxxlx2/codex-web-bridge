@@ -1496,6 +1496,7 @@ release-confidence 工具不访问 ChatGPT Web，只读取 private sanitized res
 same candidate_commit == git HEAD
 successful S3 count >= 3
 successful S3 evidence windows >= 2
+successful S3 elapsed span >= 7200 seconds
 office soak result == PASS
 office soak candidate_commit == git HEAD
 ```
@@ -1575,6 +1576,7 @@ S4_RELEASE_CONFIDENCE=PASS
 STANDALONE_RELEASE_CONFIDENCE=PASS
 RELEASE_CONFIDENCE_S3_PASS_COUNT>=3
 RELEASE_CONFIDENCE_S3_TIME_WINDOWS>=2
+RELEASE_CONFIDENCE_S3_SPAN_SECONDS>=7200
 RELEASE_CONFIDENCE_OFFICE_SOAK=PASS
 candidate_commit == git HEAD
 ```
