@@ -1018,6 +1018,59 @@ Implementation commits:
 Local focused/full validation is required before another live S3 run.
 
 
+## 2026-09-20 Localized Stop-control lifecycle mismatch
+
+The frozen candidate `673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa`
+reached restart continuity and entered the remote compaction probe. The probe
+seed returned `LARGE_CONTEXT_READY`, but the first coarse filler failed after
+the full 120-second pacing window and a 300-second pre-fill idle wait:
+
+```text
+SEED_REPLY_EXACT=YES
+S3_INTER_TURN_COOLDOWN_SEC=120.0
+RUN_FAIL coarse_turn_failed round=1 rc=1
+
+stream disconnected before completion:
+send_blocked_by_preexisting_generation
+```
+
+The matching browser timeline proved the seed was reported as stream-complete,
+then the next turn still saw the same old generation/Stop state for the entire
+300-second guard window. The stream terminal-state helper already required
+`still_generating=False`, so the remaining defect was the generation detector
+itself.
+
+`GeneratingStatusCache` and the pre-send guard had drifted onto different
+selector sets. The pre-send guard recognized the localized Chinese Stop control
+(`button[aria-label*="停止"]`), while `GeneratingStatusCache` only recognized
+English Stop selectors plus generic streaming classes. On a Chinese ChatGPT
+surface, stream completion could therefore observe a false idle state while the
+pre-send guard correctly observed the still-active generation later.
+
+Generation-state selectors are now shared by both lifecycle paths through
+`app/core/generation_state.py`. The shared set includes English Stop controls,
+the Chinese Stop aria-label, ChatGPT's `data-testid="stop-button"`, and the
+existing generic streaming selectors. Regression coverage proves both the
+localized Stop and stop-button paths and verifies that the pre-send probe embeds
+the same shared set.
+
+The earlier HTTP 413 line in the broad UWA log is not the failing coarse-turn
+trace. The exact coarse JSONL reports
+`send_blocked_by_preexisting_generation`; the candidate remains changed and
+must regenerate exact-SHA live/release evidence after local/CI validation.
+
+Implementation commits:
+
+```text
+894afae  Share browser generation indicators
+904a419  Align stream generation detection with shared selectors
+7cc6e8d  Share generation indicators with pre-send guard
+f161aef  Cover localized active-generation detection
+5c62fe9  Verify pre-send guard shares generation selectors
+38fd160  Run generation lifecycle regression in CI
+```
+
+
 ## Gate state
 
 ```text
