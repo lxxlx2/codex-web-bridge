@@ -63,6 +63,103 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         self.assertFalse(hasattr(observation, "commands"))
         self.assertFalse(hasattr(observation, "usage"))
 
+    def test_restart_prompt_requires_three_step_effect_contract(self) -> None:
+        prompt = s3.core._restart_context_prompt()
+        self.assertIn("绝不能直接回复 CONTEXT_PASS", prompt)
+        self.assertIn("第二步必须单独调用客户端 exec_command", prompt)
+        self.assertIn("printf '%s\\n'", prompt)
+        self.assertIn("第三步必须再次单独调用客户端 exec_command", prompt)
+        self.assertIn("只有工作区校验、写入、独立读取确认三步都成功后", prompt)
+
+    def test_restart_effect_trace_requires_write_then_separate_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            trace = Path(raw) / "restart-resume.jsonl"
+
+            events = [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": (
+                            "/bin/zsh -lc 'pwd && test -f "
+                            ".uwa_codex_acceptance && test -d context'"
+                        ),
+                    },
+                },
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": (
+                            "/bin/zsh -lc \"printf '%s\\n' "
+                            "'EMBER-7319' > context/result.txt\""
+                        ),
+                    },
+                },
+            ]
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._restart_result_effects_observed(trace),
+                (True, False),
+            )
+
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": (
+                            "/bin/zsh -lc 'cat context/result.txt'"
+                        ),
+                    },
+                }
+            )
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._restart_result_effects_observed(trace),
+                (True, True),
+            )
+
+    def test_restart_effect_trace_rejects_validation_only(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            trace = Path(raw) / "restart-resume.jsonl"
+            trace.write_text(
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "status": "completed",
+                            "exit_code": 0,
+                            "command": (
+                                "/bin/zsh -lc 'pwd && test -f "
+                                ".uwa_codex_acceptance && test -d context'"
+                            ),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._restart_result_effects_observed(trace),
+                (False, False),
+            )
+
     def test_probe_trigger_reply_accepts_exact_or_deferred(self) -> None:
         self.assertTrue(
             s3._probe_trigger_reply_acceptable(
