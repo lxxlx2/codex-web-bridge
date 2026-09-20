@@ -859,3 +859,51 @@ The previously shown restart trace is not the failing compaction trace. The next
 diagnostic must locate the probe's emitted `PRIVATE_TRACE_DIR` and inspect only
 the exact `trigger-probe-01-coarse.jsonl` plus matching UWA error/status lines.
 No candidate code change and no new live retry until that failure is classified.
+
+
+### Root cause found: localized Stop control invisible to stream completion detector
+
+The exact failed coarse trace for the latest `673ca45...` S3 run is:
+
+```text
+stream disconnected before completion:
+send_blocked_by_preexisting_generation
+```
+
+The browser timeline shows the preceding seed was reported as stream-complete,
+then the next request still observed the old generation/Stop state after 120
+seconds of pacing and waited the full 300-second pre-fill idle timeout.
+
+Root cause: lifecycle detector drift. `GeneratingStatusCache` did not include
+the localized Chinese Stop selector that the pre-send guard already recognized.
+On a Chinese ChatGPT surface, the stream monitor could therefore set
+`still_generating=False` prematurely even though the next-send guard correctly
+saw the generation as active.
+
+The fix makes stream completion and pre-send idle protection consume one shared
+selector set from `app/core/generation_state.py`, including Chinese Stop and
+ChatGPT stop-button selectors. Focused regression coverage reproduces the
+localized generation state and verifies the pre-send probe uses the same shared
+selectors. CI now explicitly runs this terminal-state regression.
+
+Current `standalone-dev` head:
+
+```text
+d4eadc2ee4a6c07dfa90890f6350d69e739659b6
+```
+
+Commits:
+
+```text
+894afae  Share browser generation indicators
+904a419  Align stream generation detection with shared selectors
+7cc6e8d  Share generation indicators with pre-send guard
+f161aef  Cover localized active-generation detection
+5c62fe9  Verify pre-send guard shares generation selectors
+38fd160  Run generation lifecycle regression in CI
+d4eadc2  Record localized generation lifecycle fix
+```
+
+The broad UWA log also contained an HTTP 413 event, but it is not the failing
+coarse-turn trace. No further S3 run until local focused/full tests and exact-SHA
+CI pass.
