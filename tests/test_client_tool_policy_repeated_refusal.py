@@ -344,7 +344,8 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     arguments = result["tool_calls"][0]["function"]["arguments"]
     assert "context/result.txt" in arguments
-    assert "read_bytes" in arguments
+    assert "cat context/result.txt" in arguments
+    assert "od -An -t x1" in arguments
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
     assert "separate client-tool readback" in seen[1][1]["content"]
