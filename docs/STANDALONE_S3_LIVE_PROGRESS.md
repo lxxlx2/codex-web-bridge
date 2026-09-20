@@ -1920,3 +1920,23 @@ Current `standalone-dev` HEAD:
 
 This was a test-alignment correction, not a production-policy semantic change
 beyond the preceding declared-tool repair.
+
+
+### 590b7d9 focused client-tool policy regression passed
+
+Exact candidate:
+
+```text
+590b7d9b79a75e3aaa0d745ed74effc5d533f517
+```
+
+The stale regression expectation was aligned with the declared-tool invariant and
+the focused client-tool policy family now passes:
+
+```text
+tests/test_client_tool_policy_repeated_refusal.py
+15 passed
+```
+
+Next: validate related continuation/affinity/runtime tests, release hygiene,
+public safety, dependency audit, and the full suite on this exact candidate.
