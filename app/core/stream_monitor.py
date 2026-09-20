@@ -21,6 +21,7 @@ from app.core.background_image_downloader import (
     normalize_remote_image_url,
 )
 from app.core.elements import ElementFinder
+from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
 from app.core.extractors.base import BaseExtractor
 from app.core.extractors.deep_mode import DeepBrowserExtractor
 from app.core.stream_observer import (
@@ -402,10 +403,8 @@ class GeneratingStatusCache:
             self._found_selector = None
 
         indicator_selectors = [
-            'css:button[aria-label*="Stop"]',
-            'css:button[aria-label*="stop"]',
-            'css:[data-state="streaming"]',
-            'css:.stop-generating',
+            f"css:{selector}"
+            for selector in GENERATION_INDICATOR_CSS_SELECTORS
         ]
 
         for selector in indicator_selectors:
