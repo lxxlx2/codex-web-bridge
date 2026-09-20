@@ -1254,3 +1254,24 @@ The warnings remain the known FastAPI/Python 3.14
 
 Next gate: exact-SHA CI must be green before the next candidate-bound live S3
 attempt.
+
+
+### 8344323 exact-SHA CI passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+GitHub Standalone CI pull-request run completed successfully:
+
+```text
+run_id=35510637571
+status=completed
+conclusion=success
+```
+
+The cancelled push run is the expected concurrency duplicate. Local focused and
+full-suite validation are already green, so this candidate is cleared for the
+next single full S3 live attempt.
