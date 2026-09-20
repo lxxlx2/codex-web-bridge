@@ -4,10 +4,15 @@ Codex Web Bridge is a local interoperability bridge with a deliberately narrow t
 
 Before changing code, read:
 
+- [Project overview](docs/PROJECT_OVERVIEW.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development guide](docs/DEVELOPMENT.md)
 - [Browser setup](docs/BROWSER_SETUP.md)
 - [Testing guide](docs/TESTING.md)
+- [Reliability model](docs/RELIABILITY_MODEL.md)
+- [Maintainer handoff](docs/MAINTAINER_HANDOFF.md)
+- [Test suite map](tests/README.md)
+- [Tooling map](tools/README.md)
 - [Troubleshooting and engineering decisions](docs/TROUBLESHOOTING.md)
 - [Security policy](SECURITY.md)
 
@@ -16,6 +21,8 @@ The documentation index is [docs/README.md](docs/README.md).
 ## Development branch
 
 Normal development happens on `standalone-dev`. `main` is the release boundary and should only move to a candidate that has completed the documented release gates.
+
+A temporary release-hardening branch may be used for one coordinated documentation/test/release-control batch. It must be merged back into `standalone-dev` before candidate-bound live evidence is generated. Do not publish or tag directly from a temporary hardening branch.
 
 Create focused commits. Avoid unrelated refactors in a bug fix, especially around browser lifecycle, Responses continuation, client-tool policy, compaction, and request cleanup.
 
@@ -87,7 +94,9 @@ Also run:
 
 Use [docs/TESTING.md](docs/TESTING.md) for the change-to-test map and release-gate rules.
 
-Changes that affect browser lifecycle, continuation, tool calls, compaction, provider routing, install wrappers, security defaults, or release metadata may require real S3/Desktop/install/S4 evidence before release. A historical PASS from another commit does not transfer to a new candidate SHA.
+Changes that affect browser lifecycle, continuation, tool calls, compaction, provider routing, install wrappers, security defaults, or release metadata require regeneration of the affected candidate-bound evidence.
+
+The first RC release confidence additionally requires repeated S3 live success plus an office-work soak on the same candidate. A historical PASS from another commit does not transfer to a new candidate SHA. External Web failures such as rate limiting stop the current run and do not count as positive evidence; they are not a reason to weaken correctness conditions or add an implicit fallback route.
 
 ## Security and repository hygiene
 
@@ -111,4 +120,6 @@ A good pull request explains:
 5. whether release-bound live evidence is affected;
 6. any privacy, security, or migration implications.
 
-Do not weaken a gate merely to make a failing acceptance test pass. If an external condition such as ChatGPT Web rate limiting blocks a live gate, classify it and preserve the correctness criteria.
+Do not weaken a gate merely to make a failing acceptance test pass. If an external condition such as ChatGPT Web rate limiting blocks a live gate, classify it, stop the run, and preserve the correctness criteria.
+
+Acceptance code should verify observable effects rather than trusting model prose. For file edits, tests, Git scope, or interactive processes, add independent postcondition checks whenever practical.
