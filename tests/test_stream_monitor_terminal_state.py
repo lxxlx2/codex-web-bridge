@@ -1,7 +1,11 @@
 import json
 
 from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
-from app.core.stream_monitor import GeneratingStatusCache, _ordinary_text_completion_reason
+from app.core.stream_monitor import (
+    GeneratingStatusCache,
+    _final_settle_generation_transition,
+    _ordinary_text_completion_reason,
+)
 from app.core.workflow.executor_send import WorkflowExecutorSendMixin
 
 
@@ -98,6 +102,66 @@ def test_stream_generation_cache_detects_chatgpt_stop_testid():
     cache = GeneratingStatusCache(tab)
 
     assert cache.is_generating() is True
+
+
+class _ComposerStopRunJsTab:
+    def __init__(self):
+        self.js = ""
+
+    def ele(self, selector, timeout=0):
+        return None
+
+    def run_js(self, js):
+        self.js = js
+        return True
+
+
+def test_stream_generation_cache_detects_composer_stop_metadata_fallback():
+    tab = _ComposerStopRunJsTab()
+    cache = GeneratingStatusCache(tab)
+
+    assert cache.is_generating() is True
+    assert "#prompt-textarea" in tab.js
+    assert "stopping" in tab.js
+    assert "停止" in tab.js
+
+
+def test_final_settle_generation_reappearance_resets_stability_window():
+    active_since, reset = _final_settle_generation_transition(
+        was_generating=False,
+        still_generating=True,
+        active_since=None,
+        now=10.0,
+    )
+    assert active_since == 10.0
+    assert reset is True
+
+    active_since, reset = _final_settle_generation_transition(
+        was_generating=True,
+        still_generating=True,
+        active_since=10.0,
+        now=11.0,
+    )
+    assert active_since == 10.0
+    assert reset is True
+
+    active_since, reset = _final_settle_generation_transition(
+        was_generating=True,
+        still_generating=False,
+        active_since=10.0,
+        now=12.0,
+    )
+    assert active_since is None
+    assert reset is True
+
+    active_since, reset = _final_settle_generation_transition(
+        was_generating=False,
+        still_generating=False,
+        active_since=None,
+        now=13.0,
+    )
+    assert active_since is None
+    assert reset is False
 
 
 class _RunJsCaptureTab:
