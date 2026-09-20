@@ -37,6 +37,8 @@ jobs:
           python -m py_compile tools/chatgpt_surface_preflight.py
           python -m py_compile tools/standalone_install_smoke.py
           python -m py_compile tools/standalone_s4_release_gate.py
+          python -m py_compile tools/standalone_office_soak.py
+          python -m py_compile tools/standalone_release_confidence.py
           python -m py_compile tools/standalone_tagged_source_smoke.py
           python -m py_compile security_guard.py
           python -m py_compile start.py
@@ -73,6 +75,11 @@ jobs:
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
           test -f docs/KNOWN_LIMITATIONS.md
+          test -f docs/PROJECT_OVERVIEW.md
+          test -f docs/RELIABILITY_MODEL.md
+          test -f docs/MAINTAINER_HANDOFF.md
+          test -f tests/README.md
+          test -f tools/README.md
           test -f manifests/README.md
           grep -q 'REQUIREMENTS_APPROVED=YES' docs/RELEASE_REQUIREMENTS.md
           grep -q 'TECH_DESIGN_APPROVED=YES' docs/RELEASE_TECHNICAL_DESIGN.md
@@ -153,6 +160,8 @@ jobs:
             tests/test_standalone_desktop_e2e_gate.py \
             tests/test_standalone_install_smoke.py \
             tests/test_standalone_s4_release_gate.py \
+            tests/test_standalone_office_soak.py \
+            tests/test_standalone_release_confidence.py \
             tests/test_standalone_tagged_source_smoke.py
       - name: Audit standalone dependency closure
         run: |
@@ -214,6 +223,11 @@ jobs:
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
           test -f docs/KNOWN_LIMITATIONS.md
+          test -f docs/PROJECT_OVERVIEW.md
+          test -f docs/RELIABILITY_MODEL.md
+          test -f docs/MAINTAINER_HANDOFF.md
+          test -f tests/README.md
+          test -f tools/README.md
           test -f manifests/README.md
           test -f CONTRIBUTING.md
           test -f requirements-dev.txt
@@ -231,6 +245,8 @@ jobs:
           python -m pytest -q \
             tests/test_standalone_desktop_e2e_gate.py \
             tests/test_standalone_install_smoke.py \
+            tests/test_standalone_office_soak.py \
+            tests/test_standalone_release_confidence.py \
             tests/test_standalone_s4_release_gate.py \
             tests/test_standalone_tagged_source_smoke.py
 
