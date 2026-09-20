@@ -1397,3 +1397,27 @@ candidate has completed the pre-tag release acceptance gates.
 Next actions must follow `docs/RELEASE_PROCESS.md`: verify the frozen SHA and
 CI/evidence once more, merge/tag without modifying the candidate contents, then
 run the required tagged-source smoke.
+
+
+### Final pre-merge candidate check passed
+
+Exact candidate remains:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+The operator performed the final local/remote pre-merge verification:
+
+```text
+LOCAL_HEAD=83443230f853e1f6aaf88dadc174831fba7acfec
+REMOTE_STANDALONE_DEV=83443230f853e1f6aaf88dadc174831fba7acfec
+REMOTE_MAIN=fa9c8979ce0a71ab44a635a5c29a4cb154a62df6
+MAIN_IS_ANCESTOR=YES
+WORKTREE=CLEAN
+```
+
+This proves `main` can be fast-forwarded directly to the exact validated
+candidate without creating a new release SHA. The next release action is the
+main fast-forward, followed by exact main/candidate verification and creation of
+the `v0.1.0-rc.1` tag only if the fast-forward succeeds unchanged.
