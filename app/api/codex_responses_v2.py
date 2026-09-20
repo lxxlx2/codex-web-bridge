@@ -623,6 +623,73 @@ def _function_output_call_ids(source: Any) -> set[str]:
     return call_ids
 
 
+def _latest_compacted_continuation_context(
+    messages: Any,
+) -> str:
+    """Return the newest compacted continuation text for internal delta metadata."""
+
+    if not isinstance(messages, list):
+        return ""
+
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content
+        else:
+            try:
+                text = json.dumps(content, ensure_ascii=False)
+            except Exception:
+                text = str(content or "")
+        if "[Compacted prior context]" in text:
+            return text.strip()
+
+    return ""
+
+
+def _attach_compacted_context_to_generated_tool_fallbacks(
+    request_body: ChatRequest,
+    compacted_context: str,
+) -> ChatRequest:
+    """Carry compacted state as private metadata without replaying it to Web."""
+
+    value = str(compacted_context or "").strip()
+    if not value:
+        return request_body
+
+    messages = (
+        request_body.messages
+        if isinstance(request_body.messages, list)
+        else []
+    )
+    changed = False
+    updated: List[Dict[str, Any]] = []
+
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        next_message = dict(message)
+        if next_message.get("_uwa_function_output_fallback") is True:
+            next_message["_uwa_compacted_continuation_context"] = value
+            changed = True
+        updated.append(next_message)
+
+    if not changed:
+        return request_body
+
+    if hasattr(request_body, "model_copy"):
+        return request_body.model_copy(
+            update={"messages": updated}
+        )
+
+    return request_body.copy(
+        update={"messages": updated}
+    )
+
+
 def _browser_delta_chat_request(
     state_chat_body: ChatRequest,
     browser_source_body: ResponsesRequest,
@@ -679,7 +746,12 @@ def _browser_delta_chat_request(
             break
 
     if start_index is None:
-        return delta_body
+        return _attach_compacted_context_to_generated_tool_fallbacks(
+            delta_body,
+            _latest_compacted_continuation_context(
+                messages
+            ),
+        )
 
     tail = messages[start_index:]
 
