@@ -263,6 +263,37 @@ def check_desktop_candidate(root: Path, result_path: Path) -> None:
         raise GateFailure("desktop_candidate_match", "candidate_sha_mismatch")
 
 
+def check_release_confidence(
+    result_path: Path,
+    *,
+    expected_candidate: str,
+) -> None:
+    if not result_path.is_file():
+        raise GateFailure("release_confidence", "result_missing")
+    values = parse_key_values(result_path.read_text(encoding="utf-8"))
+    required = {
+        "STANDALONE_RELEASE_CONFIDENCE": "PASS",
+        "RELEASE_CONFIDENCE_OFFICE_SOAK": "PASS",
+    }
+    for key, expected in required.items():
+        if values.get(key) != expected:
+            raise GateFailure(
+                "release_confidence",
+                f"{key.lower()}_not_{expected.lower()}",
+            )
+    try:
+        s3_pass_count = int(values.get("RELEASE_CONFIDENCE_S3_PASS_COUNT", "0") or 0)
+        s3_windows = int(values.get("RELEASE_CONFIDENCE_S3_TIME_WINDOWS", "0") or 0)
+    except ValueError as exc:
+        raise GateFailure("release_confidence", "invalid_numeric_evidence") from exc
+    if s3_pass_count < 3:
+        raise GateFailure("release_confidence", f"s3_pass_count={s3_pass_count}")
+    if s3_windows < 2:
+        raise GateFailure("release_confidence", f"s3_time_windows={s3_windows}")
+    if values.get("candidate_commit", "") != expected_candidate:
+        raise GateFailure("release_confidence", "candidate_sha_mismatch")
+
+
 def check_install_smoke(
     result_path: Path,
     *,
@@ -294,6 +325,7 @@ def run(
     s3_result: Path,
     desktop_result: Path,
     install_smoke_result: Path,
+    release_confidence_result: Path,
 ) -> int:
     try:
         require_clean_worktree(root)
@@ -306,6 +338,11 @@ def run(
         check_provenance(root)
         print("S4_PROVENANCE_CHECK=PASS", flush=True)
         candidate = git_head(root)
+        check_release_confidence(
+            release_confidence_result,
+            expected_candidate=candidate,
+        )
+        print("S4_RELEASE_CONFIDENCE=PASS", flush=True)
         check_install_smoke(
             install_smoke_result,
             expected_candidate=candidate,
@@ -348,6 +385,11 @@ def main() -> int:
         type=Path,
         default=Path.home() / ".uwa" / "standalone-s4" / "install-smoke-result.txt",
     )
+    parser.add_argument(
+        "--release-confidence-result",
+        type=Path,
+        default=Path.home() / ".uwa" / "standalone-release-confidence" / "result.txt",
+    )
     args = parser.parse_args()
 
     s3_result = args.s3_result or latest_s3_result(args.private_root)
@@ -356,6 +398,7 @@ def main() -> int:
         s3_result=s3_result.expanduser(),
         desktop_result=args.desktop_result.expanduser(),
         install_smoke_result=args.install_smoke_result.expanduser(),
+        release_confidence_result=args.release_confidence_result.expanduser(),
     )
 
 
