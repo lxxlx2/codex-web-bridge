@@ -1419,3 +1419,51 @@ TECH_DESIGN_APPROVED=YES
 NO_DESIGN_DRIFT_WITHOUT_REVIEW=YES
 NO_UNPLANNED_PRODUCTION_CHANGE=YES
 ```
+
+
+---
+
+## 25. Pre-tag onboarding and repository-hygiene addendum
+
+A final pre-tag audit found three release-readiness issues outside the production inference path:
+
+1. contributor onboarding did not provide a durable code map, development guide, test map, or troubleshooting index;
+2. several historical S3/S4 documents still presented old gate state as if it were current;
+3. tracked `config/browser_config.json` contained machine-specific remembered conversation/route state that conflicted with R14.
+
+Approved implementation scope:
+
+```text
+production inference semantics: unchanged
+README section structure: unchanged
+developer documentation: add durable entrypoint/code-map/test/troubleshooting/roadmap docs
+tracked browser defaults: remove machine-specific conversation/route state
+public safety scanner: reject raw AI conversation URLs
+S4 gate: verify new docs, reject stale release snapshots and tracked browser state
+```
+
+The tracked browser config keeps reusable runtime defaults but resets:
+
+```text
+tab_pool.excluded_urls = []
+tab_pool.route_groups = []
+tab_pool.auto_remember_url_presets = false
+```
+
+This prevents public source from carrying remembered machine/session state. It does not change Codex/ChatGPT routing semantics.
+
+New durable documentation:
+
+```text
+CONTRIBUTING.md
+docs/README.md
+docs/ARCHITECTURE.md
+docs/DEVELOPMENT.md
+docs/TESTING.md
+docs/TROUBLESHOOTING.md
+docs/ROADMAP.md
+requirements-dev.txt
+.github/pull_request_template.md
+```
+
+Because these changes alter the candidate commit, all exact-candidate release evidence required by the release policy must be regenerated before tagging.
