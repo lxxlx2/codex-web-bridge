@@ -94,6 +94,7 @@ def _confidence_text(candidate: str = "abc123") -> str:
         "STANDALONE_RELEASE_CONFIDENCE=PASS\n"
         "RELEASE_CONFIDENCE_S3_PASS_COUNT=3\n"
         "RELEASE_CONFIDENCE_S3_TIME_WINDOWS=2\n"
+        "RELEASE_CONFIDENCE_S3_SPAN_SECONDS=7200\n"
         "RELEASE_CONFIDENCE_OFFICE_SOAK=PASS\n"
         f"candidate_commit={candidate}\n"
     )
@@ -173,6 +174,39 @@ def test_provenance_requires_reliability_acknowledgements(tmp_path: Path):
         gate.check_provenance(tmp_path)
 
 
+def test_latest_s3_result_ignores_newer_failed_attempt_and_wrong_candidate(tmp_path: Path):
+    old_pass = tmp_path / "20260921T000000Z" / "result.txt"
+    old_pass.parent.mkdir(parents=True)
+    old_pass.write_text(
+        "STANDALONE_S3=PASS_LIVE_CLOSED\n"
+        "candidate_commit=abc123\n",
+        encoding="utf-8",
+    )
+
+    wrong_candidate = tmp_path / "20260921T010000Z" / "result.txt"
+    wrong_candidate.parent.mkdir(parents=True)
+    wrong_candidate.write_text(
+        "STANDALONE_S3=PASS_LIVE_CLOSED\n"
+        "candidate_commit=other\n",
+        encoding="utf-8",
+    )
+
+    newest_fail = tmp_path / "20260921T020000Z" / "result.txt"
+    newest_fail.parent.mkdir(parents=True)
+    newest_fail.write_text(
+        "STANDALONE_S3=FAIL\n"
+        "candidate_commit=abc123\n",
+        encoding="utf-8",
+    )
+
+    selected = gate.latest_s3_result(
+        tmp_path,
+        expected_candidate="abc123",
+    )
+
+    assert selected == old_pass
+
+
 def test_s3_candidate_must_match_head(tmp_path: Path, monkeypatch):
     result = tmp_path / "result.txt"
     result.write_text(
@@ -219,6 +253,19 @@ def test_release_confidence_requires_repeated_s3_soak_and_candidate(tmp_path: Pa
         encoding="utf-8",
     )
     with pytest.raises(gate.GateFailure, match="s3_pass_count=2"):
+        gate.check_release_confidence(
+            result,
+            expected_candidate="abc123",
+        )
+
+    result.write_text(
+        _confidence_text("abc123").replace(
+            "RELEASE_CONFIDENCE_S3_SPAN_SECONDS=7200",
+            "RELEASE_CONFIDENCE_S3_SPAN_SECONDS=7199",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(gate.GateFailure, match="s3_span_seconds=7199"):
         gate.check_release_confidence(
             result,
             expected_candidate="abc123",
