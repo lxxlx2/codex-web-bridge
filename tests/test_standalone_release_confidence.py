@@ -99,13 +99,29 @@ def test_s3_stability_accepts_three_passes_across_two_windows(tmp_path: Path):
     _stamp_result(tmp_path, "20260921T010000Z", candidate="abc")
     _stamp_result(tmp_path, "20260921T021000Z", candidate="abc")
 
-    pass_count, windows = confidence.check_s3_stability(
+    pass_count, windows, span_seconds = confidence.check_s3_stability(
         tmp_path,
         candidate="abc",
     )
 
     assert pass_count == 3
     assert windows == 2
+    assert span_seconds == 2 * 60 * 60 + 10 * 60
+
+
+def test_s3_stability_rejects_bucket_boundary_without_real_two_hour_span(tmp_path: Path):
+    _stamp_result(tmp_path, "20260921T015500Z", candidate="abc")
+    _stamp_result(tmp_path, "20260921T020500Z", candidate="abc")
+    _stamp_result(tmp_path, "20260921T021500Z", candidate="abc")
+
+    with pytest.raises(
+        confidence.GateFailure,
+        match="span_seconds=1200 required=7200",
+    ):
+        confidence.check_s3_stability(
+            tmp_path,
+            candidate="abc",
+        )
 
 
 def test_latest_successful_office_soak_ignores_newer_failed_attempt(tmp_path: Path):
@@ -167,5 +183,6 @@ def test_run_writes_candidate_bound_confidence_result(
     assert "STANDALONE_RELEASE_CONFIDENCE=PASS" in text
     assert "RELEASE_CONFIDENCE_S3_PASS_COUNT=3" in text
     assert "RELEASE_CONFIDENCE_S3_TIME_WINDOWS=2" in text
+    assert "RELEASE_CONFIDENCE_S3_SPAN_SECONDS=7800" in text
     assert "RELEASE_CONFIDENCE_OFFICE_SOAK=PASS" in text
     assert "candidate_commit=abc" in text
