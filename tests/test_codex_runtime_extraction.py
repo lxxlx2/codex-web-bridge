@@ -33,6 +33,44 @@ class CodexRuntimeExtractionTests(unittest.TestCase):
         dumped = body.model_dump() if hasattr(body, "model_dump") else body.dict()
         self.assertEqual(dumped["unknown_codex_field"], {"kept": True})
 
+    def test_generated_function_output_fallback_carries_internal_provenance(self) -> None:
+        body = runtime.ResponsesRequest(
+            model="chatgpt",
+            input=[
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_missing_after_compaction",
+                    "output": "Process exited with code 0\nFinal output: ok\n",
+                }
+            ],
+            tools=[
+                {
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "run command",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        )
+
+        extracted = runtime._responses_request_to_chat_request(
+            body,
+            stream=False,
+        )
+        message = extracted.messages[-1]
+
+        self.assertEqual(message["role"], "user")
+        self.assertTrue(message["_uwa_function_output_fallback"])
+        self.assertEqual(
+            message["_uwa_function_output_call_id"],
+            "call_missing_after_compaction",
+        )
+        self.assertTrue(
+            str(message["content"]).startswith(
+                "[Function Call Output"
+            )
+        )
+
     def test_request_to_chat_matches_frozen_tool_roundtrip_contract(self) -> None:
         payload = {
             "model": "chatgpt",
