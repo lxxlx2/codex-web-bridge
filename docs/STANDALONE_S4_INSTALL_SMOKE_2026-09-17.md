@@ -1,16 +1,18 @@
 # Standalone S4 install smoke status — 2026-09-17
 
-## Current gate
+## Historical gate snapshot
 
-The standalone release remains in S4 clean-checkout install smoke validation.
+This file is retained as the engineering record for the S4 install-smoke false negative discovered on 2026-09-17. It is not the source of truth for the current release candidate.
 
-Validated candidate before this note:
+The snapshot below refers to an older candidate:
 
 - branch: `standalone-dev`
 - candidate HEAD: `ffd89cfc5a9e36ea9e71ba52dddc166ea1785052`
 - candidate commit: `Test trusted Chat mode click path`
 
-## Latest live result
+Current release status is determined by the latest exact-candidate install-smoke result plus `tools/standalone_s4_release_gate.py`.
+
+## Historical failing result
 
 The clean-checkout install smoke failed at the ChatGPT surface preflight with:
 
