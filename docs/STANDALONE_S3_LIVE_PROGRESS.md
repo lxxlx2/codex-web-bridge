@@ -1275,3 +1275,39 @@ conclusion=success
 The cancelled push run is the expected concurrency duplicate. Local focused and
 full-suite validation are already green, so this candidate is cleared for the
 next single full S3 live attempt.
+
+
+### 8344323 S3 live closure passed
+
+Exact candidate:
+
+```text
+83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+The complete unattended candidate-bound S3 runner passed live and closed all
+release-critical live invariants:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+S3_PHASE=COMPACTION_RECOVERY_PASS
+S3_REPO_PREFLIGHT=PASS
+S3_LISTENER_TRANSITION=RESTARTED
+S3_LOCAL_SAFETY_REGRESSION=PASS
+S3_UWA_HEALTH=PASS
+S3_REAL_CLIENT_TOOL=PASS
+S3_SAME_THREAD_RESTART_RECOVERY=PASS
+S3_NATIVE_AUTO_COMPACTION=PASS
+S3_REMOTE_V2_COMPACTION=PASS
+S3_POST_COMPACTION_RECOVERY=PASS
+S3_ROUTE_UWA_CHATGPT_HIGH=PASS
+S3_REQUEST_MANAGER_CLEAN=PASS
+S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+This is the first complete live S3 closure for the current exact candidate after
+the localized generation-lifecycle, compacted tool-provenance, and
+affinity-continuation fixes. The candidate remains frozen. Next release gates:
+exact-SHA Desktop E2E, install smoke, and S4 candidate/evidence match.
