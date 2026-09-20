@@ -2082,3 +2082,27 @@ run_id=35531749326
 ```
 
 No live candidate evidence should start until that canonical-branch CI is green.
+
+
+### Canonical standalone-dev exact-SHA CI passed for 523fa23
+
+The canonical candidate is now:
+
+```text
+523fa237815325cbacbd805e1142d51950546834
+```
+
+Local checkout was updated to `standalone-dev` with a clean worktree.
+
+Push-triggered Standalone CI on the canonical branch completed successfully:
+
+```text
+run_id=35531749326
+event=push
+branch=standalone-dev
+conclusion=success
+```
+
+The candidate is cleared to begin candidate-bound release evidence, starting
+with clean-checkout install / official rollback smoke before the first new S3
+success attempt.
