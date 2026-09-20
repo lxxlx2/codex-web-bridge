@@ -117,6 +117,7 @@ It requires:
 ```text
 >= 3 S3 PASS_LIVE_CLOSED results on current HEAD
 >= 2 two-hour UTC evidence windows
+>= 7200 seconds first-to-last successful S3 span
 STANDALONE_OFFICE_SOAK=PASS on current HEAD
 ```
 
