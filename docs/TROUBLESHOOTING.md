@@ -1,0 +1,130 @@
+# Troubleshooting and engineering decisions
+
+This file is a fast index for recurring failure signatures. The detailed chronological record remains in [STANDALONE_S3_LIVE_GATE_2026-09-10.md](STANDALONE_S3_LIVE_GATE_2026-09-10.md).
+
+## Browser/CDP unavailable
+
+Symptoms:
+
+```text
+browser/CDP not connected
+health reports browser unhealthy
+```
+
+Check the configured CDP port, default `9222`, and confirm the controlled Chromium-compatible browser is running with a usable logged-in ChatGPT Web tab.
+
+Relevant code:
+
+- `app/core/browser/connection.py`
+- `app/services/chatgpt_web_surface.py`
+
+## Wrong ChatGPT surface or dirty composer
+
+Symptoms include Work surface, ambiguous target, stale text in the composer, authentication challenge, quota exhaustion, or an unexpected page.
+
+The release harness fails closed before expensive compaction work.
+
+Relevant code/tests:
+
+- `app/services/chatgpt_web_surface.py`
+- `app/services/chatgpt_web_prepare.py`
+- `tests/test_chatgpt_web_surface*.py`
+
+## `send_blocked_by_preexisting_generation`
+
+A historical live failure occurred when the stream monitor and pre-send guard used different active-generation selectors. On a localized ChatGPT UI, one path could miss the Chinese Stop control and declare completion early.
+
+Current design:
+
+- shared selectors live in `app/core/generation_state.py`;
+- `stream_monitor.py` and `executor_send.py` consume the same set.
+
+Regression:
+
+- `tests/test_stream_monitor_terminal_state.py`
+
+Do not fix this class of failure by merely increasing the pre-send timeout before inspecting terminal-state detection.
+
+## ChatGPT rate limiting
+
+Symptoms:
+
+```text
+chatgpt_web_rate_limited
+请求过于频繁
+Too Many Requests
+```
+
+The bridge/gates must fail closed. The acceptance harness may dismiss an acknowledgement-only modal and apply bounded pacing, but it does not bypass account limits or automatically replay an uncertain request.
+
+Relevant code:
+
+- `app/services/chatgpt_web_rate_limit_guard.py`
+- `tools/chatgpt_surface_preflight.py`
+- `tools/standalone_s3_live_acceptance.py`
+
+## HTTP 413 or oversized resumed history
+
+Do not assume every broad-log 413 belongs to the currently failing probe. Inspect the exact phase JSONL first.
+
+Conversation affinity and browser-delta construction intentionally avoid resending unnecessary full history when the verified Web conversation already contains it.
+
+Relevant code/tests:
+
+- `app/api/codex_responses_v2.py`
+- `app/services/codex_web_session_affinity.py`
+- `tests/test_codex_web_session_affinity.py`
+
+## Model says `exec_command` is unavailable after a real tool ran
+
+This is a contradiction when the current request declares the tool and prior client-tool evidence proves it executed.
+
+Recursive compaction can remove the matching assistant function-call item while preserving a generated `[Function Call Output ...]` fallback. The bridge attaches private provenance to generated fallbacks so the policy can distinguish them from user-authored text.
+
+Relevant code/tests:
+
+- `app/api/codex_runtime.py`
+- `app/services/client_tool_policy.py`
+- `tests/test_client_tool_policy_repeated_refusal.py`
+
+## Model asks the user to provide the task again after compaction
+
+If `ACTIVE CONTINUATION STATE` already contains the unresolved workspace action, asking the user to resend the task is a recoverable contradiction.
+
+Affinity deltas carry the newest compacted continuation as private bridge metadata on generated tool-result fallbacks. That metadata is not serialized into browser-visible prompt content.
+
+Relevant code/tests:
+
+- `app/api/codex_responses_v2.py`
+- `app/services/client_tool_policy.py`
+- `tests/test_codex_web_session_affinity.py`
+
+## S4 candidate mismatch
+
+If S4 reports a candidate SHA mismatch, do not edit the evidence file or weaken the check.
+
+Regenerate the corresponding gate on the current exact HEAD:
+
+- S3 result for S3 mismatch;
+- Desktop verifier for Desktop mismatch;
+- install smoke for install candidate mismatch.
+
+## System Python cannot import `DrissionPage`
+
+Release and acceptance tools must run with the project environment:
+
+```bash
+.venv/bin/python ...
+```
+
+Do not substitute system `python3` for browser-dependent acceptance commands unless that environment has the same dependencies.
+
+## Repository becomes dirty during release acceptance
+
+S3 and S4 expect a clean release tree. Do not edit tracked files while a candidate-bound gate is running.
+
+Private evidence belongs under `~/.uwa`, not in the repository.
+
+## Historical details
+
+The long S3 record is retained because each unusual defensive rule has a real failure behind it. Use this troubleshooting index first, then open the matching dated section in [STANDALONE_S3_LIVE_GATE_2026-09-10.md](STANDALONE_S3_LIVE_GATE_2026-09-10.md) when deeper context is needed.
