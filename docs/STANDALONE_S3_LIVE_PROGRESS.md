@@ -1967,3 +1967,35 @@ The warnings remain the known FastAPI/Python 3.14
 
 The exact-SHA Standalone CI is already green, so this candidate is cleared for
 one full S3 live attempt.
+
+
+### 590b7d9 S3 blocked by external ChatGPT Web rate limit after compaction cooldown
+
+Exact candidate:
+
+```text
+590b7d9b79a75e3aaa0d745ed74effc5d533f517
+```
+
+The candidate-bound live run passed release/browser/repository/local preflight,
+restart continuity, the remote-compaction probe, and the 180-second cooldown.
+The post-compaction recovery then failed at runtime and the S3 wrapper classified
+the terminal external condition as a ChatGPT Web rate limit:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_COMPACTION_COOLDOWN_SEC=180
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=codex_turn_runtime_error
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+STANDALONE_S3=FAIL
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+No source change should be made from this run alone. The bridge failed closed
+rather than claiming a successful post-compaction recovery. This result is an
+operational-availability failure caused by the account/Web rate limiter, not
+evidence that the candidate's deterministic local regressions failed.
