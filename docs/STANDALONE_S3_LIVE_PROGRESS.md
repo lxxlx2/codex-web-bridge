@@ -1034,3 +1034,26 @@ fbd47d5  Repair compacted function-output tool refusals
 
 Do not run live S3 until focused/full local validation and exact-SHA CI are
 green.
+
+
+### 255791b local post-compaction validation passed
+
+Exact candidate:
+
+```text
+255791ba9c734c20b9aad7250ba8a624264698db
+```
+
+Local validation after the compacted function-output provenance repair:
+
+```text
+exact post-compaction regression: 13 passed
+client tool policy family:        116 passed, 8 warnings
+full suite:                       512 passed, 22 warnings
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Next gate: exact-SHA CI must be green before the next candidate-bound live S3
+attempt.
