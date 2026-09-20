@@ -1999,3 +1999,38 @@ No source change should be made from this run alone. The bridge failed closed
 rather than claiming a successful post-compaction recovery. This result is an
 operational-availability failure caused by the account/Web rate limiter, not
 evidence that the candidate's deterministic local regressions failed.
+
+
+### Pre-release hardening moved to temporary branch
+
+After the `590b7d9...` candidate was blocked by an external ChatGPT Web rate
+limit, release hardening was moved to a separate temporary branch:
+
+```text
+branch=release-hardening-v1
+base=590b7d9b79a75e3aaa0d745ed74effc5d533f517
+current_head=47c90ee6488a65d9cd499217119fc586af2abaa3
+draft_pr=#2
+ci_run=35530792524
+```
+
+The hardening batch does not add an alternate inference backend. rc.1 remains a
+single ChatGPT Web route and fails explicitly when that route cannot continue.
+
+The branch adds:
+
+- independent effect verification for acceptance fixtures;
+- a safe office-work soak covering context, multi-file edits, real failure
+  recovery, Git-diff discipline and interactive stdin;
+- a release-confidence aggregator requiring at least three successful exact-SHA
+  S3 runs, at least two two-hour UTC evidence windows, and at least 7200 seconds
+  between the first and last successful S3;
+- S4 binding to the release-confidence result;
+- project overview, reliability model, maintainer handoff, test-suite map, and
+  tooling map;
+- README/release-spec/CI/tagged-source synchronization.
+
+No final live candidate evidence will be generated on this temporary branch.
+After deterministic tests and PR CI pass, the hardening tree must return to
+`standalone-dev`, creating a new exact candidate for install smoke, repeated
+S3, office soak, Desktop E2E and S4.
