@@ -6,6 +6,7 @@ This directory separates durable contributor guidance from release-specific desi
 
 - [Architecture](ARCHITECTURE.md): request flow, trust boundaries, state, module ownership, and compatibility facades.
 - [Development](DEVELOPMENT.md): local environment, lifecycle commands, configuration policy, and safe change workflow.
+- [Browser setup](BROWSER_SETUP.md): local CDP, dedicated browser profile, login, and platform examples.
 - [Testing](TESTING.md): focused test map, CI layers, live gates, and exact-candidate rules.
 - [Troubleshooting](TROUBLESHOOTING.md): common failure signatures, root causes, and the regression tests that protect them.
 - [Roadmap](ROADMAP.md): post-RC stabilization and the planned structural cleanup after the first stable release.
