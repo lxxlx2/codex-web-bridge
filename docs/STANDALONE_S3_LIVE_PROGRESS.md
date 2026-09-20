@@ -793,3 +793,35 @@ maximum configured recovery pacing of 120 seconds between live turns.
 Next action: run exactly one full candidate-bound S3 attempt. Do not manually
 clear the marker and do not immediately retry again if the account-side limiter
 returns.
+
+
+### 673ca45 next live attempt: remote compaction failed, outer classification pending
+
+Exact candidate remains:
+
+```text
+673ca4509d6193fe2ce3ff9de17d45dd7c02fbfa
+```
+
+The next candidate-bound run started with the persisted recovery state and
+maximum pacing:
+
+```text
+S3_RATE_LIMIT_STREAK=3
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_INTER_TURN_COOLDOWN_SEC=118.4
+S3_PHASE=RESTART_CONTINUITY_PASS
+```
+
+The inner compaction probe then returned:
+
+```text
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+```
+
+At the time of this progress update, the operator had not yet provided the
+outer post-failure surface classification. Do not classify this specific run as
+account-side rate limiting until either the outer wrapper reports
+`chatgpt_web_rate_limited` or the private probe/browser evidence shows it.
+No candidate code change is justified yet.
