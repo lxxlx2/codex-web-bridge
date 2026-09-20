@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from security_guard import ensure_safe_defaults, validate_runtime_security
-from tools.public_repo_safety_check import PRIVATE_RUNTIME_TEXT_PATTERNS
+from tools.public_repo_safety_check import (
+    BROWSER_CONFIG_PRIVATE_PATTERNS,
+    PRIVATE_RUNTIME_TEXT_PATTERNS,
+)
 
 
 def test_safe_defaults(monkeypatch):
@@ -196,3 +199,12 @@ def test_tracked_browser_config_has_no_machine_specific_conversation_state():
     assert tab_pool["excluded_urls"] == []
     assert tab_pool["route_groups"] == []
     assert tab_pool["auto_remember_url_presets"] is False
+
+
+
+def test_browser_config_private_identifier_pattern_rejects_uuid_like_state():
+    sample = "01a0046f-4413-7684-9fdd-079995af4852"
+    assert any(
+        pattern.search(sample)
+        for _, pattern in BROWSER_CONFIG_PRIVATE_PATTERNS
+    )
