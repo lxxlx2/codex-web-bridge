@@ -1571,3 +1571,43 @@ Do not rerun S3 or change candidate code until the final recovery trace and
 result file are inspected. The next diagnostic must compare the result file
 representation and list the completed client commands from
 `post-compaction-recovery.jsonl` without exposing unrelated private history.
+
+
+### Byte-exact post-compaction recovery fix landed after 19d66d8 token-format failure
+
+The failed live run on `19d66d850cb79e1da57b653132a66e66505728fd`
+did not lose or contaminate the durable token. Read-only diagnosis proved:
+
+```text
+actual result bytes = b"ORBIT-5921"
+expected bytes      = b"ORBIT-5921\n"
+contains ORBIT      = yes
+contains EMBER      = no
+final write command contained ORBIT and the result path
+visible final reply = LARGE_CONTEXT_PASS
+```
+
+Root cause: the model recovered the correct token but wrote it without the
+required trailing newline, then treated a textual readback as sufficient
+verification.
+
+Fixes on `standalone-dev`:
+
+- final recovery prompt now requires a newline-preserving write;
+- explicitly forbids newline-dropping write forms;
+- requires a separate byte-level verification of final byte `0x0a`;
+- documents that plain `cat` output cannot prove the newline;
+- adds precise result mismatch classification:
+  `missing_trailing_newline`, `token_format_mismatch`, or
+  `token_value_mismatch`;
+- adds focused regression coverage and troubleshooting/history documentation.
+
+Current candidate HEAD after the fix:
+
+```text
+8c3e76f05d61c910d5c6b9d64ad0531a565129da
+```
+
+The previous `19d66d8...` candidate-bound evidence is invalidated by this
+source/documentation change. Run focused/full local validation and exact-SHA CI
+before the next single live S3 attempt.
