@@ -68,6 +68,7 @@ jobs:
           test -f docs/README.md
           test -f docs/ARCHITECTURE.md
           test -f docs/DEVELOPMENT.md
+          test -f docs/BROWSER_SETUP.md
           test -f docs/TESTING.md
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
@@ -208,6 +209,7 @@ jobs:
           test -f docs/README.md
           test -f docs/ARCHITECTURE.md
           test -f docs/DEVELOPMENT.md
+          test -f docs/BROWSER_SETUP.md
           test -f docs/TESTING.md
           test -f docs/TROUBLESHOOTING.md
           test -f docs/ROADMAP.md
