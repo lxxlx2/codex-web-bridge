@@ -907,3 +907,30 @@ d4eadc2  Record localized generation lifecycle fix
 The broad UWA log also contained an HTTP 413 event, but it is not the failing
 coarse-turn trace. No further S3 run until local focused/full tests and exact-SHA
 CI pass.
+
+
+### Localized-generation regression assertion corrected
+
+The first local run on `d4eadc2...` failed only in the new
+`test_pre_send_probe_uses_same_localized_generation_selectors` assertion.
+Runtime code had serialized the shared selector list into JavaScript via
+`json.dumps(..., ensure_ascii=False)`, so selector-internal double quotes are
+correctly escaped inside the emitted JSON string literal. The test incorrectly
+searched for the unescaped raw CSS substring.
+
+The test now asserts the exact serialized shared selector array injected into
+the pre-send probe JavaScript. Runtime implementation is unchanged.
+
+Current `standalone-dev` head:
+
+```text
+df0ffa0384bb3ba976299cde85169a7c6aabc6ed
+```
+
+Commit:
+
+```text
+df0ffa0  Assert serialized shared generation selectors
+```
+
+Re-run the localized lifecycle regression and full suite before any live S3.
