@@ -1689,3 +1689,33 @@ surface, an exact-ack mismatch, or another probe-level condition.
 
 Do not rerun or modify the candidate until the latest private
 `remote-compaction-probe.log` and sanitized failure trace are inspected.
+
+
+### 8c3e76f coarse round-1 failure narrowed; service recovered healthy
+
+Read-only diagnosis of the failed S3 run showed:
+
+```text
+seed reply exact: YES
+seed tool effects: 0
+coarse round 1: rc=1
+current UWA service: healthy
+browser.connected: true
+request_manager.running_count: 0
+request_manager totals: completed=6, failed=1
+chatgpt_web.surface_ready: true
+chatgpt_web.rate_limited: false
+chatgpt_web.blocking_reason: none
+repo status: clean
+```
+
+The failed-turn trace was not found by the first diagnostic because trigger-probe
+turn traces are stored under `~/.uwa/p1-large-context`, not under the outer
+`~/.uwa/standalone-s3` run directory.
+
+The Web screenshot captured `LARGE_CONTEXT_READY` with a visible generation
+stop control. That is suggestive of a long-lived/unfinished Web generation, but
+it is not sufficient to classify the failure. The next diagnostic must inspect
+the private `trigger-probe-01-coarse.jsonl` event types and bounded error
+messages before deciding whether this is lifecycle, timeout, transport, or an
+external transient failure.
