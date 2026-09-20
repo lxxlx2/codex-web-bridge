@@ -1,5 +1,6 @@
 # Standalone S2 broad regression checkpoint — 2026-09-10
 
+> Historical engineering evidence. This file preserves the state and reasoning from its recorded stage; current release status is determined by exact-candidate gates. See [docs/README.md](README.md) for the current documentation map.\n\n
 ## Status
 
 The extracted standalone ChatGPT executor has passed the broad non-live Codex regression gate on `standalone-dev`.
