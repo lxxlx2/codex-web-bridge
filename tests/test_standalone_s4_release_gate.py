@@ -35,7 +35,22 @@ def _release_tree(root: Path) -> None:
         "docs/RELEASE_TEST_PLAN.md",
         "TEST_PLAN_APPROVED=YES\n",
     )
-    _write(root, "SECURITY.md", "127.0.0.1\nCORS off\nunsafe Python off\n")
+    _write(
+        root,
+        "SECURITY.md",
+        "127.0.0.1\nCORS off\nunsafe Python off\nconversation URL private\n",
+    )
+    _write(
+        root,
+        "config/browser_config.json",
+        (
+            '{"tab_pool":{'
+            '"excluded_urls":[],'
+            '"route_groups":[],'
+            '"auto_remember_url_presets":false'
+            '}}\n'
+        ),
+    )
     _write(
         root,
         "NOTICE.md",
@@ -85,6 +100,44 @@ def test_docs_gate_rejects_stale_status(tmp_path: Path):
 
     with pytest.raises(gate.GateFailure, match="stale_text"):
         gate.check_docs(tmp_path)
+
+
+def test_docs_gate_rejects_release_quick_start_dev_branch(tmp_path: Path):
+    _release_tree(tmp_path)
+    _write(
+        tmp_path,
+        "README.md",
+        "git clone repo\ngit switch standalone-dev\n",
+    )
+
+    with pytest.raises(
+        gate.GateFailure,
+        match="release_quick_start_uses_dev_branch",
+    ):
+        gate.check_docs(tmp_path)
+
+
+def test_security_gate_rejects_tracked_browser_conversation_state(tmp_path: Path):
+    _release_tree(tmp_path)
+    gate.check_security(tmp_path)
+
+    _write(
+        tmp_path,
+        "config/browser_config.json",
+        (
+            '{"tab_pool":{'
+            '"excluded_urls":["https://arena.ai/c/01a0046f-4413-7684-9fdd-079995af4852"],'
+            '"route_groups":[],'
+            '"auto_remember_url_presets":false'
+            '}}\n'
+        ),
+    )
+
+    with pytest.raises(
+        gate.GateFailure,
+        match="tracked_excluded_urls_not_empty",
+    ):
+        gate.check_security(tmp_path)
 
 
 def test_version_gate_requires_rc_version_and_changelog(tmp_path: Path):
