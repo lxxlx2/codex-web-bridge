@@ -9,6 +9,7 @@ from tools.codex_large_context_acceptance import (
     TOKEN,
     WORKSPACE_VALIDATION_COMMAND,
     _final_commands_safe,
+    _result_mismatch_reason,
     _workspace_contains_token,
     _workspace_validation_observed,
     build_filler_prompt,
@@ -70,7 +71,23 @@ def test_prompts_keep_token_conversation_only_until_final_tool_write():
     assert "自动 compaction" in final
     assert "不得随后声称当前会话没有 exec_command" in final
     assert "精确合成令牌仍是当前未完成任务所必需的连续性状态" in final
+    assert "printf '%s\\n'" in final
+    assert "最后一个字节是 0x0a" in final
+    assert "仅用 cat 看到令牌文本不能证明末尾换行存在" in final
     assert "LARGE_CONTEXT_PASS" in final
+
+
+def test_result_mismatch_reason_distinguishes_missing_newline_from_token_loss():
+    assert _result_mismatch_reason((TOKEN + "\n").encode("utf-8")) == ""
+    assert _result_mismatch_reason(TOKEN.encode("utf-8")) == "missing_trailing_newline"
+    assert (
+        _result_mismatch_reason((TOKEN + "\n\n").encode("utf-8"))
+        == "token_format_mismatch"
+    )
+    assert (
+        _result_mismatch_reason(b"OTHER-0000\n")
+        == "token_value_mismatch"
+    )
 
 
 def test_filler_is_deterministic_large_and_has_exact_ack():
