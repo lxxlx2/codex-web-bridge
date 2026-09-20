@@ -1,5 +1,6 @@
 # Standalone S4 install smoke status — 2026-09-17
 
+> Historical engineering evidence. This file preserves the state and reasoning from its recorded stage; current release status is determined by exact-candidate gates. See [docs/README.md](README.md) for the current documentation map.\n\n
 ## Historical gate snapshot
 
 This file is retained as the engineering record for the S4 install-smoke false negative discovered on 2026-09-17. It is not the source of truth for the current release candidate.
