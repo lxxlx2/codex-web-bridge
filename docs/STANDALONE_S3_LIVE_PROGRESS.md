@@ -1660,3 +1660,32 @@ conclusion=success
 
 Local focused/full/safety/dependency validation is already green, so this
 candidate is cleared for the next single full S3 live attempt.
+
+
+### 8c3e76f live S3 failed during remote compaction probe
+
+Exact candidate:
+
+```text
+8c3e76f05d61c910d5c6b9d64ad0531a565129da
+```
+
+The next candidate-bound S3 run passed release preflight, browser-surface
+preflight, repository preflight, listener startup, local gates, and restart
+continuity, then failed before the compaction cooldown:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+STANDALONE_S3=FAIL
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+The controlled ChatGPT page visibly showed `LARGE_CONTEXT_READY`, which proves
+the large-context seed turn reached the Web surface. This alone does not
+identify whether the probe failed on a later coarse/fine/arm turn, a rate-limit
+surface, an exact-ack mismatch, or another probe-level condition.
+
+Do not rerun or modify the candidate until the latest private
+`remote-compaction-probe.log` and sanitized failure trace are inspected.
