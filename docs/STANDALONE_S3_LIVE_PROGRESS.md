@@ -1466,3 +1466,36 @@ status=in_progress
 ```
 
 Do not create the RC tag until this main-branch CI run completes successfully.
+
+
+### 19d66d8 pre-release onboarding/hygiene candidate local validation passed
+
+Exact candidate:
+
+```text
+19d66d850cb79e1da57b653132a66e66505728fd
+```
+
+The final pre-tag onboarding/repository-hygiene batch was pulled and validated locally:
+
+```text
+git diff --check: PASS
+release hygiene regression: 27 passed
+public repository safety: PASS
+standalone dependency audit: PASS
+full suite: 528 passed, 22 warnings
+final worktree status: clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+The candidate includes contributor onboarding, durable architecture/testing/
+troubleshooting/roadmap documentation, controlled-browser setup guidance,
+machine-specific browser-route-state removal from tracked defaults, strengthened
+public-repository safety/S4 checks, and a tagged-source smoke runner.
+
+Because this batch changes the candidate SHA, previous candidate-bound S3,
+Desktop E2E, install-smoke, and S4 evidence from `8344323...` does not apply to
+this new candidate. Next gate: exact-SHA CI, then regenerate the candidate-bound
+live/release matrix.
