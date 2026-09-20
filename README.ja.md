@@ -11,7 +11,7 @@ Codex Web Bridge は、Codex Desktop / Codex CLI のモデル推論リクエス�
 
 ## クイックスタート
 
-開発中は `standalone-dev` を使用します。
+通常利用は `main` または Release tag を使用し、開発参加時は `standalone-dev` を使用します。
 
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
