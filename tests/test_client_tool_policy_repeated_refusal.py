@@ -389,6 +389,102 @@ def test_roundtrip_repairs_live_missing_task_clarification_into_exec(monkeypatch
     assert "large_context/result.txt" in seen[1][1]["content"]
     assert "Do not ask for the task" not in seen[1][1]["content"]
 
+def test_declared_workspace_tool_absence_claim_is_repaired_without_surviving_history(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    refusal = (
+        "当前运行环境没有暴露 `exec_command` 或 `write_stdin`，"
+        "因此这一轮无法真实写入并验证 "
+        "`/Users/jerson/uwa-codex-acceptance/large_context/result.txt`。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[
+            {
+                "role": "user",
+                "content": "continue",
+            }
+        ],
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_declared_tool_absence_after_compaction_history_loss(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    refusal = (
+        "当前运行环境没有暴露 `exec_command` 或 `write_stdin`，"
+        "因此这一轮无法真实写入并验证结果文件。"
+    )
+
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=[
+            {
+                "role": "user",
+                "content": "continue",
+            }
+        ],
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+
+
+def test_declared_tool_absence_claim_is_not_repaired_when_tool_choice_none(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+
+    refusal = (
+        "当前运行环境没有暴露 `exec_command`，因此无法继续。"
+    )
+
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[{"role": "user", "content": "continue"}],
+        tools=EXEC_TOOLS,
+        tool_choice="none",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is False
+
+
 def test_unmarked_function_output_text_does_not_gain_authoritative_provenance(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     refusal = (
