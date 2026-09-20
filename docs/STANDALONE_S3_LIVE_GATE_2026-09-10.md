@@ -1303,3 +1303,34 @@ reappearing Stop state cannot release the previous turn as completed.
 The runtime now re-validates generation during final settle, adds a
 composer-scoped ChatGPT Stop metadata fallback, and fails closed if generation
 remains active through the bounded settle grace.
+
+
+## 2026-09-21 Recursive-compaction declared-tool provenance gap
+
+Candidate `cd220a98f5630f8fffc8995aa6cfc2168c499d14` completed the
+remote-compaction probe and cooldown, then failed the post-compaction recovery
+final contract.
+
+Sanitized trace and metadata-only wire evidence showed:
+
+```text
+durable token retained: ORBIT-5921
+workspace validation exec_command: completed
+two later exec_command calls: completed
+final result file: missing
+final assistant claim: exec_command/write_stdin are not exposed
+current request tool_names: still includes exec_command and write_stdin
+final request after recursive compaction:
+  function_call_output_count = 0
+  surviving immediate tool history = absent
+```
+
+The existing repair policy recognized this wording only when local-workspace
+intent or prior tool provenance still survived in the ChatRequest messages.
+Recursive compaction can remove exactly that evidence even while the current
+Responses request still declares the real client tools.
+
+The repair invariant is now based on the stronger protocol fact: if the current
+request declares a workspace client tool, a text-only claim that the same tool
+is unavailable/not exposed is contradictory and must be repaired. The narrow
+rule continues to respect `tool_choice="none"`.
