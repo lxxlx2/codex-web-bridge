@@ -797,7 +797,13 @@ def _run_remote_compaction_recovery(
     except OSError as exc:
         raise GateFailure("post_compaction_recovery", "result_file_missing") from exc
     if actual != large_context.TOKEN + "\n":
-        raise GateFailure("post_compaction_recovery", "token_mismatch")
+        reason = large_context._result_mismatch_reason(
+            actual.encode("utf-8")
+        )
+        raise GateFailure(
+            "post_compaction_recovery",
+            f"result_{reason or 'mismatch'}",
+        )
     _wait_request_cleanup()
 
 
