@@ -2136,3 +2136,39 @@ higher-level markers.
 Next release evidence: begin the first full S3 success attempt on this exact
 candidate. A failed attempt must be diagnosed before any retry and does not
 count toward the required three successful S3 results.
+
+
+### 523fa23 S3 attempt #1 blocked by ChatGPT Web rate limit
+
+Exact candidate:
+
+```text
+523fa237815325cbacbd805e1142d51950546834
+```
+
+The first new release-confidence S3 attempt passed release/browser/repository
+preflight, local gates, restart continuity, the remote-compaction probe, and the
+180-second post-probe cooldown.
+
+The inner core then failed post-compaction recovery with:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+Immediately after the core failure, the outer live wrapper's passive surface
+re-check detected a stable external ChatGPT Web rate limit, safely dismissed the
+acknowledgement-only notice, and exposed the final operator-facing failure as:
+
+```text
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+FAILURE_DETAIL=rate_limited
+```
+
+This attempt does not count toward the required three successful S3 runs.
+Do not rerun immediately. Inspect the post-compaction recovery trace
+read-only to determine whether the inner final-reply mismatch was merely the
+rate-limited Web surface becoming visible or an independent product behavior.
+No source change is justified from the outer rate-limit classification alone.
