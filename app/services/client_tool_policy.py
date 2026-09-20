@@ -658,6 +658,162 @@ def looks_like_false_acceptance_workspace_mismatch(
     )
 
 
+def _successful_workspace_commands(
+    messages: List[Dict[str, Any]],
+) -> List[str]:
+    """Return completed exit-zero exec-like commands paired with real tool results."""
+
+    calls: Dict[str, str] = {}
+    successful: List[str] = []
+
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for item in tool_calls:
+                if not isinstance(item, dict):
+                    continue
+                if _tool_name(item) not in _EXEC_LIKE_TOOLS:
+                    continue
+                call_id = str(item.get("id") or "").strip()
+                args = _decode_tool_arguments(item)
+                command = str(
+                    args.get("cmd")
+                    or args.get("command")
+                    or ""
+                ).strip()
+                if call_id and command:
+                    calls[call_id] = command
+
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"tool", "function"}:
+            continue
+
+        call_id = str(
+            message.get("tool_call_id")
+            or message.get("call_id")
+            or ""
+        ).strip()
+        command = calls.get(call_id, "")
+        if command and _tool_result_exit_zero(message):
+            successful.append(command)
+
+    return successful
+
+
+def _acceptance_success_contract(
+    assistant_text: str,
+    messages: List[Dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Return the exact synthetic success marker/result path requested by the user."""
+
+    final = str(assistant_text or "").strip()
+    contracts = {
+        "CONTEXT_PASS": "context/result.txt",
+        "LARGE_CONTEXT_PASS": "large_context/result.txt",
+    }
+    result_path = contracts.get(final)
+    if not result_path:
+        return None
+
+    searchable: List[str] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        searchable.append(_message_content_text(message))
+        private = message.get("_uwa_compacted_continuation_context")
+        if isinstance(private, str):
+            searchable.append(private)
+
+    combined = "\n".join(searchable)
+    if final not in combined or result_path not in combined:
+        return None
+    return final, result_path
+
+
+def _command_writes_result_path(command: str, result_path: str) -> bool:
+    value = str(command or "")
+    if result_path not in value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            ">",
+            "write_text",
+            "write_bytes",
+            "tee ",
+        )
+    )
+
+
+def _command_reads_result_path(command: str, result_path: str) -> bool:
+    value = str(command or "")
+    if result_path not in value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            "cat ",
+            "read_text",
+            "read_bytes",
+            "xxd ",
+            "od ",
+            "hexdump ",
+            "open(",
+        )
+    )
+
+
+def looks_like_premature_acceptance_success(
+    assistant_text: str,
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Detect a synthetic PASS returned after validation but before required effects.
+
+    This is deliberately limited to the repository's acceptance sentinels and
+    real paired client-tool history. It does not infer generic business-task
+    correctness from arbitrary shell commands.
+    """
+
+    contract = _acceptance_success_contract(
+        assistant_text,
+        messages,
+    )
+    if contract is None:
+        return False
+
+    if not _successful_acceptance_workspace_validation_observed(
+        messages
+    ):
+        return False
+
+    _marker, result_path = contract
+    commands = _successful_workspace_commands(messages)
+
+    write_index: int | None = None
+    for index, command in enumerate(commands):
+        if _command_writes_result_path(
+            command,
+            result_path,
+        ):
+            write_index = index
+            break
+
+    if write_index is None:
+        return True
+
+    return not any(
+        index > write_index
+        and _command_reads_result_path(
+            command,
+            result_path,
+        )
+        for index, command in enumerate(commands)
+    )
+
+
 def _decode_tool_arguments(tool_call: Dict[str, Any]) -> Dict[str, Any]:
     function_data = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
     raw = function_data.get("arguments")
@@ -782,6 +938,15 @@ def should_repair_client_workspace_refusal(
         # Backward-compatible path for older in-memory normalized messages that
         # predate the private provenance marker.
         workspace_tool_provenance = True
+
+    if (
+        has_history
+        and looks_like_premature_acceptance_success(
+            assistant_text,
+            messages,
+        )
+    ):
+        return True
 
     if (
         has_history
@@ -979,6 +1144,25 @@ def build_client_workspace_repair_messages(
             "Use the command/action required by the Original user request. "
             "Do not invent a result; the client will execute the emitted call."
         )
+    elif looks_like_premature_acceptance_success(
+        assistant_text,
+        messages,
+    ):
+        correction = (
+            "The previous reply returned the acceptance success sentinel before the requested workspace effects "
+            "were proven. A successful workspace-validation exec_command is only the first step. The acceptance "
+            "request still requires creating the specified result file and then performing a separate client-tool "
+            "readback/verification before the success sentinel is valid."
+        )
+        if repeated:
+            correction += (
+                " This premature success has already repeated. Do not return the success sentinel again until the "
+                "remaining write and readback steps have completed successfully."
+            )
+        action = (
+            f"Call {preferred_name} now to execute the next unfinished post-validation workspace step from the "
+            "Original user request. Return only the corrected tool-call output."
+        )
     elif looks_like_false_acceptance_workspace_mismatch(
         assistant_text,
         messages,
@@ -1096,6 +1280,7 @@ __all__ = [
     "looks_like_compacted_state_only_acknowledgement",
     "looks_like_post_tool_unavailable_claim",
     "looks_like_false_acceptance_workspace_mismatch",
+    "looks_like_premature_acceptance_success",
     "should_repair_client_workspace_refusal",
     "user_explicitly_requested_root_workdir",
 ]
