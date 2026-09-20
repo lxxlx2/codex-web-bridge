@@ -304,12 +304,15 @@ def check_release_confidence(
     try:
         s3_pass_count = int(values.get("RELEASE_CONFIDENCE_S3_PASS_COUNT", "0") or 0)
         s3_windows = int(values.get("RELEASE_CONFIDENCE_S3_TIME_WINDOWS", "0") or 0)
+        s3_span_seconds = int(values.get("RELEASE_CONFIDENCE_S3_SPAN_SECONDS", "0") or 0)
     except ValueError as exc:
         raise GateFailure("release_confidence", "invalid_numeric_evidence") from exc
     if s3_pass_count < 3:
         raise GateFailure("release_confidence", f"s3_pass_count={s3_pass_count}")
     if s3_windows < 2:
         raise GateFailure("release_confidence", f"s3_time_windows={s3_windows}")
+    if s3_span_seconds < 7200:
+        raise GateFailure("release_confidence", f"s3_span_seconds={s3_span_seconds}")
     if values.get("candidate_commit", "") != expected_candidate:
         raise GateFailure("release_confidence", "candidate_sha_mismatch")
 
