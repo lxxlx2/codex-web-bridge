@@ -2106,3 +2106,33 @@ conclusion=success
 The candidate is cleared to begin candidate-bound release evidence, starting
 with clean-checkout install / official rollback smoke before the first new S3
 success attempt.
+
+
+### 523fa23 clean-checkout install / rollback smoke passed
+
+Exact candidate:
+
+```text
+523fa237815325cbacbd805e1142d51950546834
+```
+
+Local candidate-bound install smoke completed successfully:
+
+```text
+INSTALL_SMOKE=PASS
+DEPENDENCY_BOOTSTRAP=PASS
+ACCEPTANCE_TARGET_RESET=PASS
+OFFICIAL_ROLLBACK=PASS
+BASIC_CODEX_REQUEST=PASS
+AUTH=UNCHANGED
+worktree=clean
+```
+
+The smoke runner's private result contract also records
+`WRAPPER_ROOT=PASS`, `LISTENER_OWNERSHIP=PASS`, and the exact
+`candidate_commit` on success. The console intentionally prints only the
+higher-level markers.
+
+Next release evidence: begin the first full S3 success attempt on this exact
+candidate. A failed attempt must be diagnosed before any retry and does not
+count toward the required three successful S3 results.
