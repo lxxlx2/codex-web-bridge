@@ -1761,3 +1761,29 @@ cd220a98f5630f8fffc8995aa6cfc2168c499d14
 This source change invalidates prior exact-candidate live evidence. Run focused,
 release-hygiene, full-suite, safety, and dependency validation before another
 single S3 live attempt.
+
+
+### cd220a9 local final-settle regression validation passed
+
+Exact candidate:
+
+```text
+cd220a98f5630f8fffc8995aa6cfc2168c499d14
+```
+
+Local validation after the final-settle generation race fix:
+
+```text
+stream terminal regression:      12 passed
+large-context + S3 regression:   38 passed
+release hygiene regression:      27 passed
+public repository safety:        PASS
+standalone dependency audit:     PASS
+full suite:                      531 passed, 22 warnings
+worktree:                        clean
+```
+
+The warnings remain the known FastAPI/Python 3.14
+`asyncio.iscoroutinefunction` deprecations.
+
+Next gate: exact-SHA CI must be green before another single full S3 live run.
