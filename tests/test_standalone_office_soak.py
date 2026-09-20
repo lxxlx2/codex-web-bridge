@@ -200,6 +200,35 @@ def test_context_resume_must_keep_same_thread(
     assert rc == 1
 
 
+def test_run_turn_wraps_core_transport_failure_for_surface_classification(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        soak.core,
+        "_run_codex_turn",
+        lambda **kwargs: (_ for _ in ()).throw(
+            soak.core.GateFailure("subprocess_timeout", "timeout=60s")
+        ),
+    )
+
+    with pytest.raises(
+        soak.GateFailure,
+        match="subprocess_timeout:timeout=60s",
+    ) as exc:
+        soak._run_turn(
+            codex="/usr/bin/codex",
+            root=tmp_path,
+            prompt="synthetic",
+            trace_path=tmp_path / "trace.jsonl",
+            thread_id=None,
+            timeout_sec=60,
+            require_tool_effect=False,
+        )
+
+    assert exc.value.gate == "office_soak_codex_turn"
+
+
 def test_surface_rate_limit_reclassifies_live_turn_failure(
     tmp_path: Path,
     monkeypatch,
