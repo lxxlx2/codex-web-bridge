@@ -1421,3 +1421,24 @@ This proves `main` can be fast-forwarded directly to the exact validated
 candidate without creating a new release SHA. The next release action is the
 main fast-forward, followed by exact main/candidate verification and creation of
 the `v0.1.0-rc.1` tag only if the fast-forward succeeds unchanged.
+
+
+### First main fast-forward command was malformed locally
+
+The first operator push attempt did not modify `main`. Git rejected the local
+refspec before contacting the remote branch update path:
+
+```text
+error: src refspec 83443230f853e1f6aaf88dadc174831fba7acfecefs/heads/main does not match any
+```
+
+Remote refs remain:
+
+```text
+main=fa9c8979ce0a71ab44a635a5c29a4cb154a62df6
+standalone-dev=83443230f853e1f6aaf88dadc174831fba7acfec
+```
+
+This is an operator command formatting issue only. No release evidence is
+invalidated and no candidate contents changed. Retry with a single-line explicit
+refspec using the frozen SHA.
