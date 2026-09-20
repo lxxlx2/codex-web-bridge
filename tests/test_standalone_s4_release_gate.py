@@ -121,12 +121,17 @@ def test_security_gate_rejects_tracked_browser_conversation_state(tmp_path: Path
     _release_tree(tmp_path)
     gate.check_security(tmp_path)
 
+    conversation_url = (
+        "https://arena.ai"
+        + "/c/"
+        + "01a0046f-4413-7684-9fdd-079995af4852"
+    )
     _write(
         tmp_path,
         "config/browser_config.json",
         (
             '{"tab_pool":{'
-            '"excluded_urls":["https://arena.ai' + '/c/' + '01a0046f-4413-7684-9fdd-079995af4852"],'
+            f'"excluded_urls":["{conversation_url}"],'
             '"route_groups":[],'
             '"auto_remember_url_presets":false'
             '}}\n'
