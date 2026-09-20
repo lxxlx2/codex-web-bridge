@@ -155,6 +155,8 @@ v0.1.0
 
 Contributors should start with [CONTRIBUTING.md](CONTRIBUTING.md). Local setup/configuration is documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and post-release work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the RC platform, browser/CDP, account-limit, and retained-runtime constraints.
+
 ## Security and privacy
 
 Conservative release defaults:
