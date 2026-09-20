@@ -19,7 +19,12 @@ Release-candidate scope for Codex Web Bridge:
 - Hardened post-compaction large-context recovery to require byte-exact trailing-newline verification and added precise result-mismatch classification.
 - Hardened stream terminal completion against a final-settle generation reappearance race and added composer-scoped Stop-state detection plus diagnostic source logging.
 - Repaired recursive-compaction tool-availability contradictions directly from the current declared client-tool schema, even when immediate function-call provenance has been compacted away.
-- Release evidence is exact-candidate-bound: final S3 live closure, Desktop E2E, clean-install smoke, CI, S4, main CI, and tagged-source smoke are required in the documented order before the GitHub Release.
+- Added release-hardening documentation for the project core goal, single-backend fail-closed policy, maintainer handoff, test ownership, tooling ownership, and release reliability model.
+- Added an office-work live soak covering context continuity, multi-file edits, real failure recovery, Git diff discipline, and interactive processes with independent effect verification.
+- Added a release-confidence aggregator that requires at least three successful full S3 runs on the exact candidate across at least two two-hour UTC evidence windows, plus a candidate-bound office-work soak.
+- Strengthened S4 so repeated-live release confidence is required before the final local release gate can pass.
+- Strengthened the synthetic Desktop acceptance checker so the multi-file scenario verifies the expected changed-file scope instead of trusting only the test result.
+- Release evidence is exact-candidate-bound: deterministic regression, exact-SHA CI, clean-install smoke, repeated S3 live passes, office-work soak, release-confidence aggregation, Desktop E2E, S4, main CI, and tagged-source smoke are required before the GitHub Release.
 
 ## Unreleased
 
