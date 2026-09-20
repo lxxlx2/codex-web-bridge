@@ -120,14 +120,20 @@ def _run_turn(
     timeout_sec: int,
     require_tool_effect: bool,
 ):
-    obs = core._run_codex_turn(
-        codex=codex,
-        cwd=root,
-        prompt=prompt,
-        trace_path=trace_path,
-        thread_id=thread_id,
-        timeout_sec=timeout_sec,
-    )
+    try:
+        obs = core._run_codex_turn(
+            codex=codex,
+            cwd=root,
+            prompt=prompt,
+            trace_path=trace_path,
+            thread_id=thread_id,
+            timeout_sec=timeout_sec,
+        )
+    except core.GateFailure as exc:
+        raise GateFailure(
+            "office_soak_codex_turn",
+            f"{exc.gate}:{exc.detail or exc.gate}",
+        ) from exc
     if obs.returncode != 0:
         raise GateFailure("office_soak_codex_turn", f"rc={obs.returncode}")
     if require_tool_effect and obs.tool_effect_count < 1:
