@@ -144,4 +144,18 @@ focused/static
 
 If any source or documentation file changes before the tag, treat the new commit as a new candidate and regenerate the candidate-bound gates required by the release policy.
 
+After creating the tag, use a fresh checkout of that tag and run:
+
+```bash
+.venv/bin/python tools/standalone_tagged_source_smoke.py
+```
+
+Required result:
+
+```text
+TAGGED_SOURCE_SMOKE=PASS
+```
+
+The release smoke checks tag identity, version, required public files, repository cleanliness, public-repository safety, and dependency closure.
+
 See [RELEASE_TEST_PLAN.md](RELEASE_TEST_PLAN.md) for the full formal matrix.
