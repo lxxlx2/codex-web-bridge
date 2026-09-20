@@ -233,6 +233,74 @@ def test_browser_delta_chat_request_preserves_tool_provenance():
     assert delta.messages[1]["tool_call_id"] == "call_write"
 
 
+def test_affinity_tool_result_delta_carries_private_compacted_continuation():
+    tools = [
+        {
+            "type": "function",
+            "name": "exec_command",
+            "description": "Run a command in the local client workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"cmd": {"type": "string"}},
+                "required": ["cmd"],
+            },
+        }
+    ]
+    compacted = (
+        "[Compacted prior context]\n"
+        "[DURABLE EXACT STATE]\n"
+        "ORBIT-5921\n"
+        "[ACTIVE CONTINUATION STATE]\n"
+        "Workspace validation is complete. Use exec_command to write "
+        "large_context/result.txt with ORBIT-5921, read it back, then return "
+        "LARGE_CONTEXT_PASS."
+    )
+    incoming = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_previous",
+        input=[
+            {
+                "type": "function_call_output",
+                "call_id": "call_after_compaction",
+                "output": (
+                    "Process exited with code 0\n"
+                    "Final output: large_context/result.txt: MISSING\n"
+                ),
+            }
+        ],
+        stream=True,
+        tools=tools,
+    )
+    state_chat = ChatRequest(
+        model="chatgpt",
+        messages=[
+            {"role": "assistant", "content": compacted},
+            {
+                "role": "user",
+                "content": (
+                    "[Function Call Output (call_after_compaction)]\n"
+                    "Process exited with code 0\n"
+                    "Final output: large_context/result.txt: MISSING\n"
+                ),
+                "_uwa_function_output_fallback": True,
+                "_uwa_function_output_call_id": "call_after_compaction",
+            },
+        ],
+        stream=False,
+        tools=tools,
+    )
+
+    delta = _browser_delta_chat_request(
+        state_chat,
+        incoming,
+    )
+
+    assert len(delta.messages) == 1
+    message = delta.messages[0]
+    assert message["_uwa_function_output_fallback"] is True
+    assert message["_uwa_compacted_continuation_context"] == compacted
+
+
 def test_affinity_tool_result_delta_enables_post_tool_workspace_repair():
     from app.services.client_tool_policy import (
         should_repair_client_workspace_refusal,
