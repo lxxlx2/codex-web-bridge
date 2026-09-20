@@ -2344,3 +2344,25 @@ The candidate therefore remains `0339fad80357f5e41e0ca23b21f5b71fd8053f9e`.
 This attempt counts as zero successful S3 evidence. Do not rerun immediately;
 the next S3 invocation will also honor the persisted recent-rate-limit marker
 and adaptive cooldown/pacing.
+
+
+### 0339fad S3 attempt #2 failed at restart-resume result-file verification
+
+Exact candidate:
+
+```text
+0339fad80357f5e41e0ca23b21f5b71fd8053f9e
+```
+
+The next S3 attempt passed release/browser/repository preflight, route setup,
+listener startup, and local gates, then failed during restart continuity before
+the compaction phase:
+
+```text
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=result_file_missing
+```
+
+No outer rate-limit classification was emitted for this attempt. This is a
+candidate/product-level acceptance failure until proven otherwise and must be
+diagnosed read-only before any rerun.
