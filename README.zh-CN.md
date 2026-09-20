@@ -8,26 +8,15 @@ Codex Web Bridge 是一个非官方本地桥接项目，用于把 Codex Desktop 
 
 ## 当前状态
 
-首个 RC 已进入 candidate-bound 最终验收。发布证据必须全部对应同一个 candidate commit：
+首个 RC 采用 exact-candidate 发布策略。CI、S3 live、Codex Desktop E2E、clean-install smoke 和 S4 release gate 必须全部对应同一个 release commit；代码或文档改变 HEAD 后，受影响的 candidate-bound evidence 必须重新生成。
 
-```text
-S1 / S2                                         PASS / CLOSED
-standalone non-live regression                  PASS
-Codex Desktop E2E                               REQUIRED ON CANDIDATE
-S3 CLI/live parity                              REQUIRED: PASS_LIVE_CLOSED
-clean-checkout install smoke                    REQUIRED
-S4 docs/version/security/provenance gate        REQUIRED
-CI                                              REQUIRED
-```
-
-standalone 真实 Codex Desktop 路径已经证明同线程上下文、真实本地工具执行、`uwa / chatgpt / high` 路由和 request cleanup。最终发布仍以当前 HEAD 的 Desktop、S3、install smoke 与 S4 gate 结果为准；HEAD 改变后必须重新生成受影响的证据。
+开发入口、架构、测试矩阵和历史问题索引见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/README.md](docs/README.md)。
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/lxxlx2/codex-web-bridge.git
 cd codex-web-bridge
-git switch standalone-dev
 python3 tools/install_codex_uwa_commands.py
 export PATH="$HOME/bin:$PATH"
 ```
