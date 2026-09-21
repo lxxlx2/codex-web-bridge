@@ -797,23 +797,58 @@ def _acceptance_effect_progress(
     return True, readback_after_write
 
 
+def _looks_like_acceptance_step_execution_stall(
+    assistant_text: str,
+    marker: str,
+) -> bool:
+    """Match a narrow synthetic step-stall final tied to the requested PASS marker."""
+
+    value = str(assistant_text or "").strip()
+    if not value:
+        return False
+
+    marker_pattern = (
+        rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])"
+    )
+    if re.search(marker_pattern, value) is None:
+        return False
+
+    return re.search(
+        r"(?:第二步|第三步|step\s*(?:2|3))"
+        r".{0,60}(?:未能|无法|不能|could\s+not|couldn't|unable)"
+        r".{0,100}(?:exec_command|shell_command|local_shell)"
+        r".{0,80}(?:执行|调用|run|execute|call)"
+        r".{0,120}(?:不能|无法|不可|cannot|can't|could\s+not|unable)"
+        r".{0,60}(?:回复|返回|reply|return)",
+        value,
+        re.IGNORECASE | re.DOTALL,
+    ) is not None
+
+
 def looks_like_incomplete_acceptance_continuation(
     assistant_text: str,
     messages: List[Dict[str, Any]],
 ) -> bool:
-    """Detect exact ACCEPTANCE_INCOMPLETE while required synthetic effects remain."""
-
-    if str(assistant_text or "").strip() != "ACCEPTANCE_INCOMPLETE":
-        return False
+    """Detect a narrowly unfinished synthetic acceptance continuation."""
 
     contract = _acceptance_contract_from_messages(messages)
     if contract is None:
         return False
 
-    _marker, result_path = contract
+    marker, result_path = contract
     if not _successful_acceptance_workspace_validation_observed(
         messages,
         result_path=result_path,
+    ):
+        return False
+
+    value = str(assistant_text or "").strip()
+    if (
+        value != "ACCEPTANCE_INCOMPLETE"
+        and not _looks_like_acceptance_step_execution_stall(
+            value,
+            marker,
+        )
     ):
         return False
 
@@ -1259,11 +1294,11 @@ def build_client_workspace_repair_messages(
         )
         if write_observed:
             correction = (
-                "The previous reply returned exact ACCEPTANCE_INCOMPLETE even though the synthetic acceptance "
-                "request still has one demonstrably unfinished workspace effect. The result-file write already "
-                f"completed successfully. Do not rewrite {result_path}. The next required effect is a separate "
-                "client-tool readback/verification of the existing result file, including the trailing-newline "
-                "requirement from the original acceptance request."
+                "The previous reply stopped the synthetic acceptance request even though it still has one "
+                "demonstrably unfinished workspace effect. The result-file write already completed successfully. "
+                f"Do not rewrite {result_path}. The next required effect is a separate client-tool "
+                "readback/verification of the existing result file, including the trailing-newline requirement "
+                "from the original acceptance request."
             )
             if repeated:
                 correction += (
@@ -1276,8 +1311,8 @@ def build_client_workspace_repair_messages(
             )
         else:
             correction = (
-                "The previous reply returned exact ACCEPTANCE_INCOMPLETE while the synthetic acceptance request "
-                "still has unfinished workspace effects. The workspace validation already completed successfully, "
+                "The previous reply stopped the synthetic acceptance request while required workspace effects "
+                "remain unfinished. The workspace validation already completed successfully, "
                 f"but a successful write of {result_path} has not yet been proven. Continue from that next "
                 "unfinished step; do not repeat the successful workspace validation."
             )
