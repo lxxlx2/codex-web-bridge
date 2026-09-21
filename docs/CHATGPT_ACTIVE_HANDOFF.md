@@ -463,3 +463,37 @@ Classification is unresolved pending read-only inspection of the latest
 Do not modify source yet. Determine the final assistant text, successful workspace
 command sequence, whether validation/write/readback all occurred, and whether the
 result bytes exactly match the retained token plus trailing newline.
+
+
+## 2026-09-21 post-compaction no-task acknowledgement repaired
+
+Read-only private evidence from candidate `d798bd123345970d76d473924b4ef30d9a30a869` showed:
+
+```text
+workspace validation: completed, exit 0
+result write:         missing
+result readback:      missing
+result file:          missing
+turn terminal:        completed
+trace error:          none
+assistant final:
+已续接当前状态，并保留精确值 ORBIT-5921。
+当前消息里没有新的验收命令、目标文件或预期输出，因此没有可执行的下一步。
+直接发下一条验收指令即可。
+```
+
+The exact durable token survived compaction and the real validation tool call succeeded, but the model ignored the unresolved ACTIVE CONTINUATION STATE.
+
+ChatGPT repaired this directly on `standalone-dev`.
+
+New candidate:
+
+```text
+c18a990e371eb391a59320b6853de96e47dddebe
+```
+
+The change extends the existing compacted missing-task/state-only acknowledgement detection only under authoritative compacted workspace intent/provenance. It covers the live wording about no new acceptance command, target file, expected output, or executable next step, plus the state-resume wording about retaining an exact value. Ordinary state acknowledgements without compacted workspace intent remain non-actionable.
+
+Regression coverage includes the exact live wording, tool roundtrip recovery, and an unrelated state-only control.
+
+All positive candidate-bound evidence from `d798bd1...` is historical after this source/release-document change. The exact-SHA CI run for `c18a990...` is Standalone CI #876.
