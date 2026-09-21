@@ -514,6 +514,21 @@ _MISSING_TASK_CLARIFICATION_PATTERNS = (
         r".{0,40}(?:新的?)?(?:具体)?(?:执行)?(?:任务|操作|步骤)",
         re.IGNORECASE | re.DOTALL,
     ),
+    # post_compaction_no_new_acceptance_instruction:
+    # Live S3 wording after successful post-compaction workspace validation:
+    # "当前消息里没有新的验收命令、目标文件或预期输出，因此没有可执行的下一步。"
+    # The model retained the exact durable token but incorrectly ignored the
+    # unresolved ACTIVE CONTINUATION STATE. This matcher is only actionable
+    # when compacted workspace intent/provenance is authoritative.
+    re.compile(
+        r"(?:当前|这条|本轮|这轮)?(?:消息|请求|输入)"
+        r".{0,40}(?:没有|未|并未|不包含)"
+        r".{0,60}(?:新的?)?"
+        r"(?:验收命令|验证命令|目标文件|预期输出)"
+        r".{0,120}(?:没有|无|不存在)"
+        r".{0,40}(?:可执行的?)?(?:下一步|后续步骤|操作)",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 
@@ -532,6 +547,11 @@ _COMPACTED_STATE_ONLY_ACK_PATTERNS = (
         r"(?:当前)?上下文.{0,20}(?:已|已经)?恢复"
         r".{0,80}(?:精确值|精确令牌|需要保留|继续保留|remember|retained)"
         r".{0,80}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:已|已经)?(?:续接|承接|恢复).{0,20}(?:当前)?(?:状态|上下文)"
+        r".{0,80}(?:保留|记住|恢复).{0,40}(?:精确值|精确令牌|精确测试值)",
         re.IGNORECASE | re.DOTALL,
     ),
     re.compile(
