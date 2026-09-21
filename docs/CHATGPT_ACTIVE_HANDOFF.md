@@ -497,3 +497,41 @@ The change extends the existing compacted missing-task/state-only acknowledgemen
 Regression coverage includes the exact live wording, tool roundtrip recovery, and an unrelated state-only control.
 
 All positive candidate-bound evidence from `d798bd1...` is historical after this source/release-document change. The exact-SHA CI run for `c18a990...` is Standalone CI #876.
+
+
+## 2026-09-21 CI completed for c18a990 candidate
+
+Exact-SHA Standalone CI run `#876` completed successfully for:
+
+```text
+c18a990e371eb391a59320b6853de96e47dddebe
+```
+
+All jobs passed:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+The codex-regression job reported:
+
+```text
+542 passed, 22 warnings
+```
+
+Next required candidate-bound evidence on the user's Mac is:
+
+```text
+focused tests
+full suite
+public safety
+dependency audit
+install smoke
+S3 live
+```
+
+All prior positive evidence belongs to older SHAs and must not be counted for `c18a990...`.
