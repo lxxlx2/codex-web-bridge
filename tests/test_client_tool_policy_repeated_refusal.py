@@ -934,6 +934,88 @@ def test_roundtrip_repairs_live_missing_task_clarification_into_exec(monkeypatch
     assert "large_context/result.txt" in seen[1][1]["content"]
     assert "Do not ask for the task" not in seen[1][1]["content"]
 
+def test_live_no_new_acceptance_instruction_ack_is_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    acknowledgement = (
+        "已续接当前状态，并保留精确值 `ORBIT-5921`。\n\n"
+        "当前消息里没有新的验收命令、目标文件或预期输出，"
+        "因此没有可执行的下一步。直接发下一条验收指令即可。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": acknowledgement,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=acknowledgement,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_no_new_acceptance_instruction_into_exec(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+
+    acknowledgement = (
+        "已续接当前状态，并保留精确值 `ORBIT-5921`。\n\n"
+        "当前消息里没有新的验收命令、目标文件或预期输出，"
+        "因此没有可执行的下一步。直接发下一条验收指令即可。"
+    )
+    replies = iter(
+        [
+            acknowledgement,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=_generated_affinity_delta_with_compacted_context(),
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "ACTIVE CONTINUATION STATE" in seen[1][1]["content"]
+    assert "large_context/result.txt" in seen[1][1]["content"]
+
+
+def test_state_only_resume_ack_without_compacted_workspace_state_is_not_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    acknowledgement = "已续接当前状态，并保留精确值 `ORBIT-5921`。"
+    parsed = {
+        "mode": "final",
+        "content": acknowledgement,
+        "tool_calls": [],
+    }
+
+    assert should_repair_client_workspace_refusal(
+        messages=[{"role": "user", "content": "Acknowledge state only."}],
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=acknowledgement,
+        parsed=parsed,
+    ) is False
+
+
 def test_live_no_new_task_ack_is_repaired_from_private_compacted_context(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     acknowledgement = (
