@@ -365,3 +365,59 @@ No outer ChatGPT Web limiter classification was printed for this attempt.
 Classification is therefore unresolved pending inspection of the private `restart-resume.jsonl` evidence. The first successful S3 evidence remains valid for the unchanged candidate, but this failed attempt does not count toward release confidence.
 
 Do not modify source until the trace establishes the exact final assistant message and completed workspace effects.
+
+
+## 2026-09-21 restart step-2 execution stall repaired
+
+Private evidence from the failed repeated S3 attempt on `51dea04ab95e818680b96769811c3620d36fc912` established:
+
+```text
+workspace validation: completed, exit 0
+result write:         missing
+result readback:      missing
+result file:          missing
+turn terminal:        completed
+assistant final:      第二步未能通过客户端 exec_command 执行，因此不能回复 CONTEXT_PASS。
+trace error:          none
+```
+
+No outer Web rate-limit classification was present. This was classified as a product-level synthetic acceptance continuation gap.
+
+ChatGPT repaired it directly on `standalone-dev`.
+
+New exact candidate:
+
+```text
+d798bd123345970d76d473924b4ef30d9a30a869
+```
+
+The repair is limited to one unambiguous synthetic `CONTEXT_PASS` or `LARGE_CONTEXT_PASS` contract, successful real workspace validation, unfinished write/readback effects, and an assistant final that explicitly says step 2 or step 3 could not execute through an exec-like client tool and therefore refuses the matching PASS marker.
+
+The existing next-effect logic is reused:
+- after validation with no write, repair continues to the write;
+- after write with no later readback, repair continues only to the independent readback;
+- after write plus later readback, the unfinished detector is disabled;
+- ordinary unrelated text does not activate the repair;
+- `tool_choice="none"` remains authoritative.
+
+Regression coverage was added for the exact live Chinese wording, real roundtrip repair, unrelated text, completed-effects state, and shared large-context behavior.
+
+Exact-SHA GitHub Standalone CI run `#873` completed successfully:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+The codex-regression job reported:
+
+```text
+539 passed, 22 warnings
+```
+
+Because source and the release engineering record changed, all positive candidate-bound evidence from `51dea04...`, including its earlier S3 PASS and install smoke, is historical only and does not count for `d798bd1...`.
+
+Next action is to regenerate deterministic/local candidate evidence, clean install smoke, then begin S3 success accumulation again on `d798bd123345970d76d473924b4ef30d9a30a869`.
