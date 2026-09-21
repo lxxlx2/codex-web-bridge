@@ -351,6 +351,129 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
     assert "separate client-tool readback" in seen[1][1]["content"]
 
 
+def test_live_step_execution_stall_after_validation_continues_to_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    refusal = "第二步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_step_execution_stall_into_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    refusal = "第二步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'%s\\\\n\' \'EMBER-7319\' > context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "workspace validation already completed successfully" in seen[1][1]["content"].lower()
+    assert "successful write of context/result.txt has not yet been proven" in seen[1][1]["content"]
+
+
+def test_step_execution_stall_without_synthetic_contract_is_not_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    refusal = "第二步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
+    messages = [
+        {
+            "role": "user",
+            "content": "Discuss this sentence as text only; do not access a workspace.",
+        }
+    ]
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is False
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is False
+
+
+def test_step_execution_stall_after_completed_effects_is_not_unfinished(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read",
+        "cat context/result.txt",
+        "EMBER-7319",
+    )
+    refusal = "第三步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is False
+
+
+def test_large_context_step_execution_stall_uses_shared_acceptance_policy(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _large_context_history_after_validation()
+    refusal = "第二步未能通过客户端 `exec_command` 执行，因此不能回复 `LARGE_CONTEXT_PASS`。"
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is True
+
+
 def test_acceptance_incomplete_after_validation_continues_to_write(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
