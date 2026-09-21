@@ -693,3 +693,29 @@ is now historical because source and release engineering documentation changed.
 
 Exact-SHA Standalone CI run for `f3d02327...` is `#879` and was queued when this handoff entry was written.
 
+## 2026-09-22 CI completed for f3d02327 candidate
+
+Exact-SHA Standalone CI run `#879` completed successfully for:
+
+```text
+f3d02327a5cb99513a60eeaf14fd517c5e86a09e
+```
+
+All jobs passed:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+The codex-regression job reported:
+
+```text
+546 passed, 22 warnings
+```
+
+Next candidate-bound evidence required on the user's Mac is the normal deterministic/local gate set, clean install smoke, then fresh S3 accumulation on this exact SHA. Prior S3 successes belong to older candidates and cannot be counted for `f3d02327...`.
+
