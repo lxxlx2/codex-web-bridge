@@ -1393,3 +1393,47 @@ continues directly to the missing independent readback and explicitly forbids a
 rewrite. If both write and a later readback already succeeded, this unfinished
 effect detector does not activate.
 
+## 2026-09-21 restart validation succeeded but step 2 falsely stopped
+
+Candidate `51dea04ab95e818680b96769811c3620d36fc912` had already produced one full
+`STANDALONE_S3=PASS_LIVE_CLOSED` result. A later repeated S3 attempt reached the
+restart-resume phase and then returned:
+
+```text
+第二步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。
+```
+
+Read-only private evidence established:
+
+```text
+workspace validation: completed, exit 0
+result write:         missing
+result readback:      missing
+result file:          missing
+turn terminal:        completed
+trace error:          none
+```
+
+No outer ChatGPT Web rate-limit classification was present for this attempt.
+
+The successful first client `exec_command` proved the declared local execution
+path was available, while the final text incorrectly stopped before the required
+second client-tool effect. This is another narrow synthetic acceptance
+continuation shape, not evidence that the workspace tool was actually unavailable.
+
+The repair extends the existing synthetic unfinished-acceptance policy only when
+all of the following are proven:
+
+```text
+one unambiguous CONTEXT_PASS or LARGE_CONTEXT_PASS acceptance contract
+matching result path present in the request history
+successful real workspace validation for that contract
+required write/readback effects still unfinished
+assistant final explicitly describes step 2 or step 3 failing through an exec-like client tool
+assistant final explicitly refuses the matching requested PASS marker
+```
+
+Ordinary text containing the same words without the synthetic contract is not
+repairable through this path. A completed write plus later readback also disables
+the unfinished-effect detector.
+
