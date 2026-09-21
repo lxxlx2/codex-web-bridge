@@ -644,3 +644,52 @@ This is a product-level continuation/capability-refusal shape, but source should
 
 The prior S3 success #1 for c18a990 remains valid because the candidate SHA is unchanged. This failed attempt does not count.
 
+## 2026-09-22 structural acceptance capability-refusal repair
+
+Inspection of the failed S3 target #2 proved the additional client commands were read-only:
+
+```text
+COMMAND_1 exact validation
+COMMAND_2 pwd + root listing
+COMMAND_3 pwd + root listing + large_context listing
+COMMAND_4 missing-file probe using test/wc/od/cat
+```
+
+All completed with exit code 0. None wrote `large_context/result.txt`; the final probe confirmed it was missing. This removed the side-effect replay ambiguity.
+
+ChatGPT implemented a structural repair on `standalone-dev`.
+
+New exact candidate:
+
+```text
+f3d02327a5cb99513a60eeaf14fd517c5e86a09e
+```
+
+The new detector is limited to a proven synthetic `CONTEXT_PASS` or
+`LARGE_CONTEXT_PASS` contract with:
+
+```text
+successful real matching workspace validation
+requested PASS marker referenced in the final
+unfinished write/readback effects
+final claiming either client-tool unavailability or workspace inaccessibility
+```
+
+Progress still comes only from paired successful client-tool results. A read-only
+probe before a successful write does not count as the required post-write readback.
+Once a successful write plus later readback exist, the unfinished detector is
+disabled. Without successful acceptance validation, the structural repair does not
+activate.
+
+Regression coverage includes:
+- exact live capability-refusal wording
+- read-only pre-write probes
+- repair into the missing write
+- no-validation negative case
+- completed write + later readback negative case
+
+All positive candidate-bound evidence from `c18a990...`, including its S3 #1,
+is now historical because source and release engineering documentation changed.
+
+Exact-SHA Standalone CI run for `f3d02327...` is `#879` and was queued when this handoff entry was written.
+
