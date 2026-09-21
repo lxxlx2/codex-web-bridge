@@ -618,3 +618,29 @@ This attempt does not count toward the required three successful S3 runs. The ea
 
 Do not change source until the latest post-compaction recovery trace is inspected for the exact final assistant message and completed validation/write/readback effects.
 
+## 2026-09-22 repeated post-compaction capability refusal on c18a990
+
+The failed S3 target #2 on exact candidate `c18a990e371eb391a59320b6853de96e47dddebe` was inspected.
+
+Observed private evidence:
+
+```text
+COMMAND_1=workspace validation, completed exit 0
+COMMAND_2=other, completed exit 0
+COMMAND_3=other, completed exit 0
+COMMAND_4=result readback-shaped command, completed exit 0
+
+successful write classifier: 0
+successful readback classifier: 1
+readback after successful write: NO
+result file: missing
+turn terminal: completed
+trace error: none
+```
+
+Final assistant text claimed both that the acceptance workspace was inaccessible and that no real `exec_command` client tool was callable, despite multiple successful client commands in the same turn. It retained the exact ORBIT token and the expected result-file contract, then refused to return `LARGE_CONTEXT_PASS`.
+
+This is a product-level continuation/capability-refusal shape, but source should not be changed until COMMAND_2 and COMMAND_3 are inspected. Their exact command text is needed to prove that no unrecognized or uncertain result-file write attempt occurred before deciding whether an automatic repair may safely issue the missing write.
+
+The prior S3 success #1 for c18a990 remains valid because the candidate SHA is unchanged. This failed attempt does not count.
+
