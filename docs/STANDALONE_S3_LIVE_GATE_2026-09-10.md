@@ -1469,3 +1469,36 @@ matchers for this narrow live wording. It remains actionable only when authorita
 compacted workspace intent/provenance is present. Ordinary state acknowledgements
 without a compacted workspace continuation are not turned into tool calls.
 
+## 2026-09-22 acceptance capability refusal after successful client inspection
+
+Candidate `c18a990e371eb391a59320b6853de96e47dddebe` had one valid
+`PASS_LIVE_CLOSED` result, then a later S3 attempt again failed in the
+post-compaction recovery turn.
+
+Private read-only inspection proved four successful client commands:
+
+```text
+1. exact workspace validation
+2. pwd + root listing
+3. pwd + root listing + large_context listing
+4. read-only missing-file probe using test/wc/od/cat
+```
+
+No command wrote `large_context/result.txt`. The final probe confirmed the file
+was missing. The model then claimed that the workspace was inaccessible and that
+no real callable `exec_command` client tool existed, while also retaining the
+exact ORBIT token and the `LARGE_CONTEXT_PASS` contract.
+
+The repair is now structural rather than tied to that exact Chinese sentence.
+Inside one unambiguous synthetic acceptance contract, after a real successful
+matching workspace validation, a final that references the requested PASS marker
+and claims either client-tool unavailability or workspace inaccessibility is
+treated as an unfinished acceptance continuation while required write/readback
+effects remain.
+
+Progress still comes only from paired successful client-tool results. A read-only
+probe before any successful write does not satisfy the required post-write
+readback. If a successful write plus a later independent readback already exist,
+the unfinished detector remains disabled. Without successful acceptance workspace
+validation, this structural repair does not activate.
+
