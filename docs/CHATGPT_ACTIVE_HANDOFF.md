@@ -595,3 +595,26 @@ S4 exact-candidate consistency
 ```
 
 Do not change product source or release documents while accumulating this evidence.
+
+## 2026-09-21 S3 target #2 failed in post-compaction recovery
+
+Exact candidate remained:
+
+```text
+c18a990e371eb391a59320b6853de96e47dddebe
+```
+
+The second S3 target started at approximately 22:50 local time (UTC+07). It passed restart continuity and compaction cooldown, then stopped at:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+No outer Web rate-limit classification was printed in the supplied output.
+
+This attempt does not count toward the required three successful S3 runs. The earlier successful S3 #1 remains valid because the candidate SHA did not change.
+
+Do not change source until the latest post-compaction recovery trace is inspected for the exact final assistant message and completed validation/write/readback effects.
+
