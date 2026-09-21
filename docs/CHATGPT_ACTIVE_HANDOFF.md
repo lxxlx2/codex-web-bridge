@@ -421,3 +421,45 @@ The codex-regression job reported:
 Because source and the release engineering record changed, all positive candidate-bound evidence from `51dea04...`, including its earlier S3 PASS and install smoke, is historical only and does not count for `d798bd1...`.
 
 Next action is to regenerate deterministic/local candidate evidence, clean install smoke, then begin S3 success accumulation again on `d798bd123345970d76d473924b4ef30d9a30a869`.
+
+
+## 2026-09-21 first live S3 attempt on d798bd1 candidate
+
+Exact candidate:
+
+```text
+d798bd123345970d76d473924b4ef30d9a30a869
+```
+
+Candidate-bound local validation passed:
+
+```text
+focused tests:             62 passed
+full suite:                575 passed, 22 warnings
+public repository safety: PASS
+dependency audit:          PASS
+install smoke:             PASS
+worktree after gates:      clean
+```
+
+The live S3 run then produced:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+
+STANDALONE_S3=FAIL
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+No outer Web rate-limit promotion was printed.
+
+Classification is unresolved pending read-only inspection of the latest
+`post-compaction-recovery.jsonl` and `large_context/result.txt` evidence.
+
+Do not modify source yet. Determine the final assistant text, successful workspace
+command sequence, whether validation/write/readback all occurred, and whether the
+result bytes exactly match the retained token plus trailing newline.
