@@ -474,6 +474,160 @@ def test_large_context_step_execution_stall_uses_shared_acceptance_policy(monkey
     ) is True
 
 
+def test_live_acceptance_capability_refusal_after_read_only_checks_continues_to_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _large_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_list_root",
+        "pwd && printf '\\n--- listing ---\\n' && ls -la",
+    )
+    _append_successful_exec(
+        messages,
+        "call_list_large",
+        "pwd && ls -la && ls -la large_context",
+    )
+    _append_successful_exec(
+        messages,
+        "call_missing_probe",
+        (
+            "pwd && if [ -f large_context/result.txt ]; then "
+            "wc -c < large_context/result.txt; "
+            "od -An -tx1 -v large_context/result.txt; "
+            "cat large_context/result.txt; "
+            "else printf 'MISSING\\n'; fi"
+        ),
+        "MISSING",
+    )
+    refusal = (
+        "当前运行环境无法访问 `/Users/jerson/uwa-codex-acceptance`，"
+        "并且没有实际可调用的 `exec_command` 客户端工具，因此无法真实写入并完成字节级校验。"
+        "只有真实工具完成写入并再次验证后，才能返回 `LARGE_CONTEXT_PASS`。"
+        "因此当前不能声称通过，也不能输出该成功标记。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_acceptance_capability_refusal_into_missing_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _large_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_missing_probe",
+        (
+            "if [ -f large_context/result.txt ]; then "
+            "od -An -tx1 -v large_context/result.txt; "
+            "cat large_context/result.txt; "
+            "else printf 'MISSING\\n'; fi"
+        ),
+        "MISSING",
+    )
+    refusal = (
+        "当前运行环境无法访问 `/Users/jerson/uwa-codex-acceptance`，"
+        "并且没有实际可调用的 `exec_command` 客户端工具，因此无法真实写入并完成字节级校验。"
+        "只有真实工具完成写入并再次验证后，才能返回 `LARGE_CONTEXT_PASS`。"
+    )
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert len(seen) == 2
+    assert "successful write of large_context/result.txt has not yet been proven" in seen[1][1]["content"]
+
+
+def test_acceptance_capability_refusal_without_successful_validation_is_not_repaired(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Create large_context/result.txt and return LARGE_CONTEXT_PASS, "
+                "but do not actually run any tools."
+            ),
+        }
+    ]
+    refusal = (
+        "当前运行环境无法访问工作区，并且没有实际可调用的 exec_command 客户端工具，"
+        "因此不能返回 LARGE_CONTEXT_PASS。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is False
+
+
+def test_acceptance_capability_refusal_after_write_and_later_readback_is_not_unfinished(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _large_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_large_write",
+        "printf '%s\\n' 'ORBIT-5921' > large_context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_large_read",
+        "cat large_context/result.txt && od -An -tx1 -v large_context/result.txt",
+        "ORBIT-5921",
+    )
+    refusal = (
+        "当前运行环境无法访问工作区，并且没有实际可调用的 exec_command 客户端工具，"
+        "因此不能返回 LARGE_CONTEXT_PASS。"
+    )
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is False
+
+
 def test_acceptance_incomplete_after_validation_continues_to_write(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
