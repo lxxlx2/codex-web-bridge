@@ -535,3 +535,63 @@ S3 live
 ```
 
 All prior positive evidence belongs to older SHAs and must not be counted for `c18a990...`.
+
+
+## 2026-09-21 first successful S3 on c18a990 candidate
+
+Exact candidate:
+
+```text
+c18a990e371eb391a59320b6853de96e47dddebe
+```
+
+Candidate-bound local validation passed:
+
+```text
+focused tests:             65 passed
+full suite:                578 passed, 22 warnings
+public repository safety: PASS
+dependency audit:          PASS
+install smoke:             PASS
+worktree after gates:      clean
+```
+
+The live S3 run started at approximately 16:03 local time (UTC+07) and completed successfully:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+S3_PHASE=COMPACTION_RECOVERY_PASS
+S3_REPO_PREFLIGHT=PASS
+S3_LISTENER_TRANSITION=RESTARTED
+S3_LOCAL_SAFETY_REGRESSION=PASS
+S3_UWA_HEALTH=PASS
+S3_REAL_CLIENT_TOOL=PASS
+S3_SAME_THREAD_RESTART_RECOVERY=PASS
+S3_NATIVE_AUTO_COMPACTION=PASS
+S3_REMOTE_V2_COMPACTION=PASS
+S3_POST_COMPACTION_RECOVERY=PASS
+S3_ROUTE_UWA_CHATGPT_HIGH=PASS
+S3_REQUEST_MANAGER_CLEAN=PASS
+S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+This is S3 success #1 for `c18a990...`.
+
+The first successful evidence directory corresponds to a start around 09:03 UTC, within the UTC 08:00-10:00 two-hour window. Because release confidence requires at least three successful S3 runs, at least two two-hour UTC windows, and at least 7200 seconds between first and last successful evidence timestamps, the current wall clock is already far enough beyond the first success for #2 and #3 to be run sequentially without risking the span requirement, provided they succeed on the unchanged candidate.
+
+Still required on this exact SHA:
+
+```text
+S3 success #2
+S3 success #3
+office-work soak PASS
+release-confidence aggregator PASS
+Desktop E2E
+S4 exact-candidate consistency
+```
+
+Do not change product source or release documents while accumulating this evidence.
