@@ -287,3 +287,58 @@ S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
 and a recent-rate-limit cooldown of up to about 360 seconds if the next run starts before that interval has elapsed.
 
 Operational guidance: avoid another immediate manual replay. Allow additional quiet time beyond the built-in minimum before starting the next full S3 attempt.
+
+
+## 2026-09-21 first successful S3 on current candidate
+
+Exact candidate:
+
+```text
+51dea04ab95e818680b96769811c3620d36fc912
+```
+
+A full live S3 run started at approximately 11:49 local time (UTC+07) and completed successfully at approximately 12:38 local time.
+
+Observed terminal evidence:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+S3_PHASE=COMPACTION_RECOVERY_PASS
+S3_REPO_PREFLIGHT=PASS
+S3_LISTENER_TRANSITION=RESTARTED
+S3_LOCAL_SAFETY_REGRESSION=PASS
+S3_UWA_HEALTH=PASS
+S3_REAL_CLIENT_TOOL=PASS
+S3_SAME_THREAD_RESTART_RECOVERY=PASS
+S3_NATIVE_AUTO_COMPACTION=PASS
+S3_REMOTE_V2_COMPACTION=PASS
+S3_POST_COMPACTION_RECOVERY=PASS
+S3_ROUTE_UWA_CHATGPT_HIGH=PASS
+S3_REQUEST_MANAGER_CLEAN=PASS
+S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+This is S3 success #1 for the current candidate.
+
+The release-confidence gate timestamps S3 evidence from the outer result directory name, which corresponds to run start time. Therefore the first successful evidence is in the UTC 04:00-06:00 two-hour window, with a start around 04:49 UTC.
+
+For the >=7200-second requirement, the last successful S3 evidence must start no earlier than approximately 06:49 UTC, which is approximately 13:49 local time (UTC+07).
+
+Still required on the same candidate:
+
+```text
+S3 success #2
+S3 success #3
+>=2 distinct two-hour UTC evidence windows
+>=7200 seconds first-to-last successful evidence span
+office-work soak PASS with effect verification
+release confidence PASS
+Desktop E2E
+S4
+```
+
+Do not modify source or release documents while accumulating this candidate-bound evidence.
