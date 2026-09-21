@@ -58,49 +58,46 @@ macos-compat      PASS
 
 Historical candidate `90cdbdfb7b8259f8fb00e7a0e35b57c26f7ba711` remains diagnostic evidence only.
 
-## Current live S3 blocker
+## Current live S3 status
 
-Latest S3 run:
-
-```text
-FAILURE_CLASS=restart_resume
-DETAIL=final_reply_mismatch
-```
-
-Read-only private evidence established the exact sequence:
+Candidate:
 
 ```text
-workspace validation: completed, exit 0
-result write:         completed, exit 0
-result file:          exact expected token + trailing LF
-separate readback:    missing
-turn terminal:        completed
-assistant final:      ACCEPTANCE_INCOMPLETE
-trace error:          none
+51dea04ab95e818680b96769811c3620d36fc912
 ```
 
-The S3 gate correctly failed.
+Candidate-bound clean install/rollback smoke passed locally.
 
-## Root cause
-
-The client workspace repair policy already handles narrowly scoped synthetic acceptance failures such as:
+The next live S3 attempt proved the restart-continuity repair works in the real flow:
 
 ```text
-premature CONTEXT_PASS / LARGE_CONTEXT_PASS
-ACCEPTANCE_WORKSPACE_MISMATCH
-false client-tool unavailability
-compacted missing-task/state-only completion
+S3_PHASE=RESTART_CONTINUITY_PASS
 ```
 
-It currently does not treat exact final text:
+The run then advanced through compaction cooldown and failed during post-compaction recovery:
 
 ```text
-ACCEPTANCE_INCOMPLETE
+FAILURE_CLASS=post_compaction_recovery
+DETAIL=codex_turn_runtime_error
 ```
 
-as an unfinished synthetic acceptance continuation.
+The outer release wrapper immediately rechecked the ChatGPT Web surface and found an account-side limiter:
 
-In the observed live run, validation and write were complete, while the mandatory separate readback remained unfinished. The text response was therefore accepted as a normal final response and S3 later rejected it.
+```text
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+DETAIL=rate_limited
+```
+
+The compacted continuation state retained the exact large-context token, recorded successful workspace validation, and recorded a successful write of `large_context/result.txt`. Its unresolved next step was the required separate byte-level readback before `LARGE_CONTEXT_PASS`.
+
+Classification: external Web failure after successful product progress. No source defect is established by this attempt, so no source change is required and the candidate remains `51dea04...`.
+
+The S3 runner recorded another limiter marker. With the default policy, the next run will enforce the recent-rate-limit cooldown and raise recovery pacing before sending live turns.
+
+## Previous repaired blocker
+
+The prior candidate `90cdbdf...` exposed an unfinished restart acceptance sequence where exact `ACCEPTANCE_INCOMPLETE` was accepted after validation and write but before independent readback. That blocker was repaired and the current live run reached `S3_PHASE=RESTART_CONTINUITY_PASS`, providing live confirmation that the repair closed that path.
 
 ## Completed engineering step
 
@@ -212,3 +209,44 @@ If install smoke passes and the worktree stays clean, run:
 ```
 
 Do not reuse the previous candidate's install-smoke or S3 results.
+
+
+## 2026-09-21 live attempt update
+
+Local evidence for `51dea04ab95e818680b96769811c3620d36fc912`:
+
+```text
+INSTALL_SMOKE=PASS
+DEPENDENCY_BOOTSTRAP=PASS
+ACCEPTANCE_TARGET_RESET=PASS
+OFFICIAL_ROLLBACK=PASS
+BASIC_CODEX_REQUEST=PASS
+AUTH=UNCHANGED
+
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+
+core failure:
+FAILURE_CLASS=post_compaction_recovery
+DETAIL=codex_turn_runtime_error
+
+outer classification:
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+DETAIL=rate_limited
+```
+
+Do not modify source for this attempt. Do not count it as an S3 success. Do not immediately replay the failed post-compaction turn.
+
+Next action after the account-side limiter cools down:
+
+```bash
+cd ~/codex-web-bridge
+git switch standalone-dev
+git pull --ff-only
+test "$(git rev-parse HEAD)" = "51dea04ab95e818680b96769811c3620d36fc912"
+test -z "$(git status --porcelain=v1 --untracked-files=all)"
+.venv/bin/python tools/standalone_s3_live_acceptance.py
+```
+
+The runner itself will honor the recorded limiter marker before sending requests. If the next attempt fails for a product-level reason after the limiter clears, inspect that new private evidence before changing source.
