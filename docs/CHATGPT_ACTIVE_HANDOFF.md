@@ -342,3 +342,26 @@ S4
 ```
 
 Do not modify source or release documents while accumulating this candidate-bound evidence.
+
+
+## 2026-09-21 second S3 attempt after first PASS
+
+A second full S3 attempt on exact candidate `51dea04ab95e818680b96769811c3620d36fc912` started around 12:57 local time.
+
+Observed:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+S3_PHASE=LOCAL_GATES_PASS
+S3_INTER_TURN_COOLDOWN_SEC=118.4
+STANDALONE_S3=FAIL
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=final_reply_mismatch
+```
+
+No outer ChatGPT Web limiter classification was printed for this attempt.
+
+Classification is therefore unresolved pending inspection of the private `restart-resume.jsonl` evidence. The first successful S3 evidence remains valid for the unchanged candidate, but this failed attempt does not count toward release confidence.
+
+Do not modify source until the trace establishes the exact final assistant message and completed workspace effects.
