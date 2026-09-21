@@ -250,3 +250,40 @@ test -z "$(git status --porcelain=v1 --untracked-files=all)"
 ```
 
 The runner itself will honor the recorded limiter marker before sending requests. If the next attempt fails for a product-level reason after the limiter clears, inspect that new private evidence before changing source.
+
+
+## 2026-09-21 immediate retry remained rate limited
+
+A follow-up S3 attempt on the same exact candidate `51dea04ab95e818680b96769811c3620d36fc912` started at approximately 07:05 local time.
+
+Observed:
+
+```text
+S3_RATE_LIMIT_STREAK=1
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=60
+S3_PHASE=LOCAL_GATES_PASS
+
+core:
+FAILURE_CLASS=restart_resume
+DETAIL=rc=1
+
+outer:
+S3_RATE_LIMIT_ACK_DISMISSED=YES
+FAILURE_CLASS=chatgpt_web_rate_limited
+DETAIL=rate_limited
+```
+
+Classification remains external account-side Web limiting. Do not change source and do not count this attempt as S3 success.
+
+The startup streak remaining at 1 is consistent with the previous stored limiter marker having reset its streak window before the earlier failure; this retry itself occurred within the one-hour streak window and should cause the persisted marker to advance for the next run.
+
+Expected next-run behavior with the default policy is a higher recovery floor, normally:
+
+```text
+S3_RATE_LIMIT_STREAK=2
+S3_RATE_LIMIT_RECOVERY_TURN_GAP_SEC=120
+```
+
+and a recent-rate-limit cooldown of up to about 360 seconds if the next run starts before that interval has elapsed.
+
+Operational guidance: avoid another immediate manual replay. Allow additional quiet time beyond the built-in minimum before starting the next full S3 attempt.
