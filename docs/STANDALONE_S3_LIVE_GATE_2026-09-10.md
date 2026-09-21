@@ -1437,3 +1437,35 @@ Ordinary text containing the same words without the synthetic contract is not
 repairable through this path. A completed write plus later readback also disables
 the unfinished-effect detector.
 
+## 2026-09-21 post-compaction state retained but task falsely declared absent
+
+Candidate `d798bd123345970d76d473924b4ef30d9a30a869` passed focused tests, the
+full deterministic suite, public safety, dependency audit, install smoke, and
+the restart-continuity phase of live S3. The post-compaction recovery turn then
+failed with `final_reply_mismatch`.
+
+Read-only private evidence showed:
+
+```text
+workspace validation: completed, exit 0
+result write:         missing
+result readback:      missing
+result file:          missing
+turn terminal:        completed
+trace error:          none
+assistant final:
+已续接当前状态，并保留精确值 ORBIT-5921。
+当前消息里没有新的验收命令、目标文件或预期输出，因此没有可执行的下一步。
+直接发下一条验收指令即可。
+```
+
+This is a compacted-state continuation gap. The exact durable token survived,
+and the real workspace validation succeeded, but the model ignored the unresolved
+ACTIVE CONTINUATION STATE and treated the current tool-result continuation as if
+no task remained.
+
+The repair extends the existing compacted missing-task/state-only acknowledgement
+matchers for this narrow live wording. It remains actionable only when authoritative
+compacted workspace intent/provenance is present. Ordinary state acknowledgements
+without a compacted workspace continuation are not turned into tool calls.
+
