@@ -845,6 +845,43 @@ def _looks_like_acceptance_step_execution_stall(
     ) is not None
 
 
+def _looks_like_acceptance_capability_refusal(
+    assistant_text: str,
+    marker: str,
+) -> bool:
+    """Detect capability/workspace refusal inside a proven synthetic acceptance."""
+
+    value = str(assistant_text or "").strip()
+    if not value:
+        return False
+
+    marker_pattern = (
+        rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])"
+    )
+    if re.search(marker_pattern, value) is None:
+        return False
+
+    tool_unavailable = re.search(
+        r"(?:没有|缺少|不存在|无|not\s+have|without|no)"
+        r".{0,50}(?:实际)?(?:可调用|可用|callable|available)"
+        r".{0,50}(?:exec_command|shell_command|local_shell|客户端工具|执行工具)"
+        r"|(?:exec_command|shell_command|local_shell|客户端工具|执行工具)"
+        r".{0,80}(?:不可用|无法调用|不能调用|not\s+callable|unavailable|not\s+available)",
+        value,
+        re.IGNORECASE | re.DOTALL,
+    ) is not None
+
+    workspace_unavailable = re.search(
+        r"(?:无法|不能|不可|cannot|can't|unable)"
+        r".{0,40}(?:访问|读取|写入|access|read|write)"
+        r".{0,120}(?:/Users/|/home/|[A-Za-z]:\\|workspace|工作区|large_context|context)",
+        value,
+        re.IGNORECASE | re.DOTALL,
+    ) is not None
+
+    return tool_unavailable or workspace_unavailable
+
+
 def looks_like_incomplete_acceptance_continuation(
     assistant_text: str,
     messages: List[Dict[str, Any]],
@@ -866,6 +903,10 @@ def looks_like_incomplete_acceptance_continuation(
     if (
         value != "ACCEPTANCE_INCOMPLETE"
         and not _looks_like_acceptance_step_execution_stall(
+            value,
+            marker,
+        )
+        and not _looks_like_acceptance_capability_refusal(
             value,
             marker,
         )
