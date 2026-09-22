@@ -39,6 +39,8 @@ _WORKSPACE_REQUEST_PATTERNS = (
     re.compile(r"(?:^|[\s/])[^\s/]+\.(?:py|js|jsx|ts|tsx|java|kt|kts|cs|cpp|cc|c|h|hpp|go|rs|rb|php|swift|sh|zsh|bash|toml|yaml|yml|json|md)(?:\b|$)", re.IGNORECASE),
     re.compile(r"(?:/Users/|/home/|[A-Za-z]:\\)", re.IGNORECASE),
     re.compile(r"\b(?:exec_command|shell_command|local_shell|apply_patch|write_stdin)\b", re.IGNORECASE),
+    re.compile(r"\b(?:context|large_context)/result\.txt\b", re.IGNORECASE),
+    re.compile(r"\b(?:CONTEXT_PASS|LARGE_CONTEXT_PASS)\b"),
     re.compile(r"(?:本机|本地|工作区|仓库|项目|文件|目录|代码|测试|修复|修改|检查)"),
 )
 
@@ -54,6 +56,12 @@ _REFUSAL_PATTERNS = (
     re.compile(r"(?:不可用|无法使用|不能使用|未提供|未暴露|不存在).{0,40}(?:exec_command|shell_command|local_shell|apply_patch|write_stdin|客户端工具|执行工具)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:无法|不能|没法|访问不到).{0,30}(?:本机|本地|工作区|目录|文件)"),
     re.compile(r"(?:当前这个会话环境|当前会话环境).{0,40}(?:访问不到|无法访问|不能访问)"),
+    re.compile(
+        r"(?:当前(?:运行|执行)?环境|当前(?:这个)?会话).{0,80}"
+        r"(?:无法|不能|不可).{0,30}(?:访问|读取|写入)"
+        r".{0,120}(?:/Users/|/home/|[A-Za-z]:\\|workspace|工作区|large_context|context)",
+        re.IGNORECASE | re.DOTALL,
+    ),
     re.compile(r"(?:当前(?:这个)?会话|当前环境|会话环境).{0,100}(?:文件系统|filesystem).{0,100}(?:没有|未|无法).{0,25}(?:挂载|映射|访问|看到|包含)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:没有|未).{0,25}(?:挂载|映射).{0,100}(?:/Users/|/home/|工作区|目录|文件|workspace)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:当前(?:可用|实际可用)?(?:执行环境|环境|会话环境)|当前(?:这个)?会话).{0,120}(?:不存在|没有|找不到|不可访问|无法访问).{0,160}(?:/Users/|/home/|[A-Za-z]:\\|工作区|路径|目录|文件)", re.IGNORECASE | re.DOTALL),
