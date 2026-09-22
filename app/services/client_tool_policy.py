@@ -1027,6 +1027,64 @@ def _command_reads_result_path(command: str, result_path: str) -> bool:
     )
 
 
+def _completed_acceptance_contract(
+    messages: List[Dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Return the synthetic acceptance contract only after all required effects."""
+
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None:
+        return None
+
+    marker, result_path = contract
+    if not _successful_acceptance_workspace_validation_observed(
+        messages,
+        result_path=result_path,
+    ):
+        return None
+
+    write_observed, readback_observed = _acceptance_effect_progress(
+        messages,
+        result_path,
+    )
+    if not (write_observed and readback_observed):
+        return None
+
+    return marker, result_path
+
+
+def has_redundant_acceptance_tool_call_after_completion(
+    messages: List[Dict[str, Any]],
+    parsed: Dict[str, Any],
+) -> bool:
+    """Reject extra workspace tool calls once a synthetic acceptance is complete."""
+
+    if _completed_acceptance_contract(messages) is None:
+        return False
+
+    for tool_call in parsed.get("tool_calls") or []:
+        if not isinstance(tool_call, dict):
+            continue
+        if _tool_name(tool_call) in _EXEC_LIKE_TOOLS:
+            return True
+
+    return False
+
+
+def looks_like_acceptance_completion_without_exact_sentinel(
+    assistant_text: str,
+    messages: List[Dict[str, Any]],
+) -> bool:
+    """Require the exact requested success sentinel after all effects complete."""
+
+    contract = _completed_acceptance_contract(messages)
+    if contract is None:
+        return False
+
+    marker, _result_path = contract
+    return str(assistant_text or "").strip() != marker
+
+
 def looks_like_premature_acceptance_success(
     assistant_text: str,
     messages: List[Dict[str, Any]],
@@ -1133,10 +1191,25 @@ def should_repair_client_workspace_refusal(
         return False
 
     if parsed.get("tool_calls"):
-        return has_suspicious_root_workdir_tool_call(messages, parsed)
+        return bool(
+            has_redundant_acceptance_tool_call_after_completion(
+                messages,
+                parsed,
+            )
+            or has_suspicious_root_workdir_tool_call(
+                messages,
+                parsed,
+            )
+        )
 
     if str(parsed.get("mode") or "").strip().lower() != "final":
         return False
+
+    if looks_like_acceptance_completion_without_exact_sentinel(
+        assistant_text,
+        messages,
+    ):
+        return True
 
     # A specific required workspace tool is protocol-level evidence that this
     # turn must call that client tool. If the model returns only final text and
@@ -1334,6 +1407,9 @@ def build_client_workspace_repair_messages(
     compacted_context = _latest_compacted_continuation_text(
         messages
     )
+    completed_acceptance = _completed_acceptance_contract(
+        messages
+    )
 
     has_prior_workspace_call = (
         _has_workspace_tool_call_history(
@@ -1393,7 +1469,26 @@ def build_client_workspace_repair_messages(
     )
 
     repeated = attempt > 1
-    if root_workdir_repair:
+    if completed_acceptance is not None:
+        marker, result_path = completed_acceptance
+        correction = (
+            "All required synthetic acceptance workspace effects have already completed successfully. "
+            f"The existing {result_path} was written and then independently verified with a byte-level "
+            "readback after the last successful write. The previous response attempted an extra workspace "
+            "tool call or returned descriptive prose after the acceptance was already complete. "
+            f"Do not call any client tool again. Do not rewrite {result_path}. Do not perform another "
+            "readback. The original acceptance contract now requires only its exact success sentinel."
+        )
+        if repeated:
+            correction += (
+                " This completion-contract violation has already repeated. Do not emit another tool call "
+                "or explanatory sentence."
+            )
+        action = (
+            f"Reply with exactly {marker} and nothing else. "
+            "Do not emit adapter_calls or any other markup."
+        )
+    elif root_workdir_repair:
         correction = (
             "The previous client tool call incorrectly overrode the Codex turn working directory with workdir='/' "
             "even though the user did not request filesystem root. Reissue the same intended client tool call without "
@@ -1600,6 +1695,7 @@ def build_client_workspace_repair_messages(
 __all__ = [
     "build_client_workspace_repair_messages",
     "has_client_workspace_tools",
+    "has_redundant_acceptance_tool_call_after_completion",
     "has_suspicious_root_workdir_tool_call",
     "looks_like_client_access_refusal",
     "looks_like_local_workspace_request",
@@ -1607,6 +1703,7 @@ __all__ = [
     "looks_like_compacted_state_only_acknowledgement",
     "looks_like_post_tool_unavailable_claim",
     "looks_like_false_acceptance_workspace_mismatch",
+    "looks_like_acceptance_completion_without_exact_sentinel",
     "looks_like_incomplete_acceptance_continuation",
     "looks_like_premature_acceptance_success",
     "should_repair_client_workspace_refusal",
