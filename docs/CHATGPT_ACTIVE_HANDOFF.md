@@ -1079,3 +1079,35 @@ New exact candidate:
 
 Exact-SHA Standalone CI is run #901. All older candidate-bound evidence is
 historical and must not be reused.
+
+## 2026-09-22 20b45ce candidate deterministic gates green
+
+Exact candidate:
+
+```text
+20b45ce922e8166b72488c6282e4dca495e9bda0
+```
+
+Candidate-bound local validation passed:
+
+```text
+compaction-probe focused:  51 passed
+acceptance-policy focused: 45 passed
+full suite:                594 passed, 22 warnings
+public repository safety: PASS
+dependency audit:          PASS
+install smoke:             PASS
+final identity/worktree:   clean and unchanged
+```
+
+Exact-SHA GitHub Standalone CI #901 also completed successfully for the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+This candidate is eligible for a fresh S3 attempt. No successful S3 evidence from older SHAs may be counted.
