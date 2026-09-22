@@ -1580,3 +1580,40 @@ test-suite level.
 Exact-SHA Standalone CI #914 is still running at the time of this handoff update.
 Current observed state: `scaffold-static=PASS`, `runtime-import=in_progress`.
 Do not count CI as green until all jobs complete successfully.
+
+## 2026-09-23 Codex 0.156 real-route smoke and exact-SHA CI green
+
+Exact candidate:
+
+```text
+96157a51979815b5a2e2e57b258339fedac73748
+```
+
+Real CLI smoke under Codex CLI 0.156.0 passed through the configured UWA route:
+
+```text
+thread count:             1
+real exec_command count:  1
+command exit:             0
+final assistant reply:    CODEX_0156_TOOL_PASS
+terminal event:           turn.completed
+CODEX_0156_REAL_TOOL_SMOKE=PASS
+repository remained clean
+```
+
+The CLI also emitted the known non-fatal warning that service tier `priority` is
+not advertised for model `chatgpt`; it was omitted and the request completed
+normally.
+
+Exact-SHA Standalone CI #914 has now completed successfully for the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+This candidate is now ready for the first full S3 live run under the 0.156.0
+release baseline. S3 success count for this baseline is 0/3 before that run.
