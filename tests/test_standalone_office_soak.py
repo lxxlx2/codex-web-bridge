@@ -45,6 +45,11 @@ def _install_common_mocks(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(soak, "_pace", lambda last: None)
     monkeypatch.setattr(soak.core, "_wait_request_cleanup", lambda: None)
     monkeypatch.setattr(soak.core, "_route_gate", lambda marker: None)
+    monkeypatch.setattr(
+        soak.core,
+        "_assert_candidate_identity",
+        lambda candidate: None,
+    )
     monkeypatch.setattr(soak, "MIN_RELEASE_SOAK_TURNS", 6)
 
     class GitResult:
@@ -269,3 +274,39 @@ def test_turn_gap_is_bounded(monkeypatch):
 
     monkeypatch.setenv("UWA_OFFICE_SOAK_TURN_GAP_SEC", "-5")
     assert soak._turn_gap_seconds() == 0
+
+def test_candidate_drift_prevents_office_soak_pass(tmp_path: Path, monkeypatch):
+    private = _install_common_mocks(tmp_path, monkeypatch)
+    monkeypatch.setattr(soak, "_prepare", lambda root, scenario: None)
+    monkeypatch.setattr(soak, "_check", lambda root, scenario: None)
+    replies = iter(
+        [
+            _obs("CONTEXT_READY", tools=0),
+            _obs("CONTEXT_PASS"),
+            _obs("multi-file complete"),
+            _obs("failure recovery complete"),
+            _obs("git diff complete"),
+            _obs("interactive complete"),
+        ]
+    )
+    monkeypatch.setattr(soak, "_run_turn", lambda **kwargs: next(replies))
+    monkeypatch.setattr(
+        soak.core,
+        "_assert_candidate_identity",
+        lambda candidate: (_ for _ in ()).throw(
+            soak.core.GateFailure("candidate_identity", "candidate_sha_changed")
+        ),
+    )
+
+    rc = soak.run(
+        acceptance_root=tmp_path / "acceptance",
+        private_root=tmp_path / "unused",
+        turn_timeout_sec=60,
+        work_cycles=1,
+    )
+
+    assert rc == 1
+    text = (private / "result.txt").read_text(encoding="utf-8")
+    assert "STANDALONE_OFFICE_SOAK=FAIL" in text
+    assert "candidate_sha_changed" in text
+
