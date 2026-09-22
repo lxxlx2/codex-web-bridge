@@ -1547,3 +1547,19 @@ readback and must not rewrite the result file.
 The same change also makes premature-PASS detection evaluate readback relative
 to the last successful write, so an older readback cannot satisfy a later
 rewrite.
+
+## 2026-09-22 bounded retry for proven pre-submit generation blocks
+
+Live S3 twice encountered the browser guard condition
+`send_blocked_by_preexisting_generation` during the synthetic remote-compaction
+probe. The first inspected trace proved the affected continuation turn had no
+agent message, no client-tool effect, and no usage record, which means the
+prompt was blocked before model execution rather than ambiguously submitted.
+
+The probe now retries a continuation turn once only when all of those conditions
+are simultaneously true and the private trace contains the exact
+`send_blocked_by_preexisting_generation` marker. The retry uses a separate
+private trace file after a short delay. Any partial agent output, tool effect,
+usage evidence, different failure, or second failure remains fail-closed and
+terminates the probe. Seed creation is still one-shot.
+
