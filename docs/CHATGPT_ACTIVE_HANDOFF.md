@@ -1042,3 +1042,40 @@ macos-compat      PASS
 
 This candidate is now eligible for fresh S3 accumulation. All S3 success evidence
 from older SHAs is historical.
+
+## 2026-09-22 bounded safe retry added for repeated pre-submit compaction probe blocks
+
+A later S3 run on `77f12c2...` again stopped at
+`remote_compaction_probe rc=1` immediately after restart continuity.
+
+The prior occurrence at this same phase had already been privately proven to be
+the exact browser guard condition `send_blocked_by_preexisting_generation` with
+no agent message, no tool effect, and no usage record. Because that condition
+means the prompt was blocked before model execution, the compaction probe now
+contains one bounded continuation-turn retry for that exact evidence shape.
+
+The retry activates only when all of the following are true:
+
+```text
+returncode != 0
+raw trace contains send_blocked_by_preexisting_generation
+no agent messages
+no client-tool/file/MCP effects
+no input-token usage
+no output-token usage
+continuation thread_id is present
+```
+
+It waits briefly, writes the retry to a separate private trace, and retries the
+same prompt once. Any ambiguous partial response, usage evidence, tool effect,
+different failure, or second failure remains fail-closed. Seed creation remains
+one-shot.
+
+New exact candidate:
+
+```text
+20b45ce922e8166b72488c6282e4dca495e9bda0
+```
+
+Exact-SHA Standalone CI is run #901. All older candidate-bound evidence is
+historical and must not be reused.
