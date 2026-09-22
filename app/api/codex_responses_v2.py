@@ -654,7 +654,14 @@ def _attach_compacted_context_to_generated_tool_fallbacks(
     request_body: ChatRequest,
     compacted_context: str,
 ) -> ChatRequest:
-    """Carry compacted state as private metadata without replaying it to Web."""
+    """Carry compacted state as private metadata without replaying it to Web.
+
+    Recursive compaction can leave the current affinity delta as either a
+    generated user-shaped function-output fallback or a normal structured tool
+    result with its matching assistant call. Both shapes need the same private
+    continuation metadata for local policy decisions. The browser prompt
+    serializer ignores this field.
+    """
 
     value = str(compacted_context or "").strip()
     if not value:
@@ -672,7 +679,11 @@ def _attach_compacted_context_to_generated_tool_fallbacks(
         if not isinstance(message, dict):
             continue
         next_message = dict(message)
-        if next_message.get("_uwa_function_output_fallback") is True:
+        role = str(next_message.get("role") or "").strip().lower()
+        if (
+            next_message.get("_uwa_function_output_fallback") is True
+            or role in {"tool", "function"}
+        ):
             next_message["_uwa_compacted_continuation_context"] = value
             changed = True
         updated.append(next_message)
@@ -766,12 +777,17 @@ def _browser_delta_chat_request(
         return delta_body
 
     if hasattr(delta_body, "model_copy"):
-        return delta_body.model_copy(
+        tail_body = delta_body.model_copy(
+            update={"messages": [dict(message) for message in tail]}
+        )
+    else:
+        tail_body = delta_body.copy(
             update={"messages": [dict(message) for message in tail]}
         )
 
-    return delta_body.copy(
-        update={"messages": [dict(message) for message in tail]}
+    return _attach_compacted_context_to_generated_tool_fallbacks(
+        tail_body,
+        _latest_compacted_continuation_context(messages),
     )
 
 
