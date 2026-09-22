@@ -1133,3 +1133,41 @@ Because the candidate already contains one bounded retry for the exact
 until the new private probe log and any `*-retry.jsonl` trace are inspected. The
 next diagnosis must determine whether the retry activated and the retry itself
 failed, or whether this run failed for a different probe reason.
+
+## 2026-09-22 ChatGPT localized Stop false positive confirmed and repaired
+
+Private/live browser logs repeatedly showed the remote-compaction continuation turn
+being blocked for the full 300-second pre-fill idle timeout by exactly:
+
+```text
+matched_indicator='button[aria-label*="停止"]'
+send_stop=False
+stop_btn=False
+```
+
+The same false positive recurred on the one bounded retry. Both private traces had
+zero agent messages, zero tool effects, and zero usage, confirming no prompt was
+dispatched.
+
+Root cause: ChatGPT's page-wide generation probe accepted a broad localized
+partial aria-label Stop selector even when the matching visible control was not
+the active composer generation control.
+
+Repair on `standalone-dev`:
+
+* the probe now records the matched indicator's `data-testid` and whether it is
+  inside the active composer rooted at `#prompt-textarea`;
+* for ChatGPT only, a broad page-wide Stop aria-label match is ignored when it is
+  outside the composer and no stronger generation evidence exists;
+* canonical `data-testid="stop-button"`, composer-local Stop, send-as-Stop,
+  configured stop/generation selectors, and non-ChatGPT sites remain fail-closed.
+
+Regression tests cover the observed false positive and the strong-evidence cases.
+
+Current exact candidate:
+
+```text
+2b5a1772e96e4f6961685757a9cf60aa3b544cc0
+```
+
+Exact-SHA Standalone CI is run #904. Older candidate-bound evidence is historical.
