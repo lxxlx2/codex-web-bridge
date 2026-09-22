@@ -786,3 +786,55 @@ accumulation until they are addressed. The current failed post-compaction trace
 should still be inspected before source changes so all known fixes can be batched
 into one new candidate.
 
+## 2026-09-22 release-evidence hardening candidate
+
+After Astra quota exhaustion, ChatGPT continued the engineering work directly.
+
+The previous live S3 failure on `f3d02327...` showed repeated successful read-only
+client commands followed by a false workspace-inaccessible final. Astra's partial
+review also surfaced two independent release-gate integrity gaps.
+
+All three were addressed on `standalone-dev`.
+
+Current exact candidate:
+
+```text
+49da82d46d47179aea64dfbf6b7611bdbaa8489d
+```
+
+Changes:
+
+```text
+1. Recursive-compaction affinity deltas now carry private compacted continuation
+   metadata on normal structured tool results as well as generated fallbacks.
+
+2. A post-tool workspace-inaccessible claim is repairable when real workspace-tool
+   provenance plus compacted workspace intent are present.
+
+3. Synthetic acceptance readback progress now requires a byte-oriented readback.
+   Plain cat/read_text no longer satisfies the byte-level contract.
+
+4. S3 post-compaction recovery now proves:
+   successful validation command
+   -> successful result write
+   -> later separate successful byte-level readback
+   -> exact final bytes
+   -> exact PASS marker.
+
+5. Effect ordering is based on the last successful write so an earlier readback
+   cannot satisfy a later rewrite.
+
+6. Long-running S3, office soak, release-confidence, Desktop E2E, and S4 gates
+   re-check candidate identity before PASS evidence is written.
+```
+
+Focused regression tests were added/updated for the compacted workspace refusal,
+plain-cat rejection, post-last-write byte readback, candidate drift, and structured
+affinity metadata.
+
+Standalone CI #894 is the exact-SHA run for this candidate. Earlier intermediate
+CI runs from the sequential GitHub edits were cancelled by the workflow concurrency
+policy and must not be treated as candidate evidence.
+
+All positive release evidence from older SHAs is historical. Do not start fresh
+S3 accumulation until #894 and local deterministic/install gates are green.
