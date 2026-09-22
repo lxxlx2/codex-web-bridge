@@ -719,3 +719,34 @@ The codex-regression job reported:
 
 Next candidate-bound evidence required on the user's Mac is the normal deterministic/local gate set, clean install smoke, then fresh S3 accumulation on this exact SHA. Prior S3 successes belong to older candidates and cannot be counted for `f3d02327...`.
 
+## 2026-09-22 first S3 attempt on f3d02327 candidate failed post-compaction
+
+Exact candidate remained:
+
+```text
+f3d02327a5cb99513a60eeaf14fd517c5e86a09e
+```
+
+Candidate-bound local validation passed before the live run:
+
+```text
+focused tests:             69 passed
+full suite:                582 passed, 22 warnings
+public repository safety: PASS
+dependency audit:          PASS
+install smoke:             PASS
+worktree:                  clean
+```
+
+The live run passed restart continuity and compaction cooldown, then failed:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+No outer Web rate-limit classification was present in the supplied output.
+
+This attempt does not count toward S3 success accumulation. Do not change source until the latest post-compaction recovery trace is inspected for exact final text and successful command/effect sequence.
+
