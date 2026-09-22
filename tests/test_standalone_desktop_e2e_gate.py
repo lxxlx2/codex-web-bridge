@@ -103,6 +103,11 @@ def test_verify_accepts_context_tools_route_and_clean_candidate(
         stdout = ""
 
     monkeypatch.setattr(gate.core, "_git", lambda *args, **kwargs: Result())
+    monkeypatch.setattr(
+        gate.core,
+        "_assert_candidate_identity",
+        lambda candidate: None,
+    )
     written: list[str] = []
     monkeypatch.setattr(gate, "_write_result", lambda candidate: written.append(candidate))
 
