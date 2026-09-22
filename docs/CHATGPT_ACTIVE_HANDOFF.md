@@ -955,3 +955,32 @@ the unchanged candidate is appropriate after the stale generation has cleared.
 If the same preexisting-generation block repeats, investigate bounded safe retry
 or explicit external-failure classification without weakening ambiguous-submit
 protection.
+
+## 2026-09-22 fd1975e S3 retry failed at restart finalization
+
+Exact candidate remained:
+
+```text
+fd1975edf3b90e08faf86d67bdd5967b1ac5130e
+```
+
+The retry passed preflight, target reset, route/listener setup, and local gates, then
+failed early in restart continuity:
+
+```text
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+The browser-visible final was:
+
+```text
+第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。
+```
+
+This wording is semantically similar to the prior synthetic step-execution stalls,
+but it does not name `exec_command`, so the current narrow step-stall matcher may
+not recognize it. Do not change source until the restart trace is inspected for
+successful validation/write/readback progress. In particular, determine whether
+step 3 means the write already succeeded and only byte-level readback remains.
