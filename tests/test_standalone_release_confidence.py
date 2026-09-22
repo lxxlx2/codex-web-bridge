@@ -169,6 +169,11 @@ def test_run_writes_candidate_bound_confidence_result(
     soak = _soak(tmp_path / "soak" / "result.txt", candidate="abc")
     out = tmp_path / "confidence" / "result.txt"
     monkeypatch.setattr(confidence, "_git_head", lambda root: "abc")
+    monkeypatch.setattr(
+        confidence,
+        "_assert_candidate_stable",
+        lambda root, candidate: None,
+    )
 
     rc = confidence.run(
         root=tmp_path,
@@ -186,3 +191,37 @@ def test_run_writes_candidate_bound_confidence_result(
     assert "RELEASE_CONFIDENCE_S3_SPAN_SECONDS=7800" in text
     assert "RELEASE_CONFIDENCE_OFFICE_SOAK=PASS" in text
     assert "candidate_commit=abc" in text
+
+def test_candidate_drift_prevents_confidence_result(
+    tmp_path: Path,
+    monkeypatch,
+):
+    s3_root = tmp_path / "s3"
+    _stamp_result(s3_root, "20260921T000000Z", candidate="abc")
+    _stamp_result(s3_root, "20260921T010000Z", candidate="abc")
+    _stamp_result(s3_root, "20260921T021000Z", candidate="abc")
+    soak = _soak(tmp_path / "soak" / "result.txt", candidate="abc")
+    out = tmp_path / "confidence" / "result.txt"
+    monkeypatch.setattr(confidence, "_git_head", lambda root: "abc")
+    monkeypatch.setattr(
+        confidence,
+        "_assert_candidate_stable",
+        lambda root, candidate: (_ for _ in ()).throw(
+            confidence.GateFailure(
+                "release_confidence_candidate",
+                "candidate_sha_changed",
+            )
+        ),
+    )
+
+    rc = confidence.run(
+        root=tmp_path,
+        s3_root=s3_root,
+        office_soak_result=soak,
+        office_soak_root=tmp_path / "unused",
+        result_path=out,
+    )
+
+    assert rc == 1
+    assert not out.exists()
+
