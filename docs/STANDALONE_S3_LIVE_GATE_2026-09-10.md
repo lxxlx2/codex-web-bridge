@@ -1502,3 +1502,23 @@ readback. If a successful write plus a later independent readback already exist,
 the unfinished detector remains disabled. Without successful acceptance workspace
 validation, this structural repair does not activate.
 
+## 2026-09-22 release-evidence integrity hardening
+
+Astra's interrupted independent review and subsequent live S3 evidence exposed
+three release-gate invariants that are now enforced together.
+
+First, long-running candidate-bound gates re-check checkout identity immediately
+before writing PASS evidence. A clean worktree alone is insufficient because a
+clean fast-forward or branch switch can change HEAD during a run.
+
+Second, synthetic acceptance effect verification now requires the last successful
+result-file write to be followed by a separate successful byte-oriented readback.
+Plain `cat` or text-only reads do not satisfy that contract. The final on-disk
+bytes are still checked independently.
+
+Third, recursive-compaction affinity deltas now carry the newest compacted
+continuation as private metadata on both generated function-output fallbacks and
+normal structured tool results. When a real prior client-tool result exists, a
+later claim that the same compacted workspace is inaccessible is repaired as a
+continuation contradiction rather than accepted as final text. This metadata is
+internal and is not serialized into the browser-visible prompt.
