@@ -237,6 +237,34 @@ def _preflight_repo() -> None:
         raise GateFailure("codex_cli", "codex_not_found")
 
 
+def _assert_candidate_identity(
+    expected_candidate: str,
+    *,
+    expected_branch: str = EXPECTED_BRANCH,
+) -> None:
+    """Fail closed if a long-running release gate changed checkout identity."""
+
+    branch = _git("branch", "--show-current")
+    if branch.returncode != 0 or branch.stdout.strip() != expected_branch:
+        raise GateFailure(
+            "candidate_identity",
+            f"branch_changed expected={expected_branch}",
+        )
+
+    head = _git("rev-parse", "HEAD")
+    if head.returncode != 0 or head.stdout.strip() != expected_candidate:
+        raise GateFailure(
+            "candidate_identity",
+            "candidate_sha_changed",
+        )
+
+    status = _git("status", "--porcelain=v1", "--untracked-files=all")
+    if status.returncode != 0:
+        raise GateFailure("candidate_identity", "git_status_failed")
+    if status.stdout.strip():
+        raise GateFailure("candidate_identity", "worktree_changed")
+
+
 def _normalize_remote(url: str) -> str:
     value = str(url or "").strip()
     if value.startswith("git@github.com:"):
@@ -479,53 +507,75 @@ def _completed_exec_commands_from_trace(
     return commands
 
 
-def _restart_result_effects_observed(
-    trace_path: Path,
-) -> tuple[bool, bool]:
-    """Prove a successful result write followed by a separate readback."""
-
-    result_path = "context/result.txt"
-    commands = _completed_exec_commands_from_trace(
-        trace_path
+def _command_writes_result_path(
+    command: str,
+    result_path: str,
+) -> bool:
+    value = str(command or "")
+    if result_path not in value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            ">",
+            "write_text",
+            "write_bytes",
+            "tee ",
+        )
     )
 
-    write_index: int | None = None
-    for index, command in enumerate(commands):
-        if result_path not in command:
-            continue
-        if any(
-            marker in command
-            for marker in (
-                ">",
-                "write_text",
-                "write_bytes",
-                "tee ",
-            )
-        ):
-            write_index = index
-            break
 
-    if write_index is None:
+def _command_byte_reads_result_path(
+    command: str,
+    result_path: str,
+) -> bool:
+    """Recognize a real byte-oriented readback, not a plain text-only cat."""
+
+    value = str(command or "")
+    if result_path not in value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            "read_bytes",
+            "xxd ",
+            "od ",
+            "hexdump ",
+        )
+    )
+
+
+def _result_effects_observed(
+    trace_path: Path,
+    result_path: str,
+) -> tuple[bool, bool]:
+    """Prove the last successful write is followed by a byte-level readback."""
+
+    commands = _completed_exec_commands_from_trace(trace_path)
+    write_indexes = [
+        index
+        for index, command in enumerate(commands)
+        if _command_writes_result_path(command, result_path)
+    ]
+    if not write_indexes:
         return False, False
 
+    last_write_index = write_indexes[-1]
     readback = any(
-        index > write_index
-        and result_path in command
-        and any(
-            marker in command
-            for marker in (
-                "cat ",
-                "read_text",
-                "read_bytes",
-                "xxd ",
-                "od ",
-                "hexdump ",
-                "open(",
-            )
-        )
+        index > last_write_index
+        and _command_byte_reads_result_path(command, result_path)
         for index, command in enumerate(commands)
     )
     return True, readback
+
+
+def _restart_result_effects_observed(
+    trace_path: Path,
+) -> tuple[bool, bool]:
+    return _result_effects_observed(
+        trace_path,
+        "context/result.txt",
+    )
 
 
 def _run_restart_continuity(
@@ -854,12 +904,13 @@ def _run_remote_compaction_recovery(
     )
 
     _pace_before_live_turn()
+    recovery_trace = private_dir / "post-compaction-recovery.jsonl"
     try:
         recovery = large_context._run_codex_turn(
             codex=codex,
             root=root,
             prompt=large_context.build_final_prompt(),
-            trace_path=private_dir / "post-compaction-recovery.jsonl",
+            trace_path=recovery_trace,
             thread_id=thread_id,
             timeout_sec=timeout_sec,
         )
@@ -878,8 +929,11 @@ def _run_remote_compaction_recovery(
             "post_compaction_recovery",
             "thread_identity_mismatch",
         )
+    successful_recovery_commands = _completed_exec_commands_from_trace(
+        recovery_trace
+    )
     if not large_context._workspace_validation_observed(
-        recovery.commands
+        successful_recovery_commands
     ):
         raise GateFailure(
             "post_compaction_recovery",
@@ -894,6 +948,20 @@ def _run_remote_compaction_recovery(
         raise GateFailure("post_compaction_recovery", "real_client_tool_missing")
     if not large_context._final_commands_safe(recovery.commands):
         raise GateFailure("post_compaction_recovery", "unsafe_private_history_search_detected")
+    write_observed, byte_readback_observed = _result_effects_observed(
+        recovery_trace,
+        large_context.RESULT_RELATIVE.as_posix(),
+    )
+    if not write_observed:
+        raise GateFailure(
+            "post_compaction_recovery",
+            "result_write_missing",
+        )
+    if not byte_readback_observed:
+        raise GateFailure(
+            "post_compaction_recovery",
+            "result_byte_readback_missing",
+        )
     result_path = root / large_context.RESULT_RELATIVE
     try:
         actual = result_path.read_text(encoding="utf-8")
