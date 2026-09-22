@@ -240,3 +240,61 @@ def test_request_transport_fill_path_skips_browser_idle_guard():
 
     assert events == []
 
+def _chatgpt_false_page_stop_state():
+    return {
+        "generating": True,
+        "sendLooksLikeStop": False,
+        "stopBtnFound": False,
+        "configuredGenFound": False,
+        "matchedIndicatorSelector": 'button[aria-label*="停止"]',
+        "matchedIndicatorDataTestid": "",
+        "matchedIndicatorInComposer": False,
+    }
+
+
+def test_chatgpt_pre_fill_ignores_unrelated_localized_stop_outside_composer():
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor.tab = _Tab("https://chatgpt.com/c/test")
+
+    state = _chatgpt_false_page_stop_state()
+
+    assert executor._is_chatgpt_weak_page_generation_match(state) is True
+
+    executor._chatgpt_composer_send_ready = lambda selector: False
+    executor._probe_send_post_click_state = lambda selector: state
+    executor._is_arena_page = lambda: False
+
+    assert executor._wait_for_send_idle_before_action(
+        '[data-testid="send-button"]',
+        wait_timeout_override=0.01,
+    ) is True
+
+
+def test_chatgpt_pre_fill_keeps_real_composer_stop_fail_closed():
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor.tab = _Tab("https://chatgpt.com/c/test")
+
+    in_composer = _chatgpt_false_page_stop_state()
+    in_composer["matchedIndicatorInComposer"] = True
+    assert executor._is_chatgpt_weak_page_generation_match(in_composer) is False
+
+    canonical_stop = _chatgpt_false_page_stop_state()
+    canonical_stop["matchedIndicatorDataTestid"] = "stop-button"
+    assert executor._is_chatgpt_weak_page_generation_match(canonical_stop) is False
+
+    send_is_stop = _chatgpt_false_page_stop_state()
+    send_is_stop["sendLooksLikeStop"] = True
+    assert executor._is_chatgpt_weak_page_generation_match(send_is_stop) is False
+
+
+def test_non_chatgpt_page_stop_is_never_relaxed_by_chatgpt_rule():
+    executor = WorkflowExecutor.__new__(WorkflowExecutor)
+    executor.tab = _Tab("https://example.com/")
+
+    assert (
+        executor._is_chatgpt_weak_page_generation_match(
+            _chatgpt_false_page_stop_state()
+        )
+        is False
+    )
+
