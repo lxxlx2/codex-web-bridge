@@ -1476,3 +1476,36 @@ Migration plan: upgrade the existing npm installation in place to Codex CLI 0.15
 verify every visible `codex` executable and PATH resolution, and preserve an exact
 rollback command to npm 0.153.4. Once the CLI changes, candidate live evidence must
 be regenerated with the exact CLI version recorded.
+
+## 2026-09-23 Codex CLI 0.156.0 installed and S3 baseline bound
+
+Primary selected CLI now reports:
+
+```text
+/Users/jerson/.nvm/versions/node/v24.18.0/bin/codex
+codex-cli 0.156.0
+@openai/codex@0.156.0
+```
+
+A stale lower-priority standalone installation remains at:
+
+```text
+/Users/jerson/.local/bin/codex
+codex-cli 0.148.0
+```
+
+It is currently shadowed by the NVM/npm path and has not been deleted.
+
+The public `standalone-dev` branch now binds release S3 evidence to Codex CLI
+0.156.0. The runner parses the selected `codex --version`, rejects any other
+version, prints `S3_CODEX_CLI_VERSION=0.156.0`, records the version in successful
+private result evidence, and re-checks the version before pass promotion.
+
+Current exact source candidate after the baseline binding/documentation commits:
+
+```text
+1543a28ffcfb9cc639d9db0fbe60fd8974c92f57
+```
+
+All older candidate-bound local/CI/S3 evidence is historical and must not count
+toward the 0.156.0 release baseline.
