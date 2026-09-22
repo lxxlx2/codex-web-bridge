@@ -1,7 +1,8 @@
 import json
 
-from app.api.chat import ResponsesRequest
+from app.api.chat import ChatRequest, ResponsesRequest
 from app.api.codex_responses_v2 import (
+    _browser_delta_chat_request,
     _clone_for_required_tool_retry,
     _completed_response_has_no_output,
     _required_tool_failed_events,
@@ -156,3 +157,63 @@ def test_completed_empty_output_is_rejected():
         "incomplete",
         {"output": []},
     )
+
+def test_affinity_structured_tool_delta_carries_private_compacted_context():
+    compacted = (
+        "[Compacted prior context]\n"
+        "[ACTIVE CONTINUATION STATE]\n"
+        "Continue large_context/result.txt and only then return LARGE_CONTEXT_PASS."
+    )
+    state = ChatRequest(
+        model="chatgpt",
+        messages=[
+            {"role": "assistant", "content": compacted},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_latest",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": '{"cmd":"pwd && ls -la large_context"}',
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_latest",
+                "name": "exec_command",
+                "content": "Process exited with code 0\nFinal output: total 0\n",
+            },
+        ],
+        tools=[],
+    )
+    source = ResponsesRequest(
+        model="chatgpt",
+        input=[
+            {
+                "type": "function_call_output",
+                "call_id": "call_latest",
+                "output": "Process exited with code 0\nFinal output: total 0\n",
+            }
+        ],
+        tools=[_tool("exec_command")],
+    )
+
+    delta = _browser_delta_chat_request(state, source)
+    tool_messages = [
+        message
+        for message in delta.messages
+        if isinstance(message, dict)
+        and message.get("role") == "tool"
+    ]
+
+    assert tool_messages
+    assert (
+        tool_messages[-1]["_uwa_compacted_continuation_context"]
+        == compacted
+    )
+
