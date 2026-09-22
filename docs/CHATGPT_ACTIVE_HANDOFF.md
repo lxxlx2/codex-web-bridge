@@ -916,3 +916,42 @@ be made until the private `remote-compaction-probe.log` and final trigger trace 
 inspected. The failure can represent threshold/probe calibration, trigger reply
 contract, rollout lifecycle, Remote V2 completion, token-leak guard, or an external
 Web failure, and these require different handling.
+
+## 2026-09-22 fd1975e first S3 remote-compaction failure classified as transient pre-submit block
+
+Private coarse-turn trace showed the exact failure:
+
+```text
+error: stream disconnected before completion: send_blocked_by_preexisting_generation
+turn.failed
+agent messages: none
+client commands: none
+usage: none
+```
+
+The browser log showed the guard detected an older generation/stop-state before
+submitting the coarse filler and waited for it to end:
+
+```text
+[SEND] 发送前检测到页面仍处于旧生成/停止态，等待其结束后再提交本次消息
+```
+
+The workflow's terminal-send contract treats
+`send_blocked_by_preexisting_generation` as a prompt-filled-but-never-dispatched
+failure. Therefore this run did not execute the coarse filler and produced no
+workspace/tool side effects. The earlier priority-tier warning is compatibility
+noise and not the failure cause.
+
+Classification: transient external/browser-surface pre-submit blocker. Do not
+change product source from this single occurrence because the guard behaved
+fail-closed and prevented an ambiguous submit. Candidate remains:
+
+```text
+fd1975edf3b90e08faf86d67bdd5967b1ac5130e
+```
+
+The failed run does not count toward S3 success accumulation. A fresh S3 run on
+the unchanged candidate is appropriate after the stale generation has cleared.
+If the same preexisting-generation block repeats, investigate bounded safe retry
+or explicit external-failure classification without weakening ambiguous-submit
+protection.
