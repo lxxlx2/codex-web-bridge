@@ -1344,3 +1344,52 @@ macos-compat      PASS
 
 This candidate is eligible for a fresh S3 attempt. No successful S3 evidence from
 older SHAs may be counted.
+
+## 2026-09-22/23 S3 success #1 for 8cc96f3 candidate
+
+Exact candidate:
+
+```text
+8cc96f38229d26ff22d124d8ef817bfb9ddde516
+```
+
+Fresh live S3 success #1 completed with the candidate unchanged and the repository
+clean afterward.
+
+Observed local timestamps from the live output:
+
+```text
+run start:              2026-09-22 20:30:41 +07
+compaction cooldown:    completed by 2026-09-22 21:19:30 +07
+final S3 pass:          shortly after 2026-09-22 21:19:35 +07
+```
+
+Equivalent UTC evidence window is approximately 2026-09-22 13:30Z through
+14:19Z.
+
+Required live markers all passed:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+S3_PHASE=COMPACTION_RECOVERY_PASS
+S3_REPO_PREFLIGHT=PASS
+S3_LISTENER_TRANSITION=RESTARTED
+S3_LOCAL_SAFETY_REGRESSION=PASS
+S3_UWA_HEALTH=PASS
+S3_REAL_CLIENT_TOOL=PASS
+S3_SAME_THREAD_RESTART_RECOVERY=PASS
+S3_NATIVE_AUTO_COMPACTION=PASS
+S3_REMOTE_V2_COMPACTION=PASS
+S3_POST_COMPACTION_RECOVERY=PASS
+S3_ROUTE_UWA_CHATGPT_HIGH=PASS
+S3_REQUEST_MANAGER_CLEAN=PASS
+S3_REPOSITORY_CLEAN_AFTER_LIVE=PASS
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+S3 candidate-bound success count for this SHA is now 1/3.
+
+Release timing requirement remains: three successes total across at least two
+two-hour UTC evidence windows, with at least 7200 seconds from the first success
+evidence to the last. Older SHA successes do not count.
