@@ -296,6 +296,7 @@ def run(
         if status.returncode != 0 or status.stdout.strip():
             raise GateFailure("office_soak_repo_cleanliness", "repository_changed")
 
+        core._assert_candidate_identity(candidate)
         _write_result(
             private_dir,
             candidate=candidate,
