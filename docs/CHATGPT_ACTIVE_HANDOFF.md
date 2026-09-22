@@ -892,3 +892,27 @@ Exact-SHA GitHub Standalone CI #895 completed successfully for the same SHA.
 
 This candidate is now eligible to start fresh S3 evidence accumulation. All S3
 success evidence from earlier SHAs remains historical and must not be counted.
+
+## 2026-09-22 first live S3 attempt on fd1975e failed during remote compaction probe
+
+Exact candidate remained:
+
+```text
+fd1975edf3b90e08faf86d67bdd5967b1ac5130e
+```
+
+The run passed release preflight, repo preflight, local gates, route setup, listener
+startup, and restart continuity, then failed before post-compaction recovery:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+This attempt does not count toward S3 success accumulation. No source change should
+be made until the private `remote-compaction-probe.log` and final trigger trace are
+inspected. The failure can represent threshold/probe calibration, trigger reply
+contract, rollout lifecycle, Remote V2 completion, token-leak guard, or an external
+Web failure, and these require different handling.
