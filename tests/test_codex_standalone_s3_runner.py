@@ -131,6 +131,29 @@ class StandaloneS3RunnerTests(unittest.TestCase):
 
             self.assertEqual(
                 s3.core._restart_result_effects_observed(trace),
+                (True, False),
+            )
+
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": (
+                            "/bin/zsh -lc 'od -An -t x1 context/result.txt'"
+                        ),
+                    },
+                }
+            )
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._restart_result_effects_observed(trace),
                 (True, True),
             )
 
@@ -522,6 +545,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     return_value={"blocking_reason": "none"},
                 ),
                 patch.object(s3.core, "run", return_value=0),
+                patch.object(s3.core, "_assert_candidate_identity"),
                 patch.object(s3, "_promote_core_result"),
                 patch.object(s3, "_restore_codex_desktop"),
             ):
@@ -768,6 +792,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     return_value={"blocking_reason": "none"},
                 ),
                 patch.object(s3.core, "run", return_value=0),
+                patch.object(s3.core, "_assert_candidate_identity"),
                 patch.object(s3, "_promote_core_result"),
                 patch.object(s3, "_restore_codex_desktop"),
             ):
@@ -932,3 +957,61 @@ class StandaloneS3RunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_result_effects_require_readback_after_last_successful_write(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            trace = Path(raw) / "trace.jsonl"
+            events = []
+            for command in (
+                "printf '%s\\n' FIRST > large_context/result.txt",
+                "od -An -t x1 large_context/result.txt",
+                "printf '%s\\n' SECOND > large_context/result.txt",
+            ):
+                events.append(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "status": "completed",
+                            "exit_code": 0,
+                            "command": command,
+                        },
+                    }
+                )
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._result_effects_observed(
+                    trace,
+                    "large_context/result.txt",
+                ),
+                (True, False),
+            )
+
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": "xxd -p large_context/result.txt",
+                    },
+                }
+            )
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                s3.core._result_effects_observed(
+                    trace,
+                    "large_context/result.txt",
+                ),
+                (True, True),
+            )
+
