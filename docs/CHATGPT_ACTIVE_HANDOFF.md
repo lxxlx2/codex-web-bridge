@@ -984,3 +984,28 @@ but it does not name `exec_command`, so the current narrow step-stall matcher ma
 not recognize it. Do not change source until the restart trace is inspected for
 successful validation/write/readback progress. In particular, determine whether
 step 3 means the write already succeeded and only byte-level readback remains.
+
+## 2026-09-22 restart step-3 readback stall repaired
+
+Private restart evidence on `fd1975e...` proved:
+
+```text
+validation = successful
+write = successful
+byte readback = missing
+result file = exact EMBER-7319 plus trailing LF
+final = 第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。
+```
+
+The final omitted the tool name, so the older narrow numbered-step matcher did
+not activate. ChatGPT repaired this structurally using proven acceptance effect
+state. When the write is already proven and readback remains incomplete, a
+step-3 verification stall referencing the requested PASS contract advances only
+to the separate byte-level readback and explicitly forbids rewriting the file.
+
+Premature-PASS detection was also corrected to require readback after the last
+successful write rather than after the first write.
+
+The current release candidate is the latest `standalone-dev` head after the
+source, regression-test, and release-document commits. All prior candidate-bound
+positive evidence is historical and must be regenerated.
