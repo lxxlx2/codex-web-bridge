@@ -1393,3 +1393,35 @@ S3 candidate-bound success count for this SHA is now 1/3.
 Release timing requirement remains: three successes total across at least two
 two-hour UTC evidence windows, with at least 7200 seconds from the first success
 evidence to the last. Older SHA successes do not count.
+
+## 2026-09-23 S3 attempt #2 failed after compaction recovery turn
+
+Exact candidate remained:
+
+```text
+8cc96f38229d26ff22d124d8ef817bfb9ddde516
+```
+
+The second fresh live attempt started around 2026-09-23 02:10 +07 and reached:
+
+```text
+S3_PHASE=RESTART_CONTINUITY_PASS
+S3_PHASE=COMPACTION_COOLDOWN_PASS
+```
+
+before failing at:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+Do not count this as S3 success #2. S3 success count remains 1/3.
+
+The candidate source must not be changed until the new
+`post-compaction-recovery.jsonl` is inspected. Compare its command/effect
+sequence with the prior failing run that executed validation, write, byte readback,
+then a redundant rewrite. Determine whether the completed-acceptance closure policy
+was reached, whether the redundant rewrite was prevented, and what exact final
+assistant message was returned.
