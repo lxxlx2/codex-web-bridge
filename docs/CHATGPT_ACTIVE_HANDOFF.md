@@ -1425,3 +1425,29 @@ sequence with the prior failing run that executed validation, write, byte readba
 then a redundant rewrite. Determine whether the completed-acceptance closure policy
 was reached, whether the redundant rewrite was prevented, and what exact final
 assistant message was returned.
+
+## 2026-09-23 CLI compatibility strategy pivot
+
+The release strategy is now to absorb current stable Codex CLI compatibility before
+publishing the first RC instead of finishing the RC exclusively on the historical
+0.153.4 baseline.
+
+Important correction from source review: the standalone bridge already implements
+streamed Remote Compaction V2 using trailing `{"type":"compaction_trigger"}` items
+on `/v1/responses`, emits one `type=compaction` output item, and carries the
+UWA-owned compaction envelope through `encrypted_content`. That support is present
+in `app/services/codex_remote_compaction_v2.py` and was originally hardened against
+Codex 0.153.4 behavior. The legacy `/v1/responses/compact` route remains only as a
+compatibility path and should not be mistaken for the active V2 implementation.
+
+Therefore the next compatibility target should be the current stable Codex CLI
+0.156.0 rather than stopping at 0.155.1. Keep 0.153.4 as the known-good compatibility
+floor while validating 0.156.0 as the new release baseline.
+
+Before changing CLI, preserve the failed S3 #2 private trace as a 0.153.4 comparison
+fixture. After the CLI changes, all release-candidate live evidence must be regenerated
+and must record the exact CLI version as part of the environment identity.
+
+The local Mac currently also requires acceptance of the Xcode/Apple SDK license;
+the diagnostic shell reached the worktree check and was blocked by xcodebuild before
+completion.
