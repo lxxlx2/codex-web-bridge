@@ -484,6 +484,54 @@ class WorkflowExecutorSendMixin:
             or state.get("stopBtnFound")
         )
 
+    def _is_chatgpt_weak_page_generation_match(
+        self,
+        state: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Ignore only weak page-wide Stop labels outside ChatGPT's composer."""
+
+        if not isinstance(state, dict):
+            return False
+
+        tab = getattr(self, "tab", None)
+        try:
+            current_url = str(
+                getattr(tab, "url", "")
+                or ""
+            ).lower()
+        except Exception:
+            current_url = ""
+        if "chatgpt.com" not in current_url:
+            return False
+
+        weak_selectors = {
+            'button[aria-label*="Stop"]',
+            'button[aria-label*="stop"]',
+            'button[aria-label*="停止"]',
+        }
+        matched = str(
+            state.get("matchedIndicatorSelector")
+            or ""
+        )
+        if matched not in weak_selectors:
+            return False
+
+        if bool(state.get("sendLooksLikeStop")):
+            return False
+        if bool(state.get("stopBtnFound")):
+            return False
+        if bool(state.get("configuredGenFound")):
+            return False
+        if str(
+            state.get("matchedIndicatorDataTestid")
+            or ""
+        ).strip() == "stop-button":
+            return False
+        if bool(state.get("matchedIndicatorInComposer")):
+            return False
+
+        return True
+
     def _is_arena_page(self) -> bool:
         tab = getattr(self, "tab", None)
         if tab is None:
@@ -708,6 +756,12 @@ class WorkflowExecutorSendMixin:
 
         state = self._probe_send_post_click_state(send_selector)
         if not self._is_send_post_click_confirmed(state):
+            return True
+        if self._is_chatgpt_weak_page_generation_match(state):
+            logger.info(
+                "[SEND] ChatGPT ignored unrelated page-level Stop control "
+                f"(matched_indicator={state.get('matchedIndicatorSelector')!r})"
+            )
             return True
 
         if self._is_arena_page():
@@ -1078,13 +1132,31 @@ class WorkflowExecutorSendMixin:
                     sendBtn.textContent
                 ].map(lowered).join(' ') : '';
 
+                const promptNode = document.querySelector('#prompt-textarea');
+                const composerRoot = promptNode
+                    ? (
+                        promptNode.closest('form')
+                        || promptNode.closest('.shadow-short-composer')
+                        || promptNode.parentElement
+                    )
+                    : null;
+
                 let matchedIndicatorSelector = '';
+                let matchedIndicatorDataTestid = '';
+                let matchedIndicatorInComposer = false;
                 const generatingIndicator = indicators.some(selector => {{
                     try {{
                         const nodes = document.querySelectorAll(selector);
                         for (const node of nodes) {{
                             if (isVisible(node)) {{
                                 matchedIndicatorSelector = selector;
+                                matchedIndicatorDataTestid = node.getAttribute
+                                    ? String(node.getAttribute('data-testid') || '')
+                                    : '';
+                                matchedIndicatorInComposer = !!(
+                                    composerRoot
+                                    && composerRoot.contains(node)
+                                );
                                 const info = extractNodeInfo(node, 'matched_indicator:' + selector);
                                 if (info) details.push(info);
                                 return true;
@@ -1095,7 +1167,6 @@ class WorkflowExecutorSendMixin:
                         return false;
                     }}
                 }});
-
                 const sendLooksLikeStop = !!sendMeta && (
                     /\bstop\b|\bstopping\b|\bcancel\b|\babort\b/.test(sendMeta)
                     || /停止|中止|取消/.test(sendMeta)
@@ -1131,6 +1202,8 @@ class WorkflowExecutorSendMixin:
                     stopBtnFound,
                     configuredGenFound,
                     matchedIndicatorSelector,
+                    matchedIndicatorDataTestid,
+                    matchedIndicatorInComposer,
                     generating: isGenerating,
                     details: details,
                     visibleButtons: visibleButtons
