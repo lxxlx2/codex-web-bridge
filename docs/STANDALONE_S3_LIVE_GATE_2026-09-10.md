@@ -1522,3 +1522,28 @@ normal structured tool results. When a real prior client-tool result exists, a
 later claim that the same compacted workspace is inaccessible is repaired as a
 continuation contradiction rather than accepted as final text. This metadata is
 internal and is not serialized into the browser-visible prompt.
+
+## 2026-09-22 state-aware restart step recovery
+
+A live restart-continuity turn proved the workspace validation and result-file
+write had both completed successfully, while the required byte-level readback
+had not:
+
+```text
+validation:       PASS
+write:            PASS
+byte readback:    missing
+result bytes:     exact
+assistant final:  第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。
+```
+
+The continuation repair now uses proven synthetic acceptance effect state when
+interpreting blocked numbered steps. After a successful write, a step-3
+verification stall that withholds the requested PASS marker is treated as an
+unfinished readback continuation even when the final text does not repeat the
+client tool name. The repair must continue with the separate byte-level
+readback and must not rewrite the result file.
+
+The same change also makes premature-PASS detection evaluate readback relative
+to the last successful write, so an older readback cannot satisfy a later
+rewrite.
