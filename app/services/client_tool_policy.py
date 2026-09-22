@@ -942,13 +942,10 @@ def _command_reads_result_path(command: str, result_path: str) -> bool:
     return any(
         marker in value
         for marker in (
-            "cat ",
-            "read_text",
             "read_bytes",
             "xxd ",
             "od ",
             "hexdump ",
-            "open(",
         )
     )
 
@@ -1165,8 +1162,19 @@ def should_repair_client_workspace_refusal(
         # encode tool output as the newest user item.
         if (
             workspace_tool_provenance
-            and looks_like_post_tool_unavailable_claim(assistant_text)
+            and (
+                looks_like_post_tool_unavailable_claim(assistant_text)
+                or (
+                    compacted_workspace_request
+                    and looks_like_client_access_refusal(assistant_text)
+                )
+            )
         ):
+            # A real prior client-tool result plus compacted workspace intent
+            # proves the client workspace path is actionable. A later claim
+            # that the same workspace is inaccessible is therefore a
+            # contradiction even when the final wording does not explicitly
+            # say that exec_command itself is unavailable.
             return True
 
         # After recursive compaction the model can retain the exact pending
@@ -1367,8 +1375,8 @@ def build_client_workspace_repair_messages(
                     "another acknowledgement before the independent readback completes."
                 )
             action = (
-                f"Call {preferred_name} now to independently read and verify the existing {result_path}. "
-                "Return only the corrected tool-call output."
+                f"Call {preferred_name} now to perform a separate byte-level readback and verify the existing {result_path}, "
+                "including the trailing newline. Return only the corrected tool-call output."
             )
         else:
             correction = (
