@@ -1009,3 +1009,36 @@ successful write rather than after the first write.
 The current release candidate is the latest `standalone-dev` head after the
 source, regression-test, and release-document commits. All prior candidate-bound
 positive evidence is historical and must be regenerated.
+
+## 2026-09-22 77f12c2 candidate deterministic gates green
+
+Exact candidate:
+
+```text
+77f12c2374ceeef463a9d245b018a675c68ec053
+```
+
+Candidate-bound local validation passed:
+
+```text
+acceptance focused:         75 passed
+release-hardening focused:  46 passed, 8 warnings
+full suite:                 591 passed, 22 warnings
+public repository safety:  PASS
+dependency audit:           PASS
+install smoke:              PASS
+final identity/worktree:    clean and unchanged
+```
+
+Exact-SHA GitHub Standalone CI #898 also completed successfully for the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+This candidate is now eligible for fresh S3 accumulation. All S3 success evidence
+from older SHAs is historical.
