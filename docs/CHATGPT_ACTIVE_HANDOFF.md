@@ -1311,3 +1311,36 @@ Only the regression expectation was changed. Current exact candidate:
 
 Exact-SHA Standalone CI is run #908. Candidate-bound validation for the prior SHA
 must not be reused.
+
+## 2026-09-22 8cc96f3 candidate deterministic gates green
+
+Exact candidate:
+
+```text
+8cc96f38229d26ff22d124d8ef817bfb9ddde516
+```
+
+Candidate-bound local validation passed:
+
+```text
+acceptance closure focused:      79 passed
+compaction/response focused:     30 passed, 8 warnings
+full suite:                      601 passed, 22 warnings
+public repository safety:        PASS
+dependency audit:                PASS
+install smoke:                   PASS
+final identity/worktree:         clean and unchanged
+```
+
+Exact-SHA GitHub Standalone CI #908 also completed successfully for the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+This candidate is eligible for a fresh S3 attempt. No successful S3 evidence from
+older SHAs may be counted.
