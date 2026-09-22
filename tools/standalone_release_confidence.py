@@ -54,6 +54,35 @@ def _git_head(root: Path) -> str:
     return result.stdout.strip()
 
 
+def _assert_candidate_stable(
+    root: Path,
+    expected_candidate: str,
+) -> None:
+    if _git_head(root) != expected_candidate:
+        raise GateFailure(
+            "release_confidence_candidate",
+            "candidate_sha_changed",
+        )
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=str(root),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise GateFailure(
+            "release_confidence_candidate",
+            "git_status_failed",
+        )
+    if status.stdout.strip():
+        raise GateFailure(
+            "release_confidence_candidate",
+            "worktree_changed",
+        )
+
+
 def parse_key_values(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw in text.splitlines():
@@ -276,6 +305,10 @@ def run(
         )
         print("RELEASE_CONFIDENCE_OFFICE_SOAK=PASS", flush=True)
 
+        _assert_candidate_stable(
+            root,
+            candidate,
+        )
         _write_result(
             result_path,
             candidate=candidate,
