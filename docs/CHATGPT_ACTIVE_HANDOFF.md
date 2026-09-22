@@ -1203,3 +1203,36 @@ macos-compat      PASS
 ```
 
 This candidate is eligible for a fresh S3 attempt. Older S3 evidence remains historical.
+
+## 2026-09-22 2b5a177 first live S3 reached post-compaction recovery
+
+Exact candidate:
+
+```text
+2b5a1772e96e4f6961685757a9cf60aa3b544cc0
+```
+
+This run passed:
+
+```text
+RESTART_CONTINUITY_PASS
+remote compaction probe
+180-second compaction cooldown
+COMPACTION_COOLDOWN_PASS
+```
+
+and then failed at:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=final_reply_mismatch
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+This is materially later than the prior pre-fill Stop false-positive failures and
+confirms that the localized Stop hardening let the remote-compaction probe
+progress.
+
+Do not change source until `post-compaction-recovery.jsonl` is inspected for:
+the exact final assistant message, successful workspace-validation command,
+result write, separate byte readback, and the final on-disk bytes.
