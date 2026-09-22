@@ -838,3 +838,31 @@ policy and must not be treated as candidate evidence.
 
 All positive release evidence from older SHAs is historical. Do not start fresh
 S3 accumulation until #894 and local deterministic/install gates are green.
+
+## 2026-09-22 focused regression follow-up
+
+The first local focused run on candidate `49da82d...` failed exactly one new
+regression:
+
+```text
+test_post_tool_workspace_inaccessible_claim_uses_private_compacted_state
+```
+
+The implementation carried private compacted metadata correctly, but the compacted
+acceptance state did not match the generic workspace-intent classifier because it
+used `large_context/result.txt` / `LARGE_CONTEXT_PASS` rather than one of the
+older generic workspace keywords. The exact live refusal shape also used
+"当前运行环境无法访问 ..." which was narrower than the older refusal patterns.
+
+This was fixed structurally by recognizing the synthetic acceptance result paths
+and PASS markers as workspace intent and by recognizing current running/execution
+environment path-access refusals.
+
+New exact candidate:
+
+```text
+fd1975edf3b90e08faf86d67bdd5967b1ac5130e
+```
+
+Exact-SHA Standalone CI is run #895. Local focused/full deterministic gates must
+be rerun on this SHA before any S3 evidence is accumulated.
