@@ -866,3 +866,29 @@ fd1975edf3b90e08faf86d67bdd5967b1ac5130e
 
 Exact-SHA Standalone CI is run #895. Local focused/full deterministic gates must
 be rerun on this SHA before any S3 evidence is accumulated.
+
+## 2026-09-22 fd1975e candidate deterministic gates green
+
+Exact candidate:
+
+```text
+fd1975edf3b90e08faf86d67bdd5967b1ac5130e
+```
+
+Candidate-bound local deterministic validation passed:
+
+```text
+release-hardening focused: 117 passed, 8 warnings
+full suite:                587 passed, 22 warnings
+public repository safety: PASS
+dependency audit:          PASS
+install smoke:             PASS
+worktree/final identity:   clean and unchanged
+```
+
+The visible browser install-smoke surface also returned `INSTALL_SMOKE_PASS`.
+
+Exact-SHA GitHub Standalone CI #895 completed successfully for the same SHA.
+
+This candidate is now eligible to start fresh S3 evidence accumulation. All S3
+success evidence from earlier SHAs remains historical and must not be counted.
