@@ -35,6 +35,64 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Release-grade standalone S3 acceptance", result.stdout)
 
+    def test_codex_cli_identity_parses_selected_cli_version(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["codex", "--version"],
+            returncode=0,
+            stdout="codex-cli 0.156.0\n",
+        )
+        with (
+            patch.object(
+                s3.core.shutil,
+                "which",
+                return_value="/tmp/codex",
+            ),
+            patch.object(
+                s3.core,
+                "_run",
+                return_value=completed,
+            ),
+        ):
+            path, version = s3.core._codex_cli_identity()
+
+        self.assertEqual(path, "/tmp/codex")
+        self.assertEqual(version, "0.156.0")
+
+    def test_expected_codex_cli_version_rejects_other_versions(self) -> None:
+        with patch.object(
+            s3.core,
+            "_codex_cli_identity",
+            return_value=("/tmp/codex", "0.155.1"),
+        ):
+            with self.assertRaises(s3.GateFailure) as ctx:
+                s3.core._assert_expected_codex_cli_version()
+
+        self.assertEqual(
+            ctx.exception.gate,
+            "codex_cli_version",
+        )
+        self.assertIn(
+            "expected=0.156.0",
+            ctx.exception.detail,
+        )
+        self.assertIn(
+            "actual=0.155.1",
+            ctx.exception.detail,
+        )
+
+    def test_expected_codex_cli_version_accepts_release_baseline(self) -> None:
+        with patch.object(
+            s3.core,
+            "_codex_cli_identity",
+            return_value=("/tmp/codex", "0.156.0"),
+        ):
+            path, version = (
+                s3.core._assert_expected_codex_cli_version()
+            )
+
+        self.assertEqual(path, "/tmp/codex")
+        self.assertEqual(version, "0.156.0")
+
     def test_codex_jsonl_parser_keeps_only_gate_metadata(self) -> None:
         events = [
             {"type": "thread.started", "thread_id": "private-thread"},
