@@ -1280,3 +1280,34 @@ c34fcd61478abc73311e42d3f70eb48bb7b7c261
 ```
 
 Exact-SHA Standalone CI is run #907. Older candidate-bound evidence is historical.
+
+## 2026-09-22 completed-acceptance regression expectation corrected
+
+Local focused validation on `c34fcd6...` found one stale test expectation:
+
+```text
+test_acceptance_incomplete_after_write_and_readback_is_not_unfinished
+expected should_repair_client_workspace_refusal(...) is False
+actual True
+```
+
+The implementation behavior is intentional. After validation, write, and later
+byte-level readback have completed, `ACCEPTANCE_INCOMPLETE` is no longer an
+unfinished-effect signal, but it is still an invalid terminal response because
+the synthetic contract requires the exact success sentinel. The regression now
+asserts:
+
+```text
+looks_like_incomplete_acceptance_continuation(...) == False
+looks_like_acceptance_completion_without_exact_sentinel(...) == True
+should_repair_client_workspace_refusal(...) == True
+```
+
+Only the regression expectation was changed. Current exact candidate:
+
+```text
+8cc96f38229d26ff22d124d8ef817bfb9ddde516
+```
+
+Exact-SHA Standalone CI is run #908. Candidate-bound validation for the prior SHA
+must not be reused.
