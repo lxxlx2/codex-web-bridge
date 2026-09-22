@@ -376,6 +376,13 @@ def run(
         print("S4_S3_CANDIDATE_MATCH=PASS", flush=True)
         check_desktop_candidate(root, desktop_result)
         print("S4_DESKTOP_E2E_CANDIDATE_MATCH=PASS", flush=True)
+        require_clean_worktree(root)
+        if git_head(root) != candidate:
+            raise GateFailure(
+                "candidate_identity",
+                "candidate_sha_changed",
+            )
+        print("S4_CANDIDATE_STABLE=PASS", flush=True)
         print("STANDALONE_S4_LOCAL=PASS", flush=True)
         return 0
     except GateFailure as exc:
