@@ -1451,3 +1451,28 @@ and must record the exact CLI version as part of the environment identity.
 The local Mac currently also requires acceptance of the Xcode/Apple SDK license;
 the diagnostic shell reached the worktree check and was blocked by xcodebuild before
 completion.
+
+## 2026-09-23 local Codex installation source confirmed before 0.156 migration
+
+Primary Codex executable is the NVM/npm installation:
+
+```text
+/Users/jerson/.nvm/versions/node/v24.18.0/bin/codex
+@openai/codex@0.153.4
+node v24.18.0
+npm 11.16.0
+```
+
+A second lower-priority executable also exists at:
+
+```text
+/Users/jerson/.local/bin/codex
+```
+
+Homebrew Codex is not installed. The current Homebrew cask metadata reports
+0.155.1, so Homebrew should not be introduced for this migration.
+
+Migration plan: upgrade the existing npm installation in place to Codex CLI 0.156.0,
+verify every visible `codex` executable and PATH resolution, and preserve an exact
+rollback command to npm 0.153.4. Once the CLI changes, candidate live evidence must
+be regenerated with the exact CLI version recorded.
