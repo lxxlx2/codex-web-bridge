@@ -1509,3 +1509,44 @@ Current exact source candidate after the baseline binding/documentation commits:
 
 All older candidate-bound local/CI/S3 evidence is historical and must not count
 toward the 0.156.0 release baseline.
+
+## 2026-09-23 0.156 deterministic gate exposed package-import defect
+
+The first local 0.156 compatibility gate did not reach protocol execution. Pytest
+collection failed while importing:
+
+```text
+tests/test_codex_remote_compaction_trigger_probe.py
+ModuleNotFoundError: No module named 'codex_auto_compact_trigger_probe'
+```
+
+Root cause: several tools relied on direct-script sibling imports. That works when
+Python executes a file from `tools/`, because that directory is put on
+`sys.path`, but fails when pytest imports the same module as
+`tools.codex_remote_compaction_trigger_probe`.
+
+The three compaction probe modules now support both forms:
+
+```text
+package import:  from . import sibling
+direct script:   fallback to import sibling
+```
+
+Files changed:
+
+```text
+tools/codex_remote_compaction_trigger_probe.py
+tools/codex_auto_compact_trigger_probe.py
+tools/codex_large_context_live.py
+```
+
+This is an import/packaging regression in the release tooling, not yet evidence of
+a Codex 0.156 wire/protocol incompatibility.
+
+Current exact candidate:
+
+```text
+96157a51979815b5a2e2e57b258339fedac73748
+```
+
+All candidate-bound evidence from `1543a28...` is superseded.
