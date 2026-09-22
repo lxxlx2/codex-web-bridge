@@ -1593,3 +1593,34 @@ no configured generation indicator
 Real composer-local Stop controls, canonical stop-button controls, send-as-Stop
 state, configured generation selectors, and all non-ChatGPT sites remain
 fail-closed.
+
+## 2026-09-22 completed-acceptance closure after post-compaction readback
+
+A live post-compaction recovery reached all required workspace effects successfully:
+
+```text
+workspace validation     PASS
+result write             PASS
+separate byte readback  PASS
+result bytes             ORBIT-5921 + trailing LF
+```
+
+The model then emitted an additional workspace command that rewrote
+`large_context/result.txt` and only used `cat` afterward, followed by descriptive
+prose instead of the exact `LARGE_CONTEXT_PASS` sentinel. That extra write made
+the previous byte readback stale under the gate's last-write ordering rule.
+
+The client-tool policy now treats a synthetic acceptance as effect-complete only
+when workspace validation succeeded and a byte-level readback followed the last
+successful result-file write. Once that state is proven:
+
+```text
+any further exec-like tool call is rejected before client execution
+descriptive or otherwise non-exact final prose is repaired
+the result file must not be rewritten or re-read
+the only valid completion is the exact requested success sentinel
+```
+
+This is intentionally scoped to the repository's synthetic
+`CONTEXT_PASS` / `LARGE_CONTEXT_PASS` acceptance contracts. Ordinary coding
+tasks and incomplete acceptance sequences keep their existing behavior.
