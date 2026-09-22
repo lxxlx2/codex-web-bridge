@@ -890,6 +890,69 @@ def _looks_like_acceptance_capability_refusal(
     return tool_unavailable or workspace_unavailable
 
 
+def _looks_like_acceptance_effect_step_stall(
+    assistant_text: str,
+    marker: str,
+    *,
+    write_observed: bool,
+    readback_observed: bool,
+) -> bool:
+    """Use proven acceptance progress to interpret a blocked numbered step."""
+
+    value = str(assistant_text or "").strip()
+    if not value or readback_observed:
+        return False
+
+    marker_pattern = (
+        rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])"
+    )
+    if re.search(marker_pattern, value) is None:
+        return False
+
+    withheld_success = re.search(
+        r"(?:不能|无法|不可|cannot|can't|unable)"
+        r".{0,60}(?:回复|返回|reply|return)",
+        value,
+        re.IGNORECASE | re.DOTALL,
+    ) is not None
+    if not withheld_success:
+        return False
+
+    blocked = (
+        r"(?:无法|不能|未能|不可|cannot|can't|could\s+not|unable)"
+    )
+    if write_observed:
+        return (
+            re.search(
+                rf"(?:第三步|step\s*3).{{0,120}}{blocked}",
+                value,
+                re.IGNORECASE | re.DOTALL,
+            )
+            is not None
+            and re.search(
+                r"(?:验证|校验|字节|readback|verify|verification|byte)",
+                value,
+                re.IGNORECASE | re.DOTALL,
+            )
+            is not None
+        )
+
+    return (
+        re.search(
+            rf"(?:第二步|step\s*2).{{0,120}}{blocked}",
+            value,
+            re.IGNORECASE | re.DOTALL,
+        )
+        is not None
+        and re.search(
+            r"(?:写入|执行|完成|write|execute|complete)",
+            value,
+            re.IGNORECASE | re.DOTALL,
+        )
+        is not None
+    )
+
+
 def looks_like_incomplete_acceptance_continuation(
     assistant_text: str,
     messages: List[Dict[str, Any]],
@@ -907,25 +970,31 @@ def looks_like_incomplete_acceptance_continuation(
     ):
         return False
 
-    value = str(assistant_text or "").strip()
-    if (
-        value != "ACCEPTANCE_INCOMPLETE"
-        and not _looks_like_acceptance_step_execution_stall(
-            value,
-            marker,
-        )
-        and not _looks_like_acceptance_capability_refusal(
-            value,
-            marker,
-        )
-    ):
-        return False
-
     write_observed, readback_observed = _acceptance_effect_progress(
         messages,
         result_path,
     )
-    return not (write_observed and readback_observed)
+    if write_observed and readback_observed:
+        return False
+
+    value = str(assistant_text or "").strip()
+    return (
+        value == "ACCEPTANCE_INCOMPLETE"
+        or _looks_like_acceptance_step_execution_stall(
+            value,
+            marker,
+        )
+        or _looks_like_acceptance_capability_refusal(
+            value,
+            marker,
+        )
+        or _looks_like_acceptance_effect_step_stall(
+            value,
+            marker,
+            write_observed=write_observed,
+            readback_observed=readback_observed,
+        )
+    )
 
 
 def _command_writes_result_path(command: str, result_path: str) -> bool:
@@ -984,20 +1053,20 @@ def looks_like_premature_acceptance_success(
     _marker, result_path = contract
     commands = _successful_workspace_commands(messages)
 
-    write_index: int | None = None
-    for index, command in enumerate(commands):
+    write_indexes = [
+        index
+        for index, command in enumerate(commands)
         if _command_writes_result_path(
             command,
             result_path,
-        ):
-            write_index = index
-            break
-
-    if write_index is None:
+        )
+    ]
+    if not write_indexes:
         return True
 
+    last_write_index = write_indexes[-1]
     return not any(
-        index > write_index
+        index > last_write_index
         and _command_reads_result_path(
             command,
             result_path,
