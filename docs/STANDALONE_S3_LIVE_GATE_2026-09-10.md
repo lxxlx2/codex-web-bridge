@@ -1563,3 +1563,33 @@ private trace file after a short delay. Any partial agent output, tool effect,
 usage evidence, different failure, or second failure remains fail-closed and
 terminates the probe. Seed creation is still one-shot.
 
+## 2026-09-22 ChatGPT localized Stop false-positive hardening
+
+Repeated live S3 failures showed the ChatGPT pre-fill idle guard timing out on:
+
+```text
+matched_indicator='button[aria-label*="停止"]'
+send_stop=False
+stop_btn=False
+```
+
+The same runs had already completed the previous model turn successfully. The
+page-wide localized aria-label selector was matching a visible Stop control that
+was not the active composer generation control.
+
+The browser probe now records whether the matched generation indicator is inside
+the active ChatGPT composer and whether it carries the canonical
+`data-testid="stop-button"`. For ChatGPT only, a page-wide partial aria-label
+Stop match is ignored when all stronger generation evidence is absent:
+
+```text
+outside active composer
+no canonical stop-button test id
+send control does not look like Stop
+no configured stop button
+no configured generation indicator
+```
+
+Real composer-local Stop controls, canonical stop-button controls, send-as-Stop
+state, configured generation selectors, and all non-ChatGPT sites remain
+fail-closed.
