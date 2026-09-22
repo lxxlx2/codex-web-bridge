@@ -1,6 +1,8 @@
 import pytest
 
 from app.services.client_tool_policy import (
+    has_redundant_acceptance_tool_call_after_completion,
+    looks_like_acceptance_completion_without_exact_sentinel,
     looks_like_incomplete_acceptance_continuation,
     looks_like_premature_acceptance_success,
     should_repair_client_workspace_refusal,
@@ -1569,4 +1571,138 @@ def test_post_tool_workspace_inaccessible_claim_uses_private_compacted_state(mon
         assistant_text=refusal,
         parsed=parsed,
     ) is True
+
+def _completed_context_acceptance_history():
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write_complete",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read_complete",
+        (
+            "python3 -c \"from pathlib import Path; "
+            "b=Path('context/result.txt').read_bytes(); "
+            "assert b == b'EMBER-7319\\\\n'\""
+        ),
+        "VALID",
+    )
+    return messages
+
+
+def test_completed_acceptance_blocks_redundant_workspace_tool_call(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _completed_context_acceptance_history()
+    raw = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"mkdir -p context && printf \'%s\\\\n\' \'EMBER-7319\' '
+        '> context/result.txt && cat context/result.txt"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    from app.services.tool_calling_parse import parse_tool_response
+
+    parsed = parse_tool_response(raw, EXEC_TOOLS)
+
+    assert has_redundant_acceptance_tool_call_after_completion(
+        messages,
+        parsed,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=raw,
+        parsed=parsed,
+    ) is True
+
+
+def test_completed_acceptance_repairs_descriptive_final_to_exact_sentinel(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _completed_context_acceptance_history()
+    prose = (
+        "已完成并验证 context/result.txt，内容正确，命令退出码为 0。"
+    )
+    parsed = {
+        "mode": "final",
+        "content": prose,
+        "tool_calls": [],
+    }
+
+    assert looks_like_acceptance_completion_without_exact_sentinel(
+        prose,
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=prose,
+        parsed=parsed,
+    ) is True
+
+
+def test_completed_acceptance_roundtrip_rejects_rewrite_and_closes_with_marker(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _completed_context_acceptance_history()
+    redundant = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"mkdir -p context && printf \'%s\\\\n\' \'EMBER-7319\' '
+        '> context/result.txt && cat context/result.txt"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    replies = iter(
+        [
+            redundant,
+            "CONTEXT_PASS",
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "final"
+    assert result["content"] == "CONTEXT_PASS"
+    assert result["tool_calls"] == []
+    assert len(seen) == 2
+    repair = seen[1][1]["content"]
+    assert "Do not call any client tool again" in repair
+    assert "Do not rewrite context/result.txt" in repair
+    assert "Reply with exactly CONTEXT_PASS and nothing else" in repair
+
+
+def test_completed_acceptance_exact_marker_remains_allowed(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _completed_context_acceptance_history()
+    parsed = {
+        "mode": "final",
+        "content": "CONTEXT_PASS",
+        "tool_calls": [],
+    }
+
+    assert looks_like_acceptance_completion_without_exact_sentinel(
+        "CONTEXT_PASS",
+        messages,
+    ) is False
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="CONTEXT_PASS",
+        parsed=parsed,
+    ) is False
 
