@@ -224,3 +224,118 @@ def test_transition_prompt_is_bounded_and_exact():
     assert "AUTO_COMPACT_TRANSITION_ACK_09" in prompt
     assert len(prompt.encode("utf-8")) < 2200
 
+def test_pre_submit_generation_block_retryable_only_without_execution_evidence():
+    safe = base.ExecObservation(
+        returncode=1,
+        raw='{"type":"error","message":"send_blocked_by_preexisting_generation"}',
+    )
+    assert probe._safe_pre_submit_generation_block(safe)
+
+    with_message = base.ExecObservation(
+        returncode=1,
+        raw=safe.raw,
+        agent_messages=["unexpected"],
+    )
+    assert not probe._safe_pre_submit_generation_block(with_message)
+
+    with_tool = base.ExecObservation(
+        returncode=1,
+        raw=safe.raw,
+        commands=["pwd"],
+    )
+    assert not probe._safe_pre_submit_generation_block(with_tool)
+
+    with_usage = base.ExecObservation(
+        returncode=1,
+        raw=safe.raw,
+        input_tokens=[10],
+    )
+    assert not probe._safe_pre_submit_generation_block(with_usage)
+
+    different_failure = base.ExecObservation(
+        returncode=1,
+        raw='{"type":"turn.failed","error":"timeout"}',
+    )
+    assert not probe._safe_pre_submit_generation_block(different_failure)
+
+
+def test_probe_turn_retries_once_after_proven_pre_submit_generation_block(
+    tmp_path: Path,
+    monkeypatch,
+):
+    first = base.ExecObservation(
+        returncode=1,
+        raw='{"type":"error","message":"send_blocked_by_preexisting_generation"}',
+    )
+    second = base.ExecObservation(
+        returncode=0,
+        agent_messages=["LARGE_CONTEXT_FILLER_ACK_01"],
+        input_tokens=[100],
+        output_tokens=[4],
+    )
+    seen = []
+    replies = iter([first, second])
+
+    def fake_run(**kwargs):
+        seen.append(kwargs)
+        return next(replies)
+
+    monkeypatch.setattr(
+        probe,
+        "_run_turn_preserving_failure",
+        fake_run,
+    )
+    monkeypatch.setattr(probe.time, "sleep", lambda _: None)
+
+    trace = tmp_path / "trigger-probe-01-coarse.jsonl"
+    result = probe._run_probe_turn(
+        codex="codex",
+        root=tmp_path,
+        prompt="filler",
+        trace_path=trace,
+        thread_id="thread-1",
+        timeout_sec=60,
+        retry_delay_sec=0,
+    )
+
+    assert result is second
+    assert len(seen) == 2
+    assert seen[0]["trace_path"] == trace
+    assert seen[1]["trace_path"] == (
+        tmp_path / "trigger-probe-01-coarse-retry.jsonl"
+    )
+
+
+def test_probe_turn_does_not_retry_ambiguous_failed_turn(
+    tmp_path: Path,
+    monkeypatch,
+):
+    failed = base.ExecObservation(
+        returncode=1,
+        raw='{"type":"turn.failed","error":"send_blocked_by_preexisting_generation"}',
+        agent_messages=["partial response"],
+    )
+    seen = []
+
+    def fake_run(**kwargs):
+        seen.append(kwargs)
+        return failed
+
+    monkeypatch.setattr(
+        probe,
+        "_run_turn_preserving_failure",
+        fake_run,
+    )
+
+    result = probe._run_probe_turn(
+        codex="codex",
+        root=tmp_path,
+        prompt="filler",
+        trace_path=tmp_path / "trace.jsonl",
+        thread_id="thread-1",
+        timeout_sec=60,
+        retry_delay_sec=0,
+    )
+
+    assert result is failed
+    assert len(seen) == 1
