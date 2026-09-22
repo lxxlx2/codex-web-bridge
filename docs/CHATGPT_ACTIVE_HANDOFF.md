@@ -750,3 +750,39 @@ No outer Web rate-limit classification was present in the supplied output.
 
 This attempt does not count toward S3 success accumulation. Do not change source until the latest post-compaction recovery trace is inspected for exact final text and successful command/effect sequence.
 
+## 2026-09-22 Astra interrupted review surfaced two release-gate concerns
+
+Astra correctly stopped its review when the local checkout moved from
+`c18a990e371eb391a59320b6853de96e47dddebe` to
+`f3d02327a5cb99513a60eeaf14fd517c5e86a09e`. Its reported zero findings are
+therefore not a completed review result.
+
+Independent source inspection on current `standalone-dev` confirms both of
+Astra's unresolved clues are substantive:
+
+1. Candidate identity can drift during a long-running gate.
+   `standalone_s3_live_acceptance.py` captures HEAD once near preflight and
+   later promotes the result with that captured SHA. The core final cleanliness
+   check only verifies `git status --porcelain`; it does not prove HEAD still
+   equals the captured candidate. `standalone_office_soak.py` has the same
+   pattern. A clean fast-forward or checkout during the run can therefore leave
+   the worktree clean while evidence is attributed to the start SHA. Release
+   confidence trusts the stored `candidate_commit`, so it cannot detect a
+   mislabeled run afterward.
+
+2. Independent readback proof is weaker than the documented acceptance contract.
+   Restart continuity does require an exit-zero write command followed by a later
+   readback-shaped command, but the readback is recognized from command text and
+   exit status only. A plain `cat` qualifies even though it does not prove the
+   trailing newline. The final file bytes are checked separately, which protects
+   file-content correctness but does not prove the requested byte-level readback
+   actually happened. The post-compaction recovery gate is weaker still: it checks
+   validation, some client-tool activity, exact final PASS, command safety, and
+   exact final file contents, but does not currently prove an ordered write then
+   separate byte-level readback.
+
+These are pending release-gate fixes. Do not continue release evidence
+accumulation until they are addressed. The current failed post-compaction trace
+should still be inspected before source changes so all known fixes can be batched
+into one new candidate.
+
