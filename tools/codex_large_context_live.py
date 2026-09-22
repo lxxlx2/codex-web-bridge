@@ -17,7 +17,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-import codex_large_context_acceptance as base
+try:
+    from . import codex_large_context_acceptance as base
+except ImportError:
+    # Direct script execution puts tools/ on sys.path but has no package context.
+    import codex_large_context_acceptance as base
 
 
 _ORIGINAL_RUN_CODEX_TURN = base._run_codex_turn
