@@ -51,6 +51,7 @@ EXPECTED_BRANCH = "standalone-dev"
 EXPECTED_PROVIDER = "uwa"
 EXPECTED_MODEL = "chatgpt"
 EXPECTED_EFFORT = "high"
+EXPECTED_CODEX_CLI_VERSION = "0.156.0"
 DEFAULT_ACCEPTANCE_ROOT = Path.home() / "uwa-codex-acceptance"
 DEFAULT_PRIVATE_ROOT = Path.home() / ".uwa" / "standalone-s3"
 DEFAULT_TURN_TIMEOUT_SEC = 600
@@ -211,6 +212,53 @@ def _resume_thread_matches(obs: CodexObservation, expected: str) -> bool:
     return all(value == expected for value in obs.thread_ids)
 
 
+def _codex_cli_identity() -> tuple[str, str]:
+    codex = shutil.which("codex")
+    if codex is None:
+        raise GateFailure("codex_cli", "codex_not_found")
+
+    result = _run(
+        [codex, "--version"],
+        cwd=REPO_ROOT,
+        timeout_sec=30,
+    )
+    if result.returncode != 0:
+        raise GateFailure(
+            "codex_cli_version",
+            "codex_version_command_failed",
+        )
+
+    raw = result.stdout.strip()
+    prefix = "codex-cli "
+    if not raw.startswith(prefix):
+        raise GateFailure(
+            "codex_cli_version",
+            "unrecognized_codex_version_output",
+        )
+
+    version = raw[len(prefix):].strip()
+    if not version or "\n" in version:
+        raise GateFailure(
+            "codex_cli_version",
+            "unrecognized_codex_version_output",
+        )
+
+    return codex, version
+
+
+def _assert_expected_codex_cli_version() -> tuple[str, str]:
+    codex, version = _codex_cli_identity()
+    if version != EXPECTED_CODEX_CLI_VERSION:
+        raise GateFailure(
+            "codex_cli_version",
+            (
+                f"expected={EXPECTED_CODEX_CLI_VERSION} "
+                f"actual={version}"
+            ),
+        )
+    return codex, version
+
+
 def _preflight_repo() -> None:
     if platform.system() != "Darwin":
         raise GateFailure("platform", "macOS_required_for_current_live_gate")
@@ -233,8 +281,7 @@ def _preflight_repo() -> None:
     if head.returncode or remote.returncode or head.stdout.strip() != remote.stdout.strip():
         raise GateFailure("stale_checkout", "local_head_does_not_match_origin")
 
-    if shutil.which("codex") is None:
-        raise GateFailure("codex_cli", "codex_not_found")
+    _assert_expected_codex_cli_version()
 
 
 def _assert_candidate_identity(
@@ -1029,6 +1076,13 @@ def run(
     _reset_live_turn_pacer()
     try:
         _preflight_repo()
+        codex_path, codex_version = (
+            _assert_expected_codex_cli_version()
+        )
+        print(
+            f"S3_CODEX_CLI_VERSION={codex_version}",
+            flush=True,
+        )
         print("S3_PHASE=REPO_PREFLIGHT_PASS")
 
         _configure_uwa_route()
@@ -1044,7 +1098,7 @@ def run(
 
         marker_epoch = route_audit.write_marker()
         root = _prepare_context_workspace(acceptance_root)
-        codex = shutil.which("codex") or "codex"
+        codex = codex_path
 
         _run_restart_continuity(
             codex=codex,
@@ -1070,10 +1124,13 @@ def run(
         if status.returncode != 0 or status.stdout.strip():
             raise GateFailure("final_repo_cleanliness", "repository_changed_during_live_gate")
 
+        _assert_expected_codex_cli_version()
+
         _write_private(
             private_dir / "result.txt",
             "STANDALONE_S3=PASS_LIVE_CLOSED\n"
-            "provider=uwa\nmodel=chatgpt\neffort=high\n",
+            "provider=uwa\nmodel=chatgpt\neffort=high\n"
+            f"codex_cli_version={codex_version}\n",
         )
         _print_pass_summary(listener_transition)
         return 0
