@@ -1624,3 +1624,36 @@ the only valid completion is the exact requested success sentinel
 This is intentionally scoped to the repository's synthetic
 `CONTEXT_PASS` / `LARGE_CONTEXT_PASS` acceptance contracts. Ordinary coding
 tasks and incomplete acceptance sequences keep their existing behavior.
+
+## 2026-09-23 Codex CLI 0.156.0 release-baseline binding
+
+The first standalone RC now validates against Codex CLI 0.156.0 as an explicit
+environment identity instead of accepting whichever `codex` executable happens
+to be first on `PATH`.
+
+The S3 repository preflight now requires:
+
+```text
+codex --version == codex-cli 0.156.0
+```
+
+and successful live evidence records:
+
+```text
+codex_cli_version=0.156.0
+```
+
+The runner re-checks the selected CLI version before promoting a successful live
+result so a long-running gate cannot silently finish under a different CLI
+installation.
+
+Codex CLI 0.153.4 remains the previously demonstrated compatibility floor and
+historical S3 evidence from that environment remains useful engineering evidence,
+but it does not count toward the 0.156.0-bound RC live-success requirement.
+
+The bridge already implements streamed Remote Compaction V2 on
+`/v1/responses`: a trailing `compaction_trigger` request item is intercepted,
+ChatGPT Web produces the bounded continuation summary, and the adapter returns one
+`type=compaction` output item carrying the UWA-owned envelope. The retained
+`/v1/responses/compact` endpoint is legacy compatibility and is not the primary
+V2 path.
