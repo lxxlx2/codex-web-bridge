@@ -441,6 +441,127 @@ def test_step_execution_stall_without_synthetic_contract_is_not_repaired(monkeyp
     ) is False
 
 
+def test_live_third_step_validation_stall_after_write_continues_to_byte_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
+    parsed = {
+        "mode": "final",
+        "content": refusal,
+        "tool_calls": [],
+    }
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is True
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
+
+def test_roundtrip_repairs_live_third_step_stall_without_rewriting_result(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    arguments = result["tool_calls"][0]["function"]["arguments"]
+    assert "context/result.txt" in arguments
+    assert "od -An -t x1" in arguments
+    assert "printf '%s\\n' 'EMBER-7319' > context/result.txt" not in arguments
+    assert len(seen) == 2
+    assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
+    assert "separate client-tool readback" in seen[1][1]["content"]
+
+
+def test_live_third_step_stall_after_completed_effects_is_not_unfinished(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read",
+        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
+        "EMBER-7319",
+    )
+    refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
+
+    assert looks_like_incomplete_acceptance_continuation(
+        refusal,
+        messages,
+    ) is False
+
+
+def test_premature_pass_requires_readback_after_last_write(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write_1",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_read_1",
+        "od -An -t x1 context/result.txt",
+        "45 4d 42 45 52 2d 37 33 31 39 0a",
+    )
+    _append_successful_exec(
+        messages,
+        "call_write_2",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+
+    assert looks_like_premature_acceptance_success(
+        "CONTEXT_PASS",
+        messages,
+    ) is True
+
+
 def test_step_execution_stall_after_completed_effects_is_not_unfinished(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     messages = _restart_context_history_after_validation()
