@@ -1171,3 +1171,35 @@ Current exact candidate:
 ```
 
 Exact-SHA Standalone CI is run #904. Older candidate-bound evidence is historical.
+
+## 2026-09-22 2b5a177 candidate deterministic gates green
+
+Exact candidate:
+
+```text
+2b5a1772e96e4f6961685757a9cf60aa3b544cc0
+```
+
+Candidate-bound local validation passed:
+
+```text
+ChatGPT Stop guard focused: 64 passed
+acceptance policy focused:  45 passed
+full suite:                 597 passed, 22 warnings
+public repository safety:  PASS
+dependency audit:           PASS
+install smoke:              PASS
+final identity/worktree:    clean and unchanged
+```
+
+Exact-SHA GitHub Standalone CI #904 also completed successfully for the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+This candidate is eligible for a fresh S3 attempt. Older S3 evidence remains historical.
