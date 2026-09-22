@@ -39,6 +39,8 @@ DEFAULT_MAX_COARSE_ROUNDS = 14
 DEFAULT_MAX_FINE_ROUNDS = 12
 DEFAULT_MAX_ARM_ROUNDS = 8
 DEFAULT_TIMEOUT_SEC = 900
+DEFAULT_PRE_SUBMIT_RETRY_DELAY_SEC = 5.0
+PREEXISTING_GENERATION_MARKER = "send_blocked_by_preexisting_generation"
 AUTO_COMPACT_PERCENT = 90
 HARD_CONTEXT_PERCENT = 95
 ARM_ACK_PREFIX = "AUTO_COMPACT_ARM_ACK"
@@ -381,6 +383,50 @@ def _run_turn_preserving_failure(**kwargs: Any) -> base.ExecObservation:
     return live.run_turn_preserving_failure_evidence(base._run_codex_turn, **kwargs)
 
 
+def _safe_pre_submit_generation_block(
+    observation: base.ExecObservation,
+) -> bool:
+    """Return True only when a turn provably never reached model execution."""
+
+    return (
+        observation.returncode != 0
+        and PREEXISTING_GENERATION_MARKER in str(observation.raw or "")
+        and not observation.agent_messages
+        and observation.tool_effect_count == 0
+        and not observation.input_tokens
+        and not observation.output_tokens
+    )
+
+
+def _run_probe_turn(
+    *,
+    retry_delay_sec: float = DEFAULT_PRE_SUBMIT_RETRY_DELAY_SEC,
+    **kwargs: Any,
+) -> base.ExecObservation:
+    """Retry once only for an exact, side-effect-free pre-submit UI block."""
+
+    observation = _run_turn_preserving_failure(**kwargs)
+    if (
+        kwargs.get("thread_id") is None
+        or not _safe_pre_submit_generation_block(observation)
+    ):
+        return observation
+
+    print(
+        "PRE_SUBMIT_RETRY=1 "
+        "reason=preexisting_generation_no_dispatch"
+    )
+    if retry_delay_sec > 0:
+        time.sleep(retry_delay_sec)
+
+    retry_kwargs = dict(kwargs)
+    trace_path = Path(retry_kwargs["trace_path"])
+    retry_kwargs["trace_path"] = trace_path.with_name(
+        trace_path.stem + "-retry.jsonl"
+    )
+    return _run_turn_preserving_failure(**retry_kwargs)
+
+
 def _turn_ok(
     observation: base.ExecObservation,
     *,
@@ -520,7 +566,7 @@ def run(
             break
         round_index += 1
         expected = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
-        observation = _run_turn_preserving_failure(
+        observation = _run_probe_turn(
             codex=codex_path,
             root=root,
             prompt=build_dense_filler_prompt(round_index, coarse_bytes),
@@ -575,7 +621,7 @@ def run(
         expected = f"LARGE_CONTEXT_FILLER_ACK_{round_index:02d}"
         previous_active_tokens = active_tokens
 
-        observation = _run_turn_preserving_failure(
+        observation = _run_probe_turn(
             codex=codex_path,
             root=root,
             prompt=build_dense_filler_prompt(round_index, fine_bytes),
@@ -642,7 +688,7 @@ def run(
         expected = f"AUTO_COMPACT_TRANSITION_ACK_{round_index:02d}"
         previous_active_tokens = active_tokens
 
-        observation = _run_turn_preserving_failure(
+        observation = _run_probe_turn(
             codex=codex_path,
             root=root,
             prompt=build_transition_prompt(
@@ -709,7 +755,7 @@ def run(
         expected = arm_expected_reply(round_index)
         previous_active_tokens = active_tokens
 
-        observation = _run_turn_preserving_failure(
+        observation = _run_probe_turn(
             codex=codex_path,
             root=root,
             prompt=build_arm_prompt(round_index),
