@@ -255,7 +255,7 @@ def test_context_pass_allowed_after_successful_write_and_separate_readback(monke
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt",
+        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
         "EMBER-7319",
     )
 
@@ -344,7 +344,7 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     arguments = result["tool_calls"][0]["function"]["arguments"]
     assert "context/result.txt" in arguments
-    assert "cat context/result.txt" in arguments
+    assert "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1" in arguments
     assert "od -An -t x1" in arguments
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
@@ -452,7 +452,7 @@ def test_step_execution_stall_after_completed_effects_is_not_unfinished(monkeypa
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt",
+        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
         "EMBER-7319",
     )
     refusal = "第三步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
@@ -679,7 +679,7 @@ def test_acceptance_incomplete_after_write_and_readback_is_not_unfinished(monkey
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt",
+        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
         "EMBER-7319",
     )
     parsed = {
@@ -1381,3 +1381,71 @@ def test_unmarked_function_output_cannot_hide_declared_tool_absence_contradictio
         assistant_text=refusal,
         parsed=parsed,
     ) is True
+
+def test_plain_cat_after_write_does_not_satisfy_byte_level_acceptance_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_cat",
+        "cat context/result.txt",
+        "EMBER-7319",
+    )
+
+    assert looks_like_premature_acceptance_success(
+        "CONTEXT_PASS",
+        messages,
+    ) is True
+
+
+def test_post_tool_workspace_inaccessible_claim_uses_private_compacted_state(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    compacted = (
+        "[Compacted prior context]\n"
+        "[ACTIVE CONTINUATION STATE]\n"
+        "Continue large_context/result.txt for LARGE_CONTEXT_PASS. "
+        "The workspace validation already succeeded; write and byte readback remain."
+    )
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_list",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": '{"cmd":"pwd && ls -la large_context"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_list",
+            "name": "exec_command",
+            "content": "Process exited with code 0\nFinal output: total 0\n",
+            "_uwa_compacted_continuation_context": compacted,
+        },
+    ]
+    refusal = (
+        "当前运行环境无法访问 /Users/example/acceptance，实际检查结果为 MISSING。"
+        "因此无法真实完成 large_context/result.txt 的写入和字节级验证，"
+        "也不能返回 LARGE_CONTEXT_PASS。"
+    )
+    parsed = {"mode": "final", "content": refusal, "tool_calls": []}
+
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text=refusal,
+        parsed=parsed,
+    ) is True
+
