@@ -1550,3 +1550,33 @@ Current exact candidate:
 ```
 
 All candidate-bound evidence from `1543a28...` is superseded.
+
+## 2026-09-23 0.156 deterministic compatibility gates green on 96157a5
+
+Exact candidate:
+
+```text
+96157a51979815b5a2e2e57b258339fedac73748
+```
+
+Local validation under Codex CLI 0.156.0 passed:
+
+```text
+package import smoke:                PASS
+remote compaction V2:               26 passed
+response/continuation contract:     79 passed, 8 warnings
+CLI baseline gate:                  33 passed
+full suite:                         604 passed, 22 warnings
+public repository safety:           PASS
+dependency audit:                   PASS
+install smoke:                      PASS
+final repo/CLI identity:            PASS
+```
+
+This is the first deterministic evidence that the 0.156.0 baseline is compatible
+with the current streamed Remote Compaction V2 and continuation contract at the
+test-suite level.
+
+Exact-SHA Standalone CI #914 is still running at the time of this handoff update.
+Current observed state: `scaffold-static=PASS`, `runtime-import=in_progress`.
+Do not count CI as green until all jobs complete successfully.
