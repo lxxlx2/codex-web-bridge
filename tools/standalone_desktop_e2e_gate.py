@@ -274,6 +274,7 @@ def verify(*, state_path: Path) -> int:
         if status.returncode != 0 or status.stdout.strip():
             raise GateFailure("desktop_repo_cleanliness", "repository_changed")
 
+        core._assert_candidate_identity(candidate)
         _write_result(candidate)
         print("DESKTOP_CONTEXT=PASS", flush=True)
         print("DESKTOP_LOCAL_TOOLS=PASS", flush=True)
