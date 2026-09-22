@@ -716,6 +716,8 @@ def run(
             )
             if external_failure is not None:
                 raise external_failure
+        if core_rc == 0:
+            core._assert_candidate_identity(candidate)
         _promote_core_result(
             outer_private_dir=outer_private_dir,
             candidate_commit=candidate,
