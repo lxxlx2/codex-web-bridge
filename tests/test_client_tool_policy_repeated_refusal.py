@@ -791,7 +791,7 @@ def test_acceptance_incomplete_after_validation_continues_to_write(monkeypatch):
     assert "do not repeat the successful workspace validation" in seen[1][1]["content"].lower()
 
 
-def test_acceptance_incomplete_after_write_and_readback_is_not_unfinished(monkeypatch):
+def test_acceptance_incomplete_after_write_and_readback_repairs_to_exact_sentinel(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     messages = _restart_context_history_after_validation()
     _append_successful_exec(
@@ -811,17 +811,23 @@ def test_acceptance_incomplete_after_write_and_readback_is_not_unfinished(monkey
         "tool_calls": [],
     }
 
+    # Effects are complete, so this is no longer an unfinished continuation.
+    # The terminal contract is still wrong because only CONTEXT_PASS is valid.
     assert looks_like_incomplete_acceptance_continuation(
         "ACCEPTANCE_INCOMPLETE",
         messages,
     ) is False
+    assert looks_like_acceptance_completion_without_exact_sentinel(
+        "ACCEPTANCE_INCOMPLETE",
+        messages,
+    ) is True
     assert should_repair_client_workspace_refusal(
         messages=messages,
         tools=EXEC_TOOLS,
         tool_choice="auto",
         assistant_text="ACCEPTANCE_INCOMPLETE",
         parsed=parsed,
-    ) is False
+    ) is True
 
 
 def test_unrelated_acceptance_incomplete_text_is_not_repaired(monkeypatch):
