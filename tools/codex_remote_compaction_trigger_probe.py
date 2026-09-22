@@ -11,8 +11,13 @@ the already-live small-step probe.
 
 from __future__ import annotations
 
-import codex_auto_compact_trigger_probe as trigger_probe
-import codex_large_context_acceptance as base
+try:
+    from . import codex_auto_compact_trigger_probe as trigger_probe
+    from . import codex_large_context_acceptance as base
+except ImportError:
+    # Direct script execution puts tools/ on sys.path but has no package context.
+    import codex_auto_compact_trigger_probe as trigger_probe
+    import codex_large_context_acceptance as base
 
 
 REMOTE_V2_ROUTE_MARKER = "[CODEX_REMOTE_COMPACTION_V2]"
