@@ -1111,3 +1111,25 @@ macos-compat      PASS
 ```
 
 This candidate is eligible for a fresh S3 attempt. No successful S3 evidence from older SHAs may be counted.
+
+## 2026-09-22 20b45ce first live S3 still failed in remote compaction probe
+
+Exact candidate remained:
+
+```text
+20b45ce922e8166b72488c6282e4dca495e9bda0
+```
+
+The run again passed restart continuity and then stopped at:
+
+```text
+FAILURE_CLASS=remote_compaction_probe
+FAILURE_DETAIL=rc=1
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+Because the candidate already contains one bounded retry for the exact
+`send_blocked_by_preexisting_generation` no-dispatch shape, do not change source
+until the new private probe log and any `*-retry.jsonl` trace are inspected. The
+next diagnosis must determine whether the retry activated and the retry itself
+failed, or whether this run failed for a different probe reason.
