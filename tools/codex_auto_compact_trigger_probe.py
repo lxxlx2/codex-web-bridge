@@ -25,8 +25,13 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-import codex_large_context_acceptance as base
-import codex_large_context_live as live
+try:
+    from . import codex_large_context_acceptance as base
+    from . import codex_large_context_live as live
+except ImportError:
+    # Direct script execution puts tools/ on sys.path but has no package context.
+    import codex_large_context_acceptance as base
+    import codex_large_context_live as live
 
 
 DEFAULT_COARSE_BYTES = 46_000
