@@ -1,5 +1,9 @@
+import json
+
 import pytest
 
+from app.api.chat import ChatRequest, ResponsesRequest
+from app.api.codex_responses_v2 import _browser_delta_chat_request
 from app.services.client_tool_policy import (
     has_redundant_acceptance_tool_call_after_completion,
     looks_like_acceptance_completion_without_exact_sentinel,
@@ -119,6 +123,124 @@ def test_roundtrip_fails_closed_if_exact_tool_list_refusal_never_recovers(monkey
         )
 
 
+_CONTEXT_VALIDATION_COMMAND = (
+    "pwd && test -f .uwa_codex_acceptance && test -d context"
+)
+
+
+def _restart_context_before_validation_with_generated_environment():
+    """A resumed Codex turn can append environment text after its operator request."""
+
+    resume_request = (
+        "这是同一个 Codex 对话的第二轮重启恢复验收。"
+        "第一步必须单独通过客户端 exec_command 在当前工作区执行 "
+        f"{_CONTEXT_VALIDATION_COMMAND}。"
+        "第二步单独写入 context/result.txt；第三步单独进行字节读取确认。"
+        "三步完成后只回复 CONTEXT_PASS。"
+    )
+    messages = [
+        {"role": "user", "content": "只记住一个合成令牌，不调用工具。"},
+        {"role": "assistant", "content": "CONTEXT_READY"},
+        {"role": "user", "content": resume_request},
+        {
+            "role": "user",
+            "content": "ENVIRONMENT_ONLY_SENTINEL: generated current workspace metadata.",
+        },
+    ]
+    return messages, resume_request
+
+
+def test_pre_validation_refusal_repairs_exact_operator_command_after_environment_item(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages, resume_request = (
+        _restart_context_before_validation_with_generated_environment()
+    )
+    refusal = "当前实际可调用工具中没有名为 exec_command 的客户端工具，因此无法继续执行。"
+    call = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        + json.dumps({"cmd": _CONTEXT_VALIDATION_COMMAND})
+        + ']]></arguments></call></adapter_calls>'
+    )
+    replies = iter([refusal, refusal, call])
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert len(result["tool_calls"]) == 1
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {
+        "cmd": _CONTEXT_VALIDATION_COMMAND,
+    }
+    assert len(seen) == 3
+    for browser_messages in seen[1:]:
+        repair = browser_messages[1]["content"]
+        assert _CONTEXT_VALIDATION_COMMAND in repair
+        assert f"Original user request:\n{resume_request}" in repair
+        assert "ENVIRONMENT_ONLY_SENTINEL" not in repair
+
+
+@pytest.mark.parametrize(
+    "candidate, tool_choice, expected_attempts",
+    [
+        (
+            "当前实际可调用工具中没有名为 exec_command 的客户端工具，因此无法继续执行。",
+            "auto",
+            3,
+        ),
+        (
+            "This unrelated answer does not call any client tool.",
+            {"type": "function", "function": {"name": "exec_command"}},
+            4,
+        ),
+        (
+            '<adapter_calls><call name="exec_command"><arguments encoding="json"><![CDATA[{"cmd":',
+            {"type": "function", "function": {"name": "exec_command"}},
+            4,
+        ),
+    ],
+)
+def test_pre_validation_refusal_and_invalid_outputs_exhaust_fail_closed(
+    monkeypatch,
+    candidate,
+    tool_choice,
+    expected_attempts,
+):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages, _resume_request = (
+        _restart_context_before_validation_with_generated_environment()
+    )
+    attempts = []
+
+    def executor(browser_messages):
+        attempts.append(browser_messages)
+        return candidate
+
+    with pytest.raises(RuntimeError, match="tool_call_validation_exhausted"):
+        complete_tool_calling_roundtrip(
+            messages=messages,
+            tools=EXEC_TOOLS,
+            tool_choice=tool_choice,
+            parallel_tool_calls=False,
+            round_executor=executor,
+        )
+
+    assert len(attempts) == expected_attempts
+
+
 
 def _restart_context_history_after_validation():
     request = (
@@ -185,6 +307,38 @@ def _append_successful_exec(messages, call_id, command, output="ok"):
             },
         ]
     )
+
+
+def _restart_context_affinity_delta(messages, call_id):
+    """Keep the latest Responses tool-result delta and trusted state separate."""
+
+    assert messages[-1]["tool_call_id"] == call_id
+    state = ChatRequest(model="chatgpt", messages=messages, stream=False)
+    source = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_synthetic_restart",
+        input=[
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": messages[-1]["content"],
+            }
+        ],
+        tools=[
+            {
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"cmd": {"type": "string"}},
+                    "required": ["cmd"],
+                },
+            }
+        ],
+    )
+    delta = _browser_delta_chat_request(state, source)
+    assert [message["role"] for message in delta.messages] == ["assistant", "tool"]
+    return delta.messages
 
 
 def test_live_context_pass_after_only_validation_is_repaired(monkeypatch):
@@ -514,6 +668,166 @@ def test_roundtrip_repairs_live_third_step_stall_without_rewriting_result(monkey
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
     assert "separate client-tool readback" in seen[1][1]["content"]
+
+
+def test_affinity_restart_post_write_refusal_repairs_to_readback_then_exact_pass(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_synthetic_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > context/result.txt",
+    )
+    post_write = _restart_context_affinity_delta(messages, "call_synthetic_write")
+    refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
+    readback_command = "od -An -tx1 -v context/result.txt"
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"od -An -tx1 -v context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    readback = complete_tool_calling_roundtrip(
+        messages=post_write,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert readback["mode"] == "tool_calls"
+    assert len(readback["tool_calls"]) == 1
+    assert __import__("json").loads(
+        readback["tool_calls"][0]["function"]["arguments"]
+    )["cmd"] == readback_command
+    assert len(seen) == 2
+    assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
+    assert "separate byte-level readback" in seen[1][1]["content"]
+
+    readback_call_id = readback["tool_calls"][0]["id"]
+    _append_successful_exec(
+        messages,
+        readback_call_id,
+        readback_command,
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+    )
+    post_readback = _restart_context_affinity_delta(messages, readback_call_id)
+    redundant_rewrite = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"printf \'%s\\n\' \'SYNTHETIC-7319\' > context/result.txt"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    final_replies = iter([redundant_rewrite, "CONTEXT_PASS"])
+    final_seen = []
+
+    def final_executor(browser_messages):
+        final_seen.append(browser_messages)
+        return next(final_replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=post_readback,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=final_executor,
+    )
+
+    assert result == {"mode": "final", "content": "CONTEXT_PASS", "tool_calls": []}
+    assert len(final_seen) == 2
+    assert "Do not rewrite context/result.txt" in final_seen[1][1]["content"]
+    assert "Reply with exactly CONTEXT_PASS and nothing else" in final_seen[1][1]["content"]
+
+
+def test_full_history_post_write_generic_tool_refusal_targets_readback(monkeypatch):
+    """A refusal need not repeat the PASS marker to expose the pending effect."""
+
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_synthetic_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > context/result.txt",
+    )
+    refusal = "当前实际可调用工具中没有名为 exec_command 的客户端工具，因此无法继续执行。"
+    replies = iter(
+        [
+            refusal,
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"od -An -tx1 -v context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert "od -An -tx1 -v context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
+    assert "separate byte-level readback" in seen[1][1]["content"]
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。",
+        "This unrelated final prose did not perform the required readback.",
+        "",
+        '<adapter_calls><call name="exec_command"><arguments encoding="json"><![CDATA[{"cmd":',
+    ],
+)
+def test_affinity_restart_post_write_exhaustion_stays_closed(monkeypatch, candidate):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_synthetic_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > context/result.txt",
+    )
+    post_write = _restart_context_affinity_delta(messages, "call_synthetic_write")
+    attempts = []
+
+    def executor(browser_messages):
+        attempts.append(browser_messages)
+        return candidate
+
+    with pytest.raises(RuntimeError, match="tool_call_validation_exhausted"):
+        complete_tool_calling_roundtrip(
+            messages=post_write,
+            tools=EXEC_TOOLS,
+            tool_choice="auto",
+            parallel_tool_calls=False,
+            round_executor=executor,
+        )
+
+    assert len(attempts) == 3
 
 
 def test_live_third_step_stall_after_completed_effects_is_not_unfinished(monkeypatch):
@@ -1711,4 +2025,3 @@ def test_completed_acceptance_exact_marker_remains_allowed(monkeypatch):
         assistant_text="CONTEXT_PASS",
         parsed=parsed,
     ) is False
-
