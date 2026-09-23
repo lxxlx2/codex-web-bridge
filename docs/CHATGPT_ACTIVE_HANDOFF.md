@@ -1759,3 +1759,26 @@ Draft PR #3 has been opened from `codex/0156-restart-resume-fix` to
 Do not merge until PR CI is green. If merged, the canonical candidate changes
 and prior candidate-bound S3 evidence must remain historical; restart S3
 accumulation on the new exact SHA.
+
+## 2026-09-23 PR #3 exact-head CI green and mergeable
+
+Draft PR #3 for the isolated Codex 0.156 restart/resume fix is now cleanly
+mergeable. Exact-head Standalone CI #915 completed successfully on:
+
+```text
+8e2b7ffbe808339daedc4c576da4f144e24dc912
+```
+
+All jobs passed:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+GitHub reports the PR mergeable with mergeable_state=clean. It remains draft and
+unmerged. Once merged to `standalone-dev`, the canonical candidate changes and
+all candidate-bound S3 accumulation restarts from 0/3 on the new exact SHA.
