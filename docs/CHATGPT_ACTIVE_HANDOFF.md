@@ -1617,3 +1617,36 @@ macos-compat      PASS
 
 This candidate is now ready for the first full S3 live run under the 0.156.0
 release baseline. S3 success count for this baseline is 0/3 before that run.
+
+## 2026-09-23 Codex 0.156 S3 success #1 on 96157a5
+
+Exact candidate:
+
+```text
+96157a51979815b5a2e2e57b258339fedac73748
+```
+
+The first full S3 live run under the Codex CLI 0.156.0 release baseline passed.
+The runner printed the bound environment identity:
+
+```text
+S3_CODEX_CLI_VERSION=0.156.0
+```
+
+and all release-critical live markers passed, including restart continuity,
+native auto-compaction, Remote V2 compaction, post-compaction recovery, real
+client tool execution, route verification, request-manager cleanup, and final
+repository cleanliness.
+
+Final marker:
+
+```text
+STANDALONE_S3=PASS_LIVE_CLOSED
+```
+
+Observed run start was 2026-09-23 03:39:15 +07, equivalent to
+2026-09-22 20:39:15Z. This falls in the UTC two-hour bucket beginning 20:00Z.
+
+S3 success count for the Codex 0.156.0 / 96157a5 release baseline is now 1/3.
+The release-confidence implementation buckets by the private result directory
+start timestamp using `floor(epoch_seconds / 7200)`.
