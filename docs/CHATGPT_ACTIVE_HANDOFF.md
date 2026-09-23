@@ -1805,3 +1805,36 @@ evidence from `96157a51979815b5a2e2e57b258339fedac73748` is historical and the
 
 Standalone CI #916 was automatically triggered for the new merge SHA and was
 queued/in progress when recorded here.
+
+## 2026-09-23 merged candidate local gates and exact-SHA CI green
+
+Canonical `standalone-dev` candidate:
+
+```text
+7ebd4387fd87a4c78adac64494d9a31fbf80de17
+```
+
+Local validation under Codex CLI 0.156.0 passed:
+
+```text
+focused regression: 104 passed, 8 warnings
+remote compaction:   26 passed
+full suite:          617 passed, 22 warnings
+public safety:       PASS
+dependency audit:    PASS
+install smoke:       PASS
+final identity:      PASS
+```
+
+Exact-SHA Standalone CI #916 also completed successfully on the same SHA:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+The new candidate is ready for S3 live accumulation. Count is 0/3 before the
+first run on this exact SHA.
