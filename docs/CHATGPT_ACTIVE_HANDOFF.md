@@ -1680,3 +1680,39 @@ This failure class differs from the prior post-compaction final-reply mismatches
 The runner raises `restart_resume rc=1` only when the real resumed Codex CLI
 process itself exits non-zero. No source change should be made until the latest
 private `restart-resume.jsonl` and bounded UWA log metadata are inspected.
+
+## 2026-09-23 review of isolated restart-resume fix branch
+
+Fix branch:
+
+```text
+codex/0156-restart-resume-fix
+91a6fa7a03317c46248af6da7984a9892ea198ed
+```
+
+It is exactly one commit ahead of `standalone-dev` candidate
+`96157a51979815b5a2e2e57b258339fedac73748` and is not merged.
+
+Changed files are limited to:
+
+```text
+app/api/codex_responses_v2.py
+app/services/client_tool_policy.py
+tests/test_client_tool_policy_repeated_refusal.py
+tests/test_codex_responses_v2_contract.py
+```
+
+Static review found the change direction appropriately scoped to synthetic
+`CONTEXT_PASS` / `LARGE_CONTEXT_PASS` acceptance progress. It carries only
+adapter-generated marker/path/effect booleans as private policy metadata on
+affinity deltas and tests that this metadata is not browser-visible. After a
+proven write, text-only termination is forced toward the required separate byte
+readback; after readback, the existing exact-sentinel closure still applies.
+
+No new private trace/thread/timestamp path markers were found in the changed
+files. Existing synthetic test strings containing a local-looking path predate
+this branch.
+
+Do not merge yet. Next gate is a targeted live restart/resume reproduction on
+this branch, followed by focused/full tests and preferably PR CI before changing
+the canonical candidate.
