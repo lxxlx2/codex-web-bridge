@@ -1650,3 +1650,33 @@ Observed run start was 2026-09-23 03:39:15 +07, equivalent to
 S3 success count for the Codex 0.156.0 / 96157a5 release baseline is now 1/3.
 The release-confidence implementation buckets by the private result directory
 start timestamp using `floor(epoch_seconds / 7200)`.
+
+## 2026-09-23 Codex 0.156 S3 attempt #2 failed in restart resume
+
+Exact candidate remained:
+
+```text
+96157a51979815b5a2e2e57b258339fedac73748
+```
+
+CLI identity remained:
+
+```text
+codex-cli 0.156.0
+```
+
+The second S3 attempt reached local gates and the restart-continuity phase, then
+failed before a successful resumed turn completed:
+
+```text
+FAILURE_CLASS=restart_resume
+FAILURE_DETAIL=rc=1
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+Do not count this as S3 success #2. The 0.156 baseline remains 1/3.
+
+This failure class differs from the prior post-compaction final-reply mismatches.
+The runner raises `restart_resume rc=1` only when the real resumed Codex CLI
+process itself exits non-zero. No source change should be made until the latest
+private `restart-resume.jsonl` and bounded UWA log metadata are inspected.
