@@ -1716,3 +1716,46 @@ this branch.
 Do not merge yet. Next gate is a targeted live restart/resume reproduction on
 this branch, followed by focused/full tests and preferably PR CI before changing
 the canonical candidate.
+
+## 2026-09-23 isolated 0.156 restart-resume fix passed targeted live twice
+
+Fix branch head:
+
+```text
+codex/0156-restart-resume-fix
+8e2b7ffbe808339daedc4c576da4f144e24dc912
+```
+
+The branch is exactly two commits ahead of frozen `standalone-dev`
+`96157a51979815b5a2e2e57b258339fedac73748`.
+
+Two targeted live restart/resume runs under Codex CLI 0.156.0 passed from fresh
+threads. Both preserved thread identity, completed validation, separate write,
+separate byte readback after the last write, exact result bytes, exact
+`CONTEXT_PASS`, no redundant write after readback, `turn.completed`, and clean
+request-manager state.
+
+Latest local validation reported:
+
+```text
+focused tests: 104 passed
+full suite: 617 passed
+public repository safety: PASS
+dependency audit: PASS
+worktree: clean
+```
+
+Static review of the second commit found the additional repair narrowly targets
+the active synthetic acceptance request before validation. It recovers the
+original acceptance instruction instead of a later user-shaped environment item
+and requires the exact validation command as the next real `exec_command`.
+Retry limits, generic tool validation, and S3 branch identity checks remain
+unchanged.
+
+Draft PR #3 has been opened from `codex/0156-restart-resume-fix` to
+`standalone-dev`. Standalone CI #915 was queued for exact head
+`8e2b7ffbe808339daedc4c576da4f144e24dc912` when recorded here.
+
+Do not merge until PR CI is green. If merged, the canonical candidate changes
+and prior candidate-bound S3 evidence must remain historical; restart S3
+accumulation on the new exact SHA.
