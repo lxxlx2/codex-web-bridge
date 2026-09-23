@@ -1838,3 +1838,44 @@ macos-compat      PASS
 
 The new candidate is ready for S3 live accumulation. Count is 0/3 before the
 first run on this exact SHA.
+
+## 2026-09-23 merged candidate S3 #1 failed after compaction at byte-readback proof
+
+Canonical candidate remained:
+
+```text
+7ebd4387fd87a4c78adac64494d9a31fbf80de17
+codex-cli 0.156.0
+```
+
+The first S3 run on this candidate passed release/browser/repo preflight, local
+gates, restart continuity, compaction cooldown, and compaction recovery setup,
+then failed in post-compaction recovery:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=result_byte_readback_missing
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+Because the runner checks exact final reply and successful write before the
+byte-readback gate, this failure shape proves the recovery turn had already
+returned exact `LARGE_CONTEXT_PASS` and had a successful result-file write, but
+the current-turn private trace did not prove a later successful byte-oriented
+readback after the last write.
+
+Do not count this run. S3 remains 0/3 for `7ebd4387...`.
+
+A new isolated branch was created from the canonical candidate for diagnosis and
+repair:
+
+```text
+codex/0156-post-compaction-readback-fix
+base 7ebd4387fd87a4c78adac64494d9a31fbf80de17
+```
+
+Do not modify `standalone-dev` while diagnosing this failure. Inspect the
+private post-compaction recovery trace and determine whether the readback was
+actually absent or was executed in a form not recognized by the gate. If absent,
+focus on synthetic acceptance progress across remote compaction / affinity
+continuations and exact-sentinel closure after a successful write.
