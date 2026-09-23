@@ -829,6 +829,34 @@ def _acceptance_contract_from_messages(
     return matches[0] if len(matches) == 1 else None
 
 
+def _current_synthetic_acceptance_request(
+    messages: List[Dict[str, Any]],
+) -> tuple[str, str, str] | None:
+    """Find the active synthetic request before later user-shaped environment items."""
+
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None:
+        return None
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role == "assistant":
+            break
+        if role != "user":
+            continue
+        text = _message_content_text(message)
+        marker, result_path = contract
+        if (
+            re.search(rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])", text)
+            and result_path in text
+            and "test -f .uwa_codex_acceptance" in text
+            and f"test -d {result_path.split('/', 1)[0]}" in text
+        ):
+            return marker, result_path, text
+    return None
+
+
 def _acceptance_effect_progress(
     messages: List[Dict[str, Any]],
     result_path: str,
@@ -1440,7 +1468,22 @@ def build_client_workspace_repair_messages(
     )
     declared_names = [name for name in (_tool_name(item) for item in workspace_tools) if name]
     tool_defs = json.dumps(workspace_tools, ensure_ascii=False, indent=2)
-    user_request = _latest_user_text(messages).strip()
+    initial_acceptance = _current_synthetic_acceptance_request(messages)
+    if initial_acceptance is not None:
+        _marker, initial_result_path, _request_text = initial_acceptance
+        if (
+            preferred_name != "exec_command"
+            or _successful_acceptance_workspace_validation_observed(
+                messages,
+                result_path=initial_result_path,
+            )
+        ):
+            initial_acceptance = None
+    user_request = (
+        initial_acceptance[2]
+        if initial_acceptance is not None
+        else _latest_user_text(messages)
+    ).strip()
     if len(user_request) > 2200:
         user_request = user_request[:2197] + "..."
     rejected = str(assistant_text or "").strip()
@@ -1542,6 +1585,23 @@ def build_client_workspace_repair_messages(
                 " This is a repeated root-workdir error. The corrected tool call must omit workdir entirely."
             )
         action = f"Call {preferred_name} again now. Preserve the intended command and omit workdir. Return only the corrected tool-call output."
+    elif initial_acceptance is not None:
+        _marker, result_path, _request_text = initial_acceptance
+        validation_cmd = (
+            "pwd && test -f .uwa_codex_acceptance "
+            f"&& test -d {result_path.split('/', 1)[0]}"
+        )
+        correction = (
+            "The current synthetic acceptance request has not yet produced a successful workspace "
+            "validation tool result. The next step is its complete workspace validation command, "
+            "executed as one real client function call. A later user-shaped environment item is not "
+            "the original acceptance instruction. Do not write the result file or return the success "
+            "sentinel before this validation and the subsequent separate write and byte readback."
+        )
+        action = (
+            f"Call exec_command now with cmd exactly {json.dumps(validation_cmd)}. "
+            "Omit workdir. Return exactly one real exec_command call and no prose."
+        )
     elif specifically_required and not looks_like_incomplete_acceptance_continuation(
         assistant_text,
         messages,

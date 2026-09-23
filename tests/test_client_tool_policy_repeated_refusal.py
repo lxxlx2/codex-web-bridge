@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.api.chat import ChatRequest, ResponsesRequest
@@ -119,6 +121,124 @@ def test_roundtrip_fails_closed_if_exact_tool_list_refusal_never_recovers(monkey
             parallel_tool_calls=False,
             round_executor=lambda _messages: refusal,
         )
+
+
+_CONTEXT_VALIDATION_COMMAND = (
+    "pwd && test -f .uwa_codex_acceptance && test -d context"
+)
+
+
+def _restart_context_before_validation_with_generated_environment():
+    """A resumed Codex turn can append environment text after its operator request."""
+
+    resume_request = (
+        "这是同一个 Codex 对话的第二轮重启恢复验收。"
+        "第一步必须单独通过客户端 exec_command 在当前工作区执行 "
+        f"{_CONTEXT_VALIDATION_COMMAND}。"
+        "第二步单独写入 context/result.txt；第三步单独进行字节读取确认。"
+        "三步完成后只回复 CONTEXT_PASS。"
+    )
+    messages = [
+        {"role": "user", "content": "只记住一个合成令牌，不调用工具。"},
+        {"role": "assistant", "content": "CONTEXT_READY"},
+        {"role": "user", "content": resume_request},
+        {
+            "role": "user",
+            "content": "ENVIRONMENT_ONLY_SENTINEL: generated current workspace metadata.",
+        },
+    ]
+    return messages, resume_request
+
+
+def test_pre_validation_refusal_repairs_exact_operator_command_after_environment_item(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages, resume_request = (
+        _restart_context_before_validation_with_generated_environment()
+    )
+    refusal = "当前实际可调用工具中没有名为 exec_command 的客户端工具，因此无法继续执行。"
+    call = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        + json.dumps({"cmd": _CONTEXT_VALIDATION_COMMAND})
+        + ']]></arguments></call></adapter_calls>'
+    )
+    replies = iter([refusal, refusal, call])
+    seen = []
+
+    def executor(browser_messages):
+        seen.append(browser_messages)
+        return next(replies)
+
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=executor,
+    )
+
+    assert result["mode"] == "tool_calls"
+    assert len(result["tool_calls"]) == 1
+    assert result["tool_calls"][0]["function"]["name"] == "exec_command"
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {
+        "cmd": _CONTEXT_VALIDATION_COMMAND,
+    }
+    assert len(seen) == 3
+    for browser_messages in seen[1:]:
+        repair = browser_messages[1]["content"]
+        assert _CONTEXT_VALIDATION_COMMAND in repair
+        assert f"Original user request:\n{resume_request}" in repair
+        assert "ENVIRONMENT_ONLY_SENTINEL" not in repair
+
+
+@pytest.mark.parametrize(
+    "candidate, tool_choice, expected_attempts",
+    [
+        (
+            "当前实际可调用工具中没有名为 exec_command 的客户端工具，因此无法继续执行。",
+            "auto",
+            3,
+        ),
+        (
+            "This unrelated answer does not call any client tool.",
+            {"type": "function", "function": {"name": "exec_command"}},
+            4,
+        ),
+        (
+            '<adapter_calls><call name="exec_command"><arguments encoding="json"><![CDATA[{"cmd":',
+            {"type": "function", "function": {"name": "exec_command"}},
+            4,
+        ),
+    ],
+)
+def test_pre_validation_refusal_and_invalid_outputs_exhaust_fail_closed(
+    monkeypatch,
+    candidate,
+    tool_choice,
+    expected_attempts,
+):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages, _resume_request = (
+        _restart_context_before_validation_with_generated_environment()
+    )
+    attempts = []
+
+    def executor(browser_messages):
+        attempts.append(browser_messages)
+        return candidate
+
+    with pytest.raises(RuntimeError, match="tool_call_validation_exhausted"):
+        complete_tool_calling_roundtrip(
+            messages=messages,
+            tools=EXEC_TOOLS,
+            tool_choice=tool_choice,
+            parallel_tool_calls=False,
+            round_executor=executor,
+        )
+
+    assert len(attempts) == expected_attempts
 
 
 
