@@ -1782,3 +1782,26 @@ macos-compat      PASS
 GitHub reports the PR mergeable with mergeable_state=clean. It remains draft and
 unmerged. Once merged to `standalone-dev`, the canonical candidate changes and
 all candidate-bound S3 accumulation restarts from 0/3 on the new exact SHA.
+
+## 2026-09-23 PR #3 merged into standalone-dev
+
+PR #3 was marked ready and merged after exact-head CI #915 passed.
+
+New canonical `standalone-dev` head:
+
+```text
+7ebd4387fd87a4c78adac64494d9a31fbf80de17
+```
+
+Merge commit title:
+
+```text
+Merge PR #3: fix Codex 0.156 restart-resume recovery
+```
+
+This becomes the new release candidate source identity. All candidate-bound S3
+evidence from `96157a51979815b5a2e2e57b258339fedac73748` is historical and the
+0.156 S3 accumulation restarts from 0/3 on `7ebd4387...`.
+
+Standalone CI #916 was automatically triggered for the new merge SHA and was
+queued/in progress when recorded here.
