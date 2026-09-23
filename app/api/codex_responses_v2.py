@@ -80,6 +80,10 @@ from app.services.codex_wire_observability import (
     trace_status,
     write_trace_attempt,
 )
+from app.services.client_tool_policy import (
+    _ACCEPTANCE_STATE_KEY,
+    _acceptance_state_from_history,
+)
 
 
 router = APIRouter()
@@ -701,6 +705,44 @@ def _attach_compacted_context_to_generated_tool_fallbacks(
     )
 
 
+def _attach_acceptance_state_to_tool_delta(
+    request_body: ChatRequest,
+    history_messages: List[Dict[str, Any]],
+) -> ChatRequest:
+    """Keep proven synthetic progress available to local policy on affinity deltas.
+
+    The browser prompt serializer reads role/content/tool_calls and ignores this
+    private field. The snapshot contains only a known marker, result path and
+    effect booleans; no command output or private continuation text is copied.
+    """
+
+    state = _acceptance_state_from_history(history_messages)
+    if state is None:
+        return request_body
+
+    messages = (
+        request_body.messages
+        if isinstance(request_body.messages, list)
+        else []
+    )
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if (
+            role not in {"tool", "function"}
+            and message.get("_uwa_function_output_fallback") is not True
+        ):
+            continue
+        updated = [dict(item) if isinstance(item, dict) else item for item in messages]
+        updated[index][_ACCEPTANCE_STATE_KEY] = state
+        if hasattr(request_body, "model_copy"):
+            return request_body.model_copy(update={"messages": updated})
+        return request_body.copy(update={"messages": updated})
+    return request_body
+
+
 def _browser_delta_chat_request(
     state_chat_body: ChatRequest,
     browser_source_body: ResponsesRequest,
@@ -757,12 +799,13 @@ def _browser_delta_chat_request(
             break
 
     if start_index is None:
-        return _attach_compacted_context_to_generated_tool_fallbacks(
+        compacted_delta = _attach_compacted_context_to_generated_tool_fallbacks(
             delta_body,
             _latest_compacted_continuation_context(
                 messages
             ),
         )
+        return _attach_acceptance_state_to_tool_delta(compacted_delta, messages)
 
     tail = messages[start_index:]
 
@@ -785,10 +828,11 @@ def _browser_delta_chat_request(
             update={"messages": [dict(message) for message in tail]}
         )
 
-    return _attach_compacted_context_to_generated_tool_fallbacks(
+    compacted_delta = _attach_compacted_context_to_generated_tool_fallbacks(
         tail_body,
         _latest_compacted_continuation_context(messages),
     )
+    return _attach_acceptance_state_to_tool_delta(compacted_delta, messages)
 
 
 def _browser_history_suffix_chat_request(
@@ -813,13 +857,12 @@ def _browser_history_suffix_chat_request(
     ]
 
     if hasattr(state_chat_body, "model_copy"):
-        return state_chat_body.model_copy(
+        suffix_body = state_chat_body.model_copy(
             update={"messages": suffix}
         )
-
-    return state_chat_body.copy(
-        update={"messages": suffix}
-    )
+    else:
+        suffix_body = state_chat_body.copy(update={"messages": suffix})
+    return _attach_acceptance_state_to_tool_delta(suffix_body, messages)
 
 
 def _chat_history_after_response(

@@ -31,6 +31,15 @@ _WORKSPACE_TOOL_PRIORITY = (
 
 _EXEC_LIKE_TOOLS = {"exec_command", "shell_command", "local_shell"}
 
+# Only the V2 affinity adapter creates this private snapshot from its hydrated
+# Responses history. It is carried on the current tool-result delta for local
+# policy decisions and is never serialized into the browser prompt.
+_ACCEPTANCE_STATE_KEY = "_uwa_synthetic_acceptance_state"
+_ACCEPTANCE_PATHS = {
+    "CONTEXT_PASS": "context/result.txt",
+    "LARGE_CONTEXT_PASS": "large_context/result.txt",
+}
+
 _WORKSPACE_REQUEST_PATTERNS = (
     re.compile(r"\bworkspace\b", re.IGNORECASE),
     re.compile(r"\brepo(?:sitory)?\b", re.IGNORECASE),
@@ -677,7 +686,12 @@ def _successful_acceptance_workspace_validation_observed(
         ):
             return True
 
-    return False
+    state = _private_acceptance_state(messages)
+    return bool(
+        state
+        and state["validated"]
+        and (result_path is None or state["result_path"] == result_path)
+    )
 
 
 def looks_like_false_acceptance_workspace_mismatch(
@@ -744,28 +758,41 @@ def _acceptance_success_contract(
 ) -> tuple[str, str] | None:
     """Return the exact synthetic success marker/result path requested by the user."""
 
-    final = str(assistant_text or "").strip()
-    contracts = {
-        "CONTEXT_PASS": "context/result.txt",
-        "LARGE_CONTEXT_PASS": "large_context/result.txt",
-    }
-    result_path = contracts.get(final)
-    if not result_path:
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None or str(assistant_text or "").strip() != contract[0]:
         return None
+    return contract
 
-    searchable: List[str] = []
-    for message in messages or []:
+
+def _private_acceptance_state(
+    messages: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """Read only a well-formed adapter-generated synthetic acceptance snapshot."""
+
+    for message in reversed(messages or []):
         if not isinstance(message, dict):
             continue
-        searchable.append(_message_content_text(message))
-        private = message.get("_uwa_compacted_continuation_context")
-        if isinstance(private, str):
-            searchable.append(private)
-
-    combined = "\n".join(searchable)
-    if final not in combined or result_path not in combined:
-        return None
-    return final, result_path
+        state = message.get(_ACCEPTANCE_STATE_KEY)
+        if not isinstance(state, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if (
+            role not in {"tool", "function"}
+            and message.get("_uwa_function_output_fallback") is not True
+        ):
+            return None
+        marker = state.get("marker")
+        if _ACCEPTANCE_PATHS.get(marker) != state.get("result_path"):
+            return None
+        if any(
+            type(state.get(key)) is not bool
+            for key in ("validated", "written", "readback")
+        ):
+            return None
+        if not state["validated"] or (state["readback"] and not state["written"]):
+            return None
+        return state
+    return None
 
 
 
@@ -786,10 +813,7 @@ def _acceptance_contract_from_messages(
     combined = "\n".join(searchable)
     matches = [
         (marker, result_path)
-        for marker, result_path in (
-            ("CONTEXT_PASS", "context/result.txt"),
-            ("LARGE_CONTEXT_PASS", "large_context/result.txt"),
-        )
+        for marker, result_path in _ACCEPTANCE_PATHS.items()
         if (
             re.search(
                 rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])",
@@ -798,6 +822,10 @@ def _acceptance_contract_from_messages(
             and result_path in combined
         )
     ]
+    private = _private_acceptance_state(messages)
+    if private is not None:
+        contract = (private["marker"], private["result_path"])
+        return contract if not matches or matches == [contract] else None
     return matches[0] if len(matches) == 1 else None
 
 
@@ -814,6 +842,9 @@ def _acceptance_effect_progress(
         if _command_writes_result_path(command, result_path)
     ]
     if not write_indexes:
+        state = _private_acceptance_state(messages)
+        if state is not None and state["result_path"] == result_path:
+            return state["written"], state["readback"]
         return False, False
 
     last_write_index = write_indexes[-1]
@@ -822,7 +853,34 @@ def _acceptance_effect_progress(
         and _command_reads_result_path(command, result_path)
         for index, command in enumerate(commands)
     )
+    state = _private_acceptance_state(messages)
+    if state is not None and state["result_path"] == result_path:
+        return state["written"], state["readback"]
     return True, readback_after_write
+
+
+def _acceptance_state_from_history(
+    messages: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    """Summarize only proven synthetic effects from the hydrated tool history."""
+
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None:
+        return None
+    marker, result_path = contract
+    if not _successful_acceptance_workspace_validation_observed(
+        messages,
+        result_path=result_path,
+    ):
+        return None
+    written, readback = _acceptance_effect_progress(messages, result_path)
+    return {
+        "marker": marker,
+        "result_path": result_path,
+        "validated": True,
+        "written": written,
+        "readback": readback,
+    }
 
 
 def _looks_like_acceptance_step_execution_stall(
@@ -978,6 +1036,11 @@ def looks_like_incomplete_acceptance_continuation(
         return False
 
     value = str(assistant_text or "").strip()
+    # Once a paired validation and write have succeeded, every text-only
+    # continuation is premature: the separate byte readback is still pending.
+    # This rule is limited to the two synthetic acceptance contracts above.
+    if write_observed:
+        return True
     return (
         value == "ACCEPTANCE_INCOMPLETE"
         or _looks_like_acceptance_step_execution_stall(
@@ -1109,28 +1172,8 @@ def looks_like_premature_acceptance_success(
         return False
 
     _marker, result_path = contract
-    commands = _successful_workspace_commands(messages)
-
-    write_indexes = [
-        index
-        for index, command in enumerate(commands)
-        if _command_writes_result_path(
-            command,
-            result_path,
-        )
-    ]
-    if not write_indexes:
-        return True
-
-    last_write_index = write_indexes[-1]
-    return not any(
-        index > last_write_index
-        and _command_reads_result_path(
-            command,
-            result_path,
-        )
-        for index, command in enumerate(commands)
-    )
+    written, readback = _acceptance_effect_progress(messages, result_path)
+    return not (written and readback)
 
 
 def _decode_tool_arguments(tool_call: Dict[str, Any]) -> Dict[str, Any]:
@@ -1499,7 +1542,10 @@ def build_client_workspace_repair_messages(
                 " This is a repeated root-workdir error. The corrected tool call must omit workdir entirely."
             )
         action = f"Call {preferred_name} again now. Preserve the intended command and omit workdir. Return only the corrected tool-call output."
-    elif specifically_required:
+    elif specifically_required and not looks_like_incomplete_acceptance_continuation(
+        assistant_text,
+        messages,
+    ):
         correction = (
             f"The request-level tool choice explicitly requires {preferred_name}. This is a protocol contract, "
             "not a suggestion. A text-only answer is invalid for this turn. Emit the declared client-tool call "

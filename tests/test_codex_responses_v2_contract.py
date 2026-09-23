@@ -1,13 +1,20 @@
 import json
 
-from app.api.chat import ChatRequest, ResponsesRequest
+from app.api.chat import ChatRequest, ResponsesRequest, _responses_request_to_chat_request
 from app.api.codex_responses_v2 import (
     _browser_delta_chat_request,
+    _browser_history_suffix_chat_request,
     _clone_for_required_tool_retry,
     _completed_response_has_no_output,
     _required_tool_failed_events,
     required_declared_tool,
 )
+from app.services.client_tool_policy import (
+    looks_like_acceptance_completion_without_exact_sentinel,
+    looks_like_incomplete_acceptance_continuation,
+    looks_like_premature_acceptance_success,
+)
+from app.services.tool_calling_prompts import build_browser_messages_for_tools
 
 
 def _tool(name: str):
@@ -217,3 +224,141 @@ def test_affinity_structured_tool_delta_carries_private_compacted_context():
         == compacted
     )
 
+
+def _synthetic_restart_response_history(*, include_readback: bool) -> ResponsesRequest:
+    """Use Responses items shaped like a restart turn, with synthetic values only."""
+
+    items = [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "Use exec_command to run pwd && test -f .uwa_codex_acceptance "
+                        "&& test -d context. After that succeeds, write "
+                        "context/result.txt, perform a separate byte readback, and "
+                        "only then reply CONTEXT_PASS."
+                    ),
+                }
+            ],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_synthetic_validate",
+            "name": "exec_command",
+            "arguments": json.dumps(
+                {"cmd": "pwd && test -f .uwa_codex_acceptance && test -d context"}
+            ),
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_synthetic_validate",
+            "output": "Process exited with code 0\nFinal output: /synthetic\n",
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_synthetic_write",
+            "name": "exec_command",
+            "arguments": json.dumps(
+                {"cmd": "printf '%s\\n' 'SYNTHETIC-7319' > context/result.txt"}
+            ),
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_synthetic_write",
+            "output": "Process exited with code 0\nFinal output:\n",
+        },
+    ]
+    if include_readback:
+        items.extend(
+            [
+                {
+                    "type": "function_call",
+                    "call_id": "call_synthetic_read",
+                    "name": "exec_command",
+                    "arguments": json.dumps(
+                        {"cmd": "od -An -tx1 -v context/result.txt"}
+                    ),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_synthetic_read",
+                    "output": (
+                        "Process exited with code 0\n"
+                        "Final output: 53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a\n"
+                    ),
+                },
+            ]
+        )
+    return ResponsesRequest(model="chatgpt", input=items, tools=[_tool("exec_command")])
+
+
+def test_affinity_restart_delta_retains_proven_write_and_pending_byte_readback():
+    full = _synthetic_restart_response_history(include_readback=False)
+    state = _responses_request_to_chat_request(full, stream=False)
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE", state.messages
+    )
+    source = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_synthetic_prior",
+        input=[full.input[-1]],
+        tools=[_tool("exec_command")],
+    )
+
+    delta = _browser_delta_chat_request(state, source)
+
+    # The web conversation already has the earlier history. Keep its visible
+    # delta short while retaining trusted history for local policy decisions.
+    assert [message["role"] for message in delta.messages] == ["assistant", "tool"]
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE", delta.messages
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", delta.messages)
+    browser_messages = build_browser_messages_for_tools(
+        messages=delta.messages,
+        tools=[_tool("exec_command")],
+        tool_choice="auto",
+    )
+    assert "_uwa_synthetic_acceptance_state" not in json.dumps(browser_messages)
+
+
+def test_affinity_restart_delta_recognizes_completed_byte_readback():
+    full = _synthetic_restart_response_history(include_readback=True)
+    state = _responses_request_to_chat_request(full, stream=False)
+    assert looks_like_acceptance_completion_without_exact_sentinel(
+        "The file is verified.", state.messages
+    )
+    source = ResponsesRequest(
+        model="chatgpt",
+        previous_response_id="resp_synthetic_prior",
+        input=[full.input[-1]],
+        tools=[_tool("exec_command")],
+    )
+
+    delta = _browser_delta_chat_request(state, source)
+
+    assert [message["role"] for message in delta.messages] == ["assistant", "tool"]
+    assert not looks_like_premature_acceptance_success(
+        "CONTEXT_PASS", delta.messages
+    )
+    assert looks_like_acceptance_completion_without_exact_sentinel(
+        "The file is verified.", delta.messages
+    )
+
+
+def test_full_history_affinity_suffix_retains_pending_byte_readback():
+    full = _synthetic_restart_response_history(include_readback=False)
+    state = _responses_request_to_chat_request(full, stream=False)
+
+    # A full-history 0.156 continuation can reuse an affined Web conversation
+    # by sending only the unmatched suffix after the validation pair.
+    suffix = _browser_history_suffix_chat_request(state, 3)
+
+    assert [message["role"] for message in suffix.messages] == ["assistant", "tool"]
+    assert looks_like_incomplete_acceptance_continuation(
+        "ACCEPTANCE_INCOMPLETE", suffix.messages
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", suffix.messages)
