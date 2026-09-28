@@ -1943,3 +1943,37 @@ currently be cryptographically bound to a trusted Codex thread id because the
 available Responses request fields do not expose one. The checkpoint is still
 narrowly scoped to the synthetic acceptance mechanism and is bound to summary
 and compaction lineage.
+
+## 2026-09-28 canonical candidate local gates and exact-SHA CI green
+
+Canonical candidate:
+
+```text
+6504248b3a0c86de61a285ca1952f30773fa3d92
+codex-cli 0.156.0
+```
+
+Local validation completed successfully:
+
+```text
+focused:          162 passed, 8 warnings, 12 subtests passed
+web recovery:      28 passed
+full suite:       667 passed, 22 warnings, 12 subtests passed
+public safety:    PASS
+dependency audit: PASS
+install smoke:    PASS
+final identity:   PASS
+```
+
+Exact-SHA Standalone CI #918 also completed successfully:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+The candidate is ready for S3 live accumulation. S3 count remains 0/3 before
+the first full live run on this exact SHA.
