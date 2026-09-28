@@ -1879,3 +1879,67 @@ private post-compaction recovery trace and determine whether the readback was
 actually absent or was executed in a form not recognized by the gate. If absent,
 focus on synthetic acceptance progress across remote compaction / affinity
 continuations and exact-sentinel closure after a successful write.
+
+## 2026-09-28 post-compaction readback fix reviewed, CI green, and merged
+
+Fix branch head:
+
+```text
+codex/0156-post-compaction-readback-fix
+24aee7de7728c40c9b93cb85fb8270203ac7856d
+```
+
+Root cause was CASE B: a successful byte-level readback occurred, but quoted
+diagnostic text containing `> large_context/result.txt` was incorrectly treated
+as a later write, so S3 falsely reported `result_byte_readback_missing`.
+
+The branch also contained current ChatGPT Web compatibility changes required by
+the live reproduction: native editor input verification, send guards, current
+model/reasoning controls, temporary-chat detection, assistant-result selection,
+and authenticated synthetic-acceptance continuity across remote-compaction
+checkpoints.
+
+Validation reported before merge:
+
+```text
+targeted post-compaction live #1: PASS
+targeted post-compaction live #2: PASS
+focused tests: 162 passed
+full suite: 667 passed, 22 warnings, 12 subtests passed
+public safety: PASS
+dependency audit: PASS
+git diff --check: PASS
+```
+
+Draft PR #4 was opened and exact-head Standalone CI #917 passed all jobs:
+
+```text
+scaffold-static   PASS
+runtime-import    PASS
+codex-regression  PASS
+release-metadata  PASS
+macos-compat      PASS
+```
+
+PR #4 was then merged into `standalone-dev`.
+
+New canonical candidate:
+
+```text
+6504248b3a0c86de61a285ca1952f30773fa3d92
+```
+
+The merge commit tree exactly matches fix head `24aee7de...`; there is no
+additional code delta from the merge itself.
+
+Standalone CI #918 was automatically triggered for the new merge SHA and was
+queued when recorded here.
+
+All prior candidate-bound S3 evidence is historical. S3 accumulation for
+`6504248b...` restarts at 0/3.
+
+Known limitation: a valid authenticated synthetic-acceptance checkpoint cannot
+currently be cryptographically bound to a trusted Codex thread id because the
+available Responses request fields do not expose one. The checkpoint is still
+narrowly scoped to the synthetic acceptance mechanism and is bound to summary
+and compaction lineage.
