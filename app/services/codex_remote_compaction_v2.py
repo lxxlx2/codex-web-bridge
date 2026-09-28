@@ -24,8 +24,11 @@ import copy
 import hashlib
 import hmac
 import json
+import os
 import secrets
+import stat
 import time
+from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Tuple
 
 from fastapi import HTTPException
@@ -52,6 +55,9 @@ _LINEAGE_HEX_LEN = 32
 _WEB_RETAINED_HISTORY_TEXT_CHAR_BUDGET = 24_000
 _WEB_ALWAYS_RETAINED_ROLES = {"system", "developer"}
 _BACKING_SUMMARY_RETRY_DELAY_SEC = 1.0
+_ACCEPTANCE_CHECKPOINT_ENVELOPE_KEY = "acceptance_checkpoint"
+_ACCEPTANCE_CHECKPOINT_MESSAGE_KEY = "_uwa_compaction_acceptance_envelope"
+_ACCEPTANCE_CHECKPOINT_KEY_PATH = Path.home() / ".uwa" / "codex-compaction-acceptance.key"
 _BACKING_SUMMARY_RETRYABLE_ERRORS = frozenset(
     {
         "compaction backing response has invalid choices",
@@ -198,10 +204,78 @@ def _normalize_compaction_lineage(value: Any) -> str:
     return lineage
 
 
+def _acceptance_checkpoint_key() -> bytes:
+    """Load a private, restart-stable key for adapter-owned effect snapshots."""
+
+    key_path = _ACCEPTANCE_CHECKPOINT_KEY_PATH
+    key_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(key_path, flags, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        try:
+            key = secrets.token_bytes(32)
+            os.write(fd, key)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    fd = os.open(key_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        metadata = os.fstat(fd)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_mode & 0o077
+            or (hasattr(os, "getuid") and metadata.st_uid != os.getuid())
+        ):
+            raise RemoteCompactionV2ProtocolError("unsafe acceptance checkpoint key")
+        key = os.read(fd, 33)
+        if len(key) != 32:
+            raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint key")
+        return key
+    finally:
+        os.close(fd)
+
+
+def _normalized_acceptance_checkpoint(value: Any) -> Dict[str, Any]:
+    """Accept only the two narrow synthetic contracts and ordered effect flags."""
+
+    from app.services.client_tool_policy import _ACCEPTANCE_PATHS
+
+    if not isinstance(value, dict) or set(value) != {
+        "marker", "result_path", "validated", "written", "readback"
+    }:
+        raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint schema")
+    if _ACCEPTANCE_PATHS.get(value.get("marker")) != value.get("result_path"):
+        raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint contract")
+    if any(type(value[key]) is not bool for key in ("validated", "written", "readback")):
+        raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint flags")
+    if not value["validated"] or (value["readback"] and not value["written"]):
+        raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint progress")
+    return {key: value[key] for key in (
+        "marker", "result_path", "validated", "written", "readback"
+    )}
+
+
+def _acceptance_checkpoint_mac(
+    state: Dict[str, Any], summary: str, lineage: str
+) -> str:
+    binding = {
+        "lineage": lineage,
+        "state": state,
+        "summary_sha256": hashlib.sha256(summary.encode("utf-8")).hexdigest(),
+    }
+    raw = json.dumps(binding, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hmac.new(_acceptance_checkpoint_key(), raw, hashlib.sha256).hexdigest()
+
+
 def encode_compaction_envelope(
     summary: str,
     *,
     lineage: str = "",
+    acceptance_state: Dict[str, Any] | None = None,
 ) -> str:
     text = str(summary or "").strip()
     raw_summary = text.encode("utf-8")
@@ -225,6 +299,12 @@ def encode_compaction_envelope(
         "summary": text,
         "v": _ENVELOPE_VERSION,
     }
+    if acceptance_state is not None:
+        state = _normalized_acceptance_checkpoint(acceptance_state)
+        payload[_ACCEPTANCE_CHECKPOINT_ENVELOPE_KEY] = {
+            "state": state,
+            "mac": _acceptance_checkpoint_mac(state, text, lineage_value),
+        }
 
     raw = json.dumps(
         payload,
@@ -331,10 +411,12 @@ def _decode_compaction_envelope_payload(
         "summary",
         "v",
     }
+    acceptance_keys = lineage_keys | {_ACCEPTANCE_CHECKPOINT_ENVELOPE_KEY}
 
     if keys not in {
         frozenset(legacy_keys),
         frozenset(lineage_keys),
+        frozenset(acceptance_keys),
     }:
         raise RemoteCompactionV2ProtocolError(
             "invalid UWA compaction envelope schema"
@@ -375,11 +457,29 @@ def _decode_compaction_envelope_payload(
                 "invalid UWA compaction lineage"
             )
 
+    acceptance_state = None
+    if _ACCEPTANCE_CHECKPOINT_ENVELOPE_KEY in payload:
+        proof = payload[_ACCEPTANCE_CHECKPOINT_ENVELOPE_KEY]
+        if not isinstance(proof, dict) or set(proof) != {"state", "mac"}:
+            raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint proof")
+        acceptance_state = _normalized_acceptance_checkpoint(proof["state"])
+        mac = proof["mac"]
+        if (
+            not isinstance(mac, str)
+            or len(mac) != 64
+            or any(ch not in "0123456789abcdef" for ch in mac)
+            or not hmac.compare_digest(
+                mac, _acceptance_checkpoint_mac(acceptance_state, summary, lineage)
+            )
+        ):
+            raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint authentication")
+
     return {
         "kind": _ENVELOPE_KIND,
         "lineage": lineage,
         "summary": summary,
         "v": _ENVELOPE_VERSION,
+        "acceptance_state": acceptance_state,
     }
 
 
@@ -602,8 +702,10 @@ def _prior_compaction_summary(
     return found[0]
 
 
-def _compaction_message(summary: str) -> Dict[str, Any]:
-    return {
+def _compaction_message(
+    summary: str, *, acceptance_envelope: str = ""
+) -> Dict[str, Any]:
+    message = {
         "type": "message",
         "role": "assistant",
         "content": [
@@ -613,6 +715,9 @@ def _compaction_message(summary: str) -> Dict[str, Any]:
             }
         ],
     }
+    if acceptance_envelope:
+        message[_ACCEPTANCE_CHECKPOINT_MESSAGE_KEY] = acceptance_envelope
+    return message
 
 
 def _text_char_count(value: Any) -> int:
@@ -724,14 +829,9 @@ def rewrite_uwa_compaction_history(
             "invalid compaction item"
         )
 
-    summary = decode_compaction_envelope(
-        str(
-            compact_item.get(
-                "encrypted_content"
-            )
-            or ""
-        )
-    )
+    envelope = str(compact_item.get("encrypted_content") or "")
+    payload = _decode_compaction_envelope_payload(envelope)
+    summary = payload["summary"]
 
     (
         retained_prefix,
@@ -762,7 +862,12 @@ def rewrite_uwa_compaction_history(
 
     return (
         retained_prefix
-        + [_compaction_message(summary)]
+        + [_compaction_message(
+            summary,
+            acceptance_envelope=(
+                envelope if payload["acceptance_state"] is not None else ""
+            ),
+        )]
         + suffix
     )
 
@@ -912,6 +1017,7 @@ async def _stream_remote_compaction_v2(
     v2.prepare_and_verify_codex_web_mode(backing_body.reasoning)
     v2.install_codex_chatgpt_network_tuning()
     chat_body = v2._responses_request_to_chat_request(backing_body, stream=False)
+    from app.services.client_tool_policy import _acceptance_state_from_history
 
     task = asyncio.create_task(
         v2._run_chat_completion_final(
@@ -1083,9 +1189,22 @@ async def _stream_remote_compaction_v2(
             fresh_active,
         )
 
+        # The current summary can restore a dropped contract as intent, but
+        # only paired, successful client-tool history may prove its effects.
+        acceptance_state = _acceptance_state_from_history(
+            [
+                *chat_body.messages,
+                {
+                    "role": "assistant",
+                    "content": "[Compacted prior context]\n" + summary,
+                },
+            ]
+        )
+
         envelope = encode_compaction_envelope(
             summary,
             lineage=lineage,
+            acceptance_state=acceptance_state,
         )
         item = {
             "type": "compaction",

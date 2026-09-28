@@ -123,17 +123,18 @@ class WorkflowExecutorActionMixin:
         return bool(target and target in self._get_stealth_dom_click_targets())
 
     def _resolve_input_length_selector(self, target_key: str) -> str:
+        """Return a selector usable by the browser's native querySelector."""
         selector = ""
         if isinstance(getattr(self, "_selectors", None), dict):
             selector = str(self._selectors.get(target_key, "") or "").strip()
         if selector:
-            return selector
+            return selector[4:].strip() if selector.startswith("css:") else selector
 
         text_handler = getattr(self, "_text_handler", None)
         if text_handler is not None:
             selector = str(getattr(text_handler, "_active_input_selector", "") or "").strip()
         if selector:
-            return selector
+            return selector[4:].strip() if selector.startswith("css:") else selector
 
         return ""
 
@@ -1685,10 +1686,20 @@ class WorkflowExecutorActionMixin:
                                     f"before_len={before_len}, expected_len={expected_len}"
                                 )
                             else:
-                                logger.warning(
-                                    "[SEND_CLICK_SKIP] 发送前输入框仍为空，跳过硬失败并继续发送观察: "
-                                    f"expected_len={expected_len}, settle_wait={settle_wait:.2f}s"
+                                raise WorkflowError("send_input_unverified")
+
+                        text_handler = getattr(self, "_text_handler", None)
+                        if getattr(text_handler, "_chatgpt_native_input_used", False):
+                            expected_input = str(self._context.get("prompt", "") or "")
+                            expected_input = expected_input.replace("\r\n", "\n").replace("\r", "\n")
+                            actual_input = text_handler.read_chatgpt_editor_canonical_text()
+                            if actual_input != expected_input:
+                                logger.error(
+                                    "[SEND_CLICK_ERROR] ChatGPT editor changed after fill "
+                                    f"actual_len={len(actual_input or '')} "
+                                    f"expected_len={len(expected_input)}"
                                 )
+                                raise WorkflowError("send_input_unverified")
 
                     self._click_element_with_configured_mode(ele, target_key, selector)
 
@@ -1720,7 +1731,10 @@ class WorkflowExecutorActionMixin:
                 return True
 
             except Exception as click_err:
-                if isinstance(click_err, WorkflowError) and str(click_err) in {"send_unconfirmed"}:
+                if isinstance(click_err, WorkflowError) and str(click_err) in {
+                    "send_unconfirmed",
+                    "send_input_unverified",
+                }:
                     raise
                 last_error = click_err
                 logger.warning(
@@ -2237,7 +2251,10 @@ class WorkflowExecutorActionMixin:
 
                     const tag = (target.tagName || '').toLowerCase();
                     if (tag === 'textarea' || tag === 'input') return (target.value || '').length;
-                    if (target.isContentEditable || target.getAttribute('contenteditable') === 'true') return (target.innerText || '').length;
+                    if (target.isContentEditable || target.getAttribute('contenteditable') === 'true') {
+                        const value = target.innerText || '';
+                        return value.trim() ? value.length : 0;
+                    }
                     return 0;
                 } catch(e){ return 0; }
             """, selector)
@@ -2706,7 +2723,7 @@ class WorkflowExecutorActionMixin:
 
             self._last_input_element = self._resolve_active_text_input() or ele
             self._note_fill_completion(text, after_new_chat=fill_after_new_chat)
-            actual_dom_len = self._safe_get_input_len_by_key(target_key) or len(text)
+            actual_dom_len = self._safe_get_input_len_by_key(target_key)
             logger.info(
                 f"[FILL_INPUT:DONE] 填充输入框完成: target={target_key!r}, "
                 f"filled_len={len(text)}, actual_dom_len={actual_dom_len}"

@@ -73,6 +73,7 @@ class TextInputHandler:
         }
         self._primary_modifier = get_primary_modifier_key()
         self._active_input_selector = ""
+        self._chatgpt_native_input_used = False
         self._active_input_target_key = ""
 
     def has_recent_attachment_upload(self, window: float = 45.0) -> bool:
@@ -1101,13 +1102,113 @@ class TextInputHandler:
             logger.error(f"JS 备用方案失败: {e}")
             return False
     
+    def _fill_chatgpt_editor_via_native_input(self, ele, text: str) -> bool:
+        """Use browser text input so the current ChatGPT editor updates its state."""
+        try:
+            is_chatgpt_editor = bool(ele.run_js("""
+                return this.matches('[role="textbox"][contenteditable="true"][aria-label*="ChatGPT"]');
+            """))
+        except Exception:
+            is_chatgpt_editor = False
+        if not is_chatgpt_editor:
+            return False
+
+        expected = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+        editor_selector = '[role="textbox"][contenteditable="true"][aria-label*="ChatGPT"]'
+        try:
+            cleared = self.tab.run_js(f"""
+                const editor = document.querySelector('{editor_selector}');
+                if (!editor) return false;
+                editor.focus();
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(editor);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                document.execCommand('delete');
+                return !(editor.innerText || '').trim();
+            """)
+        except Exception as exc:
+            raise WorkflowError("input_mismatch") from exc
+        if not cleared:
+            raise WorkflowError("input_mismatch")
+        time.sleep(0.1)
+        for offset in range(0, len(expected), 1000):
+            if self._check_cancelled():
+                raise WorkflowError("input_cancelled")
+            try:
+                # The editor can rebuild its DOM between chunks. Place the
+                # native insertion point at the end of the current editor.
+                focused = self.tab.run_js(f"""
+                    const editor = document.querySelector('{editor_selector}');
+                    if (!editor) return false;
+                    editor.focus();
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(editor);
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    return true;
+                """)
+                if not focused:
+                    raise WorkflowError("input_mismatch")
+                self.tab.run_cdp("Input.insertText", text=expected[offset:offset + 1000])
+            except Exception as exc:
+                raise WorkflowError("input_mismatch") from exc
+
+        # A DOM-only write can disappear when the send button takes focus.
+        # Verify the editor after blur, before the send workflow proceeds.
+        current_editor = self.tab.ele(f"css:{editor_selector}", timeout=0.5)
+        if not current_editor:
+            raise WorkflowError("input_mismatch")
+        current_editor.run_js("this.blur(); return true;")
+        time.sleep(0.15)
+        actual = self.read_chatgpt_editor_canonical_text()
+        if actual != expected:
+            mismatch_at = next(
+                (index for index, pair in enumerate(zip(actual or "", expected)) if pair[0] != pair[1]),
+                min(len(actual or ""), len(expected)),
+            )
+            logger.error(
+                "[CHATGPT_NATIVE_INPUT] mismatch "
+                f"actual_len={len(actual or '')} expected_len={len(expected)} "
+                f"mismatch_at={mismatch_at}"
+            )
+            raise WorkflowError("input_mismatch")
+        logger.info(f"[CHATGPT_NATIVE_INPUT] verified chars={len(actual)}")
+        self._chatgpt_native_input_used = True
+        return True
+
+    def read_chatgpt_editor_canonical_text(self) -> str | None:
+        """Read the ProseMirror paragraphs without innerText's extra line breaks."""
+        try:
+            value = self.tab.run_js(r"""
+                const editor = document.querySelector(
+                    '[role="textbox"][contenteditable="true"][aria-label*="ChatGPT"]'
+                );
+                if (!editor) return null;
+                const paragraphs = Array.from(editor.children);
+                if (!paragraphs.every(node => node.tagName === 'P')) return null;
+                return paragraphs.map(node => node.textContent || '').join('\n');
+            """)
+        except Exception:
+            return None
+        if not isinstance(value, str):
+            return None
+        return value.replace("\r\n", "\n").replace("\r", "\n")
+
     def fill_via_js(self, ele, text: str):
         """普通模式专用：JS 填充逻辑"""
+        self._chatgpt_native_input_used = False
         # 🆕 文件粘贴前置判断
         if self._should_use_file_paste(text):
             if self._fill_via_file_paste(ele, text):
                 return
             logger.warning("[FILE_PASTE] 文件粘贴失败，降级到 JS 输入模式")
+
+        if self._fill_chatgpt_editor_via_native_input(ele, text):
+            return
         
         self.clear_input_safely(ele)
         

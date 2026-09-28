@@ -18,11 +18,13 @@ Coverage:
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -554,6 +556,164 @@ def _completed_exec_commands_from_trace(
     return commands
 
 
+def _shell_redirects_to_result_path(
+    command: str, result_path: str, *, depth: int = 0
+) -> bool:
+    """Recognize a shell redirect, excluding quoted diagnostic text."""
+
+    pattern = re.compile(
+        rf"(?<![<>=!])>{{1,2}}\s*['\"]?{re.escape(result_path)}['\"]?(?=$|[\s;&|)])"
+    )
+    quote = ""
+    escaped = False
+    for index, char in enumerate(command):
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif char == quote:
+            quote = ""
+        elif not quote and char in {"'", '"'}:
+            quote = char
+        elif not quote and char == ">" and pattern.match(command, index):
+            return True
+
+    # Codex traces can include /bin/zsh -lc "..." around the actual command.
+    if depth >= 2:
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if (
+        len(words) >= 3
+        and words[0].rsplit("/", 1)[-1] in {"sh", "bash", "zsh"}
+        and words[1] in {"-c", "-lc", "-cl"}
+    ):
+        return _shell_redirects_to_result_path(words[2], result_path, depth=depth + 1)
+    return False
+
+
+def _unwrapped_effect_command(command: str, *, depth: int = 0) -> str:
+    """Inspect shell -c payloads as code, rather than as one quoted argument."""
+
+    if depth >= 2:
+        return command
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return command
+    if (
+        len(words) >= 3
+        and words[0].rsplit("/", 1)[-1] in {"sh", "bash", "zsh"}
+        and words[1] in {"-c", "-lc", "-cl"}
+    ):
+        return _unwrapped_effect_command(words[2], depth=depth + 1)
+    return command
+
+
+def _python_path_methods(command: str, result_path: str) -> set[str]:
+    """Find calls on the result Path in a real Python -c or heredoc body."""
+
+    code = ""
+    heredoc = re.match(
+        r"\s*(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-\s+<<-?\s*(['\"]?)([A-Za-z_]\w*)\1[ \t]*\n(.*?)\n\2[ \t]*(?:\n|$)",
+        command,
+        re.DOTALL,
+    )
+    if heredoc:
+        code = heredoc.group(3)
+    else:
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            return set()
+        if (
+            len(words) >= 3
+            and re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", words[0].rsplit("/", 1)[-1])
+            and words[1] == "-c"
+        ):
+            code = words[2]
+    if not code:
+        return set()
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return set()
+
+    def is_target_path(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, (ast.Name, ast.Attribute))
+            and (
+                node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+            ) == "Path"
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == result_path
+        )
+
+    path_names = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and is_target_path(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    methods: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        receiver = node.func.value
+        if is_target_path(receiver) or (
+            isinstance(receiver, ast.Name) and receiver.id in path_names
+        ):
+            methods.add(node.func.attr)
+    return methods
+
+
+def _shell_path_utilities(command: str, result_path: str) -> set[str]:
+    """Recognize executable shell utilities, excluding quoted print arguments."""
+
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+
+    effects: set[str] = set()
+    pipeline: list[list[str]] = [[]]
+
+    def inspect_pipeline() -> None:
+        file_input_seen = False
+        for component in pipeline:
+            if not component:
+                continue
+            utility = component[0].rsplit("/", 1)[-1]
+            has_path = result_path in component[1:]
+            if utility == "tee" and has_path:
+                effects.add("tee")
+            if utility in {"cat", "tail", "head", "dd"} and has_path:
+                file_input_seen = True
+            if utility in {"od", "xxd", "hexdump"} and (
+                has_path or file_input_seen
+            ):
+                effects.add("byte_read")
+
+    for token in tokens:
+        if token == "|":
+            pipeline.append([])
+        elif token in {";", "&&", "||", "&"}:
+            inspect_pipeline()
+            pipeline = [[]]
+        else:
+            pipeline[-1].append(token)
+    inspect_pipeline()
+    return effects
+
+
 def _command_writes_result_path(
     command: str,
     result_path: str,
@@ -561,14 +721,11 @@ def _command_writes_result_path(
     value = str(command or "")
     if result_path not in value:
         return False
-    return any(
-        marker in value
-        for marker in (
-            ">",
-            "write_text",
-            "write_bytes",
-            "tee ",
-        )
+    actual = _unwrapped_effect_command(value)
+    return (
+        _shell_redirects_to_result_path(value, result_path)
+        or bool(_python_path_methods(actual, result_path) & {"write_text", "write_bytes"})
+        or "tee" in _shell_path_utilities(actual, result_path)
     )
 
 
@@ -581,14 +738,10 @@ def _command_byte_reads_result_path(
     value = str(command or "")
     if result_path not in value:
         return False
-    return any(
-        marker in value
-        for marker in (
-            "read_bytes",
-            "xxd ",
-            "od ",
-            "hexdump ",
-        )
+    actual = _unwrapped_effect_command(value)
+    return (
+        "read_bytes" in _python_path_methods(actual, result_path)
+        or "byte_read" in _shell_path_utilities(actual, result_path)
     )
 
 

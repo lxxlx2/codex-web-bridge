@@ -1013,9 +1013,6 @@ class StandaloneS3RunnerTests(unittest.TestCase):
                     ] = old_recovery
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_result_effects_require_readback_after_last_successful_write(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             trace = Path(raw) / "trace.jsonl"
@@ -1073,3 +1070,149 @@ if __name__ == "__main__":
                 (True, True),
             )
 
+    def test_effect_detector_ignores_quoted_utilities_and_keeps_real_forms(self) -> None:
+        path = "large_context/result.txt"
+        cases = (
+            ("printf '%s\\n' 'tee large_context/result.txt'", False, False),
+            ("printf '%s\\n' 'od large_context/result.txt'", False, False),
+            ("printf '%s\\n' 'read_bytes large_context/result.txt'", False, False),
+            ("printf '%s\\n' VALUE | tee large_context/result.txt", True, False),
+            ("od -An -tx1 -v large_context/result.txt", False, True),
+            ("xxd -p large_context/result.txt", False, True),
+            ("hexdump -C large_context/result.txt", False, True),
+            ("tail -c 1 large_context/result.txt | od -An -t x1", False, True),
+            ("/bin/zsh -lc 'od -An -tx1 -v large_context/result.txt'", False, True),
+            (
+                "python3 -c \"from pathlib import Path; "
+                "Path('large_context/result.txt').write_text('VALUE')\"",
+                True,
+                False,
+            ),
+            (
+                "python3 -c \"from pathlib import Path; "
+                "Path('large_context/result.txt').write_bytes(b'VALUE')\"",
+                True,
+                False,
+            ),
+            (
+                "python3 - <<'PY'\nfrom pathlib import Path\n"
+                "data = Path('large_context/result.txt').read_bytes()\n"
+                "print('od large_context/result.txt')\nPY",
+                False,
+                True,
+            ),
+        )
+        for command, expected_write, expected_read in cases:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    s3.core._command_writes_result_path(command, path),
+                    expected_write,
+                )
+                self.assertEqual(
+                    s3.core._command_byte_reads_result_path(command, path),
+                    expected_read,
+                )
+
+    def test_quoted_byte_read_diagnostic_does_not_prove_readback(self) -> None:
+        path = "large_context/result.txt"
+        with tempfile.TemporaryDirectory() as raw:
+            trace = Path(raw) / "trace.jsonl"
+            commands = [
+                "printf '%s\\n' VALUE > large_context/result.txt",
+                "printf '%s\\n' 'od large_context/result.txt read_bytes'",
+            ]
+
+            def write_trace() -> None:
+                trace.write_text(
+                    "\n".join(
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "type": "command_execution",
+                                    "status": "completed",
+                                    "exit_code": 0,
+                                    "command": command,
+                                },
+                            }
+                        )
+                        for command in commands
+                    ),
+                    encoding="utf-8",
+                )
+
+            write_trace()
+            self.assertEqual(s3.core._result_effects_observed(trace, path), (True, False))
+            commands.append("od -An -tx1 -v large_context/result.txt")
+            write_trace()
+            self.assertEqual(s3.core._result_effects_observed(trace, path), (True, True))
+
+    def test_byte_readback_diagnostic_gt_does_not_become_last_write(self) -> None:
+        result_path = "large_context/result.txt"
+        write_command = "printf '%s\\n' TOKEN > large_context/result.txt"
+        read_command = (
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "data = Path('large_context/result.txt').read_bytes()\n"
+            "assert data.endswith(b'\\n')\n"
+            "print(\"diagnostic: > large_context/result.txt\")\n"
+            "print('VALUE:' + data[:-1].decode('utf-8') "
+            "if data.endswith(b'\\n') else 'MISSING>NEWLINE')\n"
+            "PY"
+        )
+        self.assertTrue(
+            s3.core._command_writes_result_path(write_command, result_path)
+        )
+        self.assertFalse(
+            s3.core._command_writes_result_path(read_command, result_path)
+        )
+        self.assertTrue(
+            s3.core._command_byte_reads_result_path(read_command, result_path)
+        )
+
+        with tempfile.TemporaryDirectory() as raw:
+            trace = Path(raw) / "post-compaction-recovery.jsonl"
+            events = [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": command,
+                    },
+                }
+                for command in (write_command, read_command)
+            ]
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                s3.core._result_effects_observed(trace, result_path),
+                (True, True),
+            )
+
+            events.append(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "status": "completed",
+                        "exit_code": 0,
+                        "command": "printf '%s\\n' NEW > large_context/result.txt",
+                    },
+                }
+            )
+            trace.write_text(
+                "\n".join(json.dumps(item) for item in events),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                s3.core._result_effects_observed(trace, result_path),
+                (True, False),
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+from bs4 import BeautifulSoup
 
 from app.core.generation_state import GENERATION_INDICATOR_CSS_SELECTORS
 from app.core.stream_monitor import (
@@ -205,3 +208,21 @@ def test_pre_send_probe_uses_same_localized_generation_selectors():
         ensure_ascii=False,
     )
     assert f"const sharedGenerationSelectors = {expected};" in tab.js
+
+
+def test_chatgpt_result_selector_finds_current_reply_without_user_markdown():
+    config = json.loads(
+        (Path(__file__).resolve().parents[1] / "config" / "sites.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    selector = config["chatgpt.com"]["presets"]["主预设"]["selectors"]["result_container"]
+    page = BeautifulSoup(
+        '<div class="group/user-message">'
+        '<div class="MarkdownRoot-user">user text</div></div>'
+        '<div class="block-model">'
+        '<div class="MarkdownRoot-assistant">assistant text</div></div>',
+        "html.parser",
+    )
+
+    assert [node.get_text() for node in page.select(selector)] == ["assistant text"]

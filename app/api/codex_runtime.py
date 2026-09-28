@@ -464,6 +464,31 @@ def _append_response_input_item(messages: List[Dict[str, Any]], item: Any) -> No
             "content": _normalize_response_message_content(content),
         }
         if normalized_role == "assistant":
+            checkpoint_envelope = item.get("_uwa_compaction_acceptance_envelope")
+            if isinstance(checkpoint_envelope, str) and isinstance(
+                message_payload["content"], str
+            ):
+                # A caller-supplied private field is inert unless its envelope
+                # has the adapter's MAC and matches this exact checkpoint text.
+                from app.services.codex_remote_compaction_v2 import (
+                    RemoteCompactionV2ProtocolError,
+                    _decode_compaction_envelope_payload,
+                )
+
+                try:
+                    checkpoint = _decode_compaction_envelope_payload(checkpoint_envelope)
+                except RemoteCompactionV2ProtocolError:
+                    checkpoint = None
+                if (
+                    checkpoint is not None
+                    and checkpoint["acceptance_state"] is not None
+                    and message_payload["content"]
+                    == "[Compacted prior context]\n" + checkpoint["summary"]
+                ):
+                    message_payload["_uwa_synthetic_acceptance_state"] = checkpoint[
+                        "acceptance_state"
+                    ]
+                    message_payload["_uwa_verified_compaction_checkpoint"] = True
             tool_calls = _normalize_chat_style_tool_calls(item.get("tool_calls"))
             if tool_calls is not None:
                 message_payload["tool_calls"] = tool_calls
