@@ -15,9 +15,11 @@ checks.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import shlex
 from typing import Any, Dict, List
 
 
@@ -621,6 +623,20 @@ def _tool_result_exit_zero(message: Dict[str, Any]) -> bool:
     )
 
 
+def _command_validates_acceptance_workspace(
+    command: str, result_path: str | None = None
+) -> bool:
+    if not all(fragment in command for fragment in (
+        "pwd", "test -f .uwa_codex_acceptance"
+    )):
+        return False
+    directories = (
+        (result_path.split("/", 1)[0],)
+        if result_path else ("large_context", "context")
+    )
+    return any(f"test -d {directory}" in command for directory in directories)
+
+
 def _successful_acceptance_workspace_validation_observed(
     messages: List[Dict[str, Any]],
     *,
@@ -661,29 +677,7 @@ def _successful_acceptance_workspace_validation_observed(
         if not command or not _tool_result_exit_zero(message):
             continue
 
-        common_required = (
-            "pwd",
-            "test -f .uwa_codex_acceptance",
-        )
-        if result_path:
-            acceptance_dirs = (
-                f"test -d {result_path.split('/', 1)[0]}",
-            )
-        else:
-            acceptance_dirs = (
-                "test -d large_context",
-                "test -d context",
-            )
-        if (
-            all(
-                fragment in command
-                for fragment in common_required
-            )
-            and any(
-                fragment in command
-                for fragment in acceptance_dirs
-            )
-        ):
+        if _command_validates_acceptance_workspace(command, result_path):
             return True
 
     state = _private_acceptance_state(messages)
@@ -709,13 +703,13 @@ def looks_like_false_acceptance_workspace_mismatch(
 
 def _successful_workspace_commands(
     messages: List[Dict[str, Any]],
-) -> List[str]:
-    """Return completed exit-zero exec-like commands paired with real tool results."""
+) -> List[tuple[int, str]]:
+    """Return exit-zero exec commands with their tool-result positions."""
 
     calls: Dict[str, str] = {}
-    successful: List[str] = []
+    successful: List[tuple[int, str]] = []
 
-    for message in messages or []:
+    for index, message in enumerate(messages or []):
         if not isinstance(message, dict):
             continue
 
@@ -747,7 +741,7 @@ def _successful_workspace_commands(
         ).strip()
         command = calls.get(call_id, "")
         if command and _tool_result_exit_zero(message):
-            successful.append(command)
+            successful.append((index, command))
 
     return successful
 
@@ -769,16 +763,36 @@ def _private_acceptance_state(
 ) -> Dict[str, Any] | None:
     """Read only a well-formed adapter-generated synthetic acceptance snapshot."""
 
-    for message in reversed(messages or []):
+    found = _private_acceptance_state_with_index(messages)
+    return found[1] if found is not None else None
+
+
+def _private_acceptance_state_with_index(
+    messages: List[Dict[str, Any]],
+) -> tuple[int, Dict[str, Any]] | None:
+    """Locate the newest valid snapshot so later real effects can supersede it."""
+
+    for index in range(len(messages or []) - 1, -1, -1):
+        message = messages[index]
         if not isinstance(message, dict):
+            continue
+        if _ACCEPTANCE_STATE_KEY not in message:
             continue
         state = message.get(_ACCEPTANCE_STATE_KEY)
         if not isinstance(state, dict):
-            continue
+            return None
         role = str(message.get("role") or "").strip().lower()
         if (
             role not in {"tool", "function"}
             and message.get("_uwa_function_output_fallback") is not True
+            and not (
+                role == "assistant"
+                and message.get("_uwa_verified_compaction_checkpoint") is True
+            )
+            and not (
+                role in {"user", "assistant"}
+                and message.get("_uwa_verified_acceptance_delta") is True
+            )
         ):
             return None
         marker = state.get("marker")
@@ -791,7 +805,7 @@ def _private_acceptance_state(
             return None
         if not state["validated"] or (state["readback"] and not state["written"]):
             return None
-        return state
+        return index, state
     return None
 
 
@@ -800,6 +814,36 @@ def _acceptance_contract_from_messages(
     messages: List[Dict[str, Any]],
 ) -> tuple[str, str] | None:
     """Return one unambiguous synthetic acceptance contract from request history."""
+
+    # Compaction requests include generic system instructions that may mention
+    # both supported sentinels as examples. The most recent actual user request
+    # with the matching workspace guard is the active contract.
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "user":
+            continue
+        if message.get("_uwa_function_output_fallback") is True:
+            continue
+        value = _message_content_text(message)
+        if "test -f .uwa_codex_acceptance" not in value:
+            continue
+        requested = [
+            (marker, result_path)
+            for marker, result_path in _ACCEPTANCE_PATHS.items()
+            if (
+                re.search(
+                    rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])",
+                    value,
+                )
+                and result_path in value
+                and f"test -d {result_path.split('/', 1)[0]}" in value
+            )
+        ]
+        if len(requested) == 1:
+            return requested[0]
+        if len(requested) > 1:
+            return None
 
     searchable: List[str] = []
     for message in messages or []:
@@ -825,8 +869,40 @@ def _acceptance_contract_from_messages(
     private = _private_acceptance_state(messages)
     if private is not None:
         contract = (private["marker"], private["result_path"])
-        return contract if not matches or matches == [contract] else None
+        active = _active_compacted_acceptance_contract(messages)
+        return active if active is not None and active != contract else contract
     return matches[0] if len(matches) == 1 else None
+
+
+def _active_compacted_acceptance_contract(
+    messages: List[Dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Read active checkpoint intent without treating its prose as tool proof."""
+
+    for message in reversed(messages or []):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+        value = _message_content_text(message)
+        if "[Compacted prior context]" not in value:
+            continue
+        if "[ACTIVE CONTINUATION STATE]" not in value:
+            return None
+        active = value.split("[ACTIVE CONTINUATION STATE]", 1)[1]
+        matches = [
+            (marker, result_path)
+            for marker, result_path in _ACCEPTANCE_PATHS.items()
+            if (
+                re.search(
+                    rf"(?<![A-Z0-9_]){re.escape(marker)}(?![A-Z0-9_])",
+                    active,
+                )
+                and result_path in active
+            )
+        ]
+        return matches[0] if len(matches) == 1 else None
+    return None
 
 
 def _current_synthetic_acceptance_request(
@@ -861,30 +937,40 @@ def _acceptance_effect_progress(
     messages: List[Dict[str, Any]],
     result_path: str,
 ) -> tuple[bool, bool]:
-    """Return successful write and later separate readback state for one result path."""
+    """Return ordered validation, write, and later byte readback effects."""
 
     commands = _successful_workspace_commands(messages)
-    write_indexes = [
-        index
-        for index, command in enumerate(commands)
-        if _command_writes_result_path(command, result_path)
-    ]
-    if not write_indexes:
-        state = _private_acceptance_state(messages)
-        if state is not None and state["result_path"] == result_path:
-            return state["written"], state["readback"]
-        return False, False
+    snapshot = _private_acceptance_state_with_index(messages)
+    snapshot_index = -1
+    written = False
+    readback = False
+    if snapshot is not None and snapshot[1]["result_path"] == result_path:
+        snapshot_index, state = snapshot
+        written = state["written"]
+        readback = state["readback"]
+    else:
+        # A write or readback before the matching successful validation cannot
+        # establish this acceptance contract, even if all three commands exist.
+        snapshot_index = next(
+            (
+                index for index, command in commands
+                if _command_validates_acceptance_workspace(command, result_path)
+            ),
+            -1,
+        )
+        if snapshot_index < 0:
+            return False, False
 
-    last_write_index = write_indexes[-1]
-    readback_after_write = any(
-        index > last_write_index
-        and _command_reads_result_path(command, result_path)
-        for index, command in enumerate(commands)
-    )
-    state = _private_acceptance_state(messages)
-    if state is not None and state["result_path"] == result_path:
-        return state["written"], state["readback"]
-    return True, readback_after_write
+    for index, command in commands:
+        if index <= snapshot_index:
+            continue
+        if _command_writes_result_path(command, result_path):
+            written = True
+            readback = False
+        elif written and _command_reads_result_path(command, result_path):
+            readback = True
+
+    return written, readback
 
 
 def _acceptance_state_from_history(
@@ -1069,6 +1155,10 @@ def looks_like_incomplete_acceptance_continuation(
     # This rule is limited to the two synthetic acceptance contracts above.
     if write_observed:
         return True
+    if value.lstrip().startswith("<adapter_calls>"):
+        # A rejected off-path tool proposal is also an unfinished synthetic
+        # continuation. Guide the next call back to the pending write.
+        return True
     return (
         value == "ACCEPTANCE_INCOMPLETE"
         or _looks_like_acceptance_step_execution_stall(
@@ -1088,18 +1178,174 @@ def looks_like_incomplete_acceptance_continuation(
     )
 
 
+def _shell_redirects_to_result_path(
+    command: str, result_path: str, *, depth: int = 0
+) -> bool:
+    """Recognize a shell redirect, excluding quoted diagnostic text."""
+
+    pattern = re.compile(
+        rf"(?<![<>=!])>{{1,2}}\s*['\"]?{re.escape(result_path)}['\"]?(?=$|[\s;&|)])"
+    )
+    quote = ""
+    escaped = False
+    for index, char in enumerate(command):
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif char == quote:
+            quote = ""
+        elif not quote and char in {"'", '"'}:
+            quote = char
+        elif not quote and char == ">" and pattern.match(command, index):
+            return True
+
+    # Some Codex command traces include an explicit shell -c wrapper. Its
+    # quoted argument is shell code, so inspect that argument once unwrapped.
+    if depth >= 2:
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if (
+        len(words) >= 3
+        and words[0].rsplit("/", 1)[-1] in {"sh", "bash", "zsh"}
+        and words[1] in {"-c", "-lc", "-cl"}
+    ):
+        return _shell_redirects_to_result_path(words[2], result_path, depth=depth + 1)
+    return False
+
+
+def _unwrapped_effect_command(command: str, *, depth: int = 0) -> str:
+    """Inspect shell -c payloads as code, rather than as one quoted argument."""
+
+    if depth >= 2:
+        return command
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return command
+    if (
+        len(words) >= 3
+        and words[0].rsplit("/", 1)[-1] in {"sh", "bash", "zsh"}
+        and words[1] in {"-c", "-lc", "-cl"}
+    ):
+        return _unwrapped_effect_command(words[2], depth=depth + 1)
+    return command
+
+
+def _python_path_methods(command: str, result_path: str) -> set[str]:
+    """Find calls on the result Path in a real Python -c or heredoc body."""
+
+    code = ""
+    heredoc = re.match(
+        r"\s*(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-\s+<<-?\s*(['\"]?)([A-Za-z_]\w*)\1[ \t]*\n(.*?)\n\2[ \t]*(?:\n|$)",
+        command,
+        re.DOTALL,
+    )
+    if heredoc:
+        code = heredoc.group(3)
+    else:
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            return set()
+        if (
+            len(words) >= 3
+            and re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", words[0].rsplit("/", 1)[-1])
+            and words[1] == "-c"
+        ):
+            code = words[2]
+    if not code:
+        return set()
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return set()
+
+    def is_target_path(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, (ast.Name, ast.Attribute))
+            and (
+                node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+            ) == "Path"
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == result_path
+        )
+
+    path_names = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and is_target_path(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    methods: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        receiver = node.func.value
+        if is_target_path(receiver) or (
+            isinstance(receiver, ast.Name) and receiver.id in path_names
+        ):
+            methods.add(node.func.attr)
+    return methods
+
+
+def _shell_path_utilities(command: str, result_path: str) -> set[str]:
+    """Recognize executable shell utilities, excluding quoted print arguments."""
+
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+
+    effects: set[str] = set()
+    pipeline: list[list[str]] = [[]]
+
+    def inspect_pipeline() -> None:
+        file_input_seen = False
+        for component in pipeline:
+            if not component:
+                continue
+            utility = component[0].rsplit("/", 1)[-1]
+            has_path = result_path in component[1:]
+            if utility == "tee" and has_path:
+                effects.add("tee")
+            if utility in {"cat", "tail", "head", "dd"} and has_path:
+                file_input_seen = True
+            if utility in {"od", "xxd", "hexdump"} and (
+                has_path or file_input_seen
+            ):
+                effects.add("byte_read")
+
+    for token in tokens:
+        if token == "|":
+            pipeline.append([])
+        elif token in {";", "&&", "||", "&"}:
+            inspect_pipeline()
+            pipeline = [[]]
+        else:
+            pipeline[-1].append(token)
+    inspect_pipeline()
+    return effects
+
+
 def _command_writes_result_path(command: str, result_path: str) -> bool:
     value = str(command or "")
     if result_path not in value:
         return False
-    return any(
-        marker in value
-        for marker in (
-            ">",
-            "write_text",
-            "write_bytes",
-            "tee ",
-        )
+    actual = _unwrapped_effect_command(value)
+    return (
+        _shell_redirects_to_result_path(value, result_path)
+        or bool(_python_path_methods(actual, result_path) & {"write_text", "write_bytes"})
+        or "tee" in _shell_path_utilities(actual, result_path)
     )
 
 
@@ -1107,14 +1353,10 @@ def _command_reads_result_path(command: str, result_path: str) -> bool:
     value = str(command or "")
     if result_path not in value:
         return False
-    return any(
-        marker in value
-        for marker in (
-            "read_bytes",
-            "xxd ",
-            "od ",
-            "hexdump ",
-        )
+    actual = _unwrapped_effect_command(value)
+    return (
+        "read_bytes" in _python_path_methods(actual, result_path)
+        or "byte_read" in _shell_path_utilities(actual, result_path)
     )
 
 
@@ -1162,6 +1404,44 @@ def has_redundant_acceptance_tool_call_after_completion(
     return False
 
 
+def has_off_path_acceptance_tool_call(
+    messages: List[Dict[str, Any]],
+    parsed: Dict[str, Any],
+) -> bool:
+    """Keep a validated synthetic request on its next required tool effect."""
+
+    contract = _acceptance_contract_from_messages(messages)
+    if contract is None:
+        return False
+    _marker, result_path = contract
+    if not _successful_acceptance_workspace_validation_observed(
+        messages, result_path=result_path
+    ):
+        return False
+    written, readback = _acceptance_effect_progress(messages, result_path)
+    if written and readback:
+        return False
+
+    calls = parsed.get("tool_calls") or []
+    if not isinstance(calls, list) or not calls:
+        return False
+    if len(calls) != 1 or not isinstance(calls[0], dict):
+        return True
+    call = calls[0]
+    if _tool_name(call) not in _EXEC_LIKE_TOOLS:
+        return True
+    args = _decode_tool_arguments(call)
+    command = str(args.get("cmd") or args.get("command") or "").strip()
+    if not command:
+        return True
+    if not written:
+        return not _command_writes_result_path(command, result_path)
+    return (
+        _command_writes_result_path(command, result_path)
+        or not _command_reads_result_path(command, result_path)
+    )
+
+
 def looks_like_acceptance_completion_without_exact_sentinel(
     assistant_text: str,
     messages: List[Dict[str, Any]],
@@ -1194,12 +1474,14 @@ def looks_like_premature_acceptance_success(
     if contract is None:
         return False
 
-    if not _successful_acceptance_workspace_validation_observed(
-        messages
-    ):
-        return False
-
     _marker, result_path = contract
+    if not _successful_acceptance_workspace_validation_observed(
+        messages, result_path=result_path
+    ):
+        # A validation for the other synthetic result directory is not proof
+        # for this contract. The checkpoint summary is intent, not proof.
+        return True
+
     written, readback = _acceptance_effect_progress(messages, result_path)
     return not (written and readback)
 
@@ -1267,6 +1549,7 @@ def should_repair_client_workspace_refusal(
                 messages,
                 parsed,
             )
+            or has_off_path_acceptance_tool_call(messages, parsed)
             or has_suspicious_root_workdir_tool_call(
                 messages,
                 parsed,
@@ -1350,13 +1633,7 @@ def should_repair_client_workspace_refusal(
     ):
         return True
 
-    if (
-        has_history
-        and looks_like_premature_acceptance_success(
-            assistant_text,
-            messages,
-        )
-    ):
+    if looks_like_premature_acceptance_success(assistant_text, messages):
         return True
 
     if (
@@ -1469,6 +1746,20 @@ def build_client_workspace_repair_messages(
     declared_names = [name for name in (_tool_name(item) for item in workspace_tools) if name]
     tool_defs = json.dumps(workspace_tools, ensure_ascii=False, indent=2)
     initial_acceptance = _current_synthetic_acceptance_request(messages)
+    if initial_acceptance is None:
+        active_contract = _acceptance_success_contract(assistant_text, messages)
+        if (
+            active_contract is not None
+            and not _successful_acceptance_workspace_validation_observed(
+                messages, result_path=active_contract[1]
+            )
+        ):
+            initial_acceptance = (
+                active_contract[0],
+                active_contract[1],
+                _latest_user_text(messages)
+                or "Continue the active synthetic acceptance request.",
+            )
     if initial_acceptance is not None:
         _marker, initial_result_path, _request_text = initial_acceptance
         if (
@@ -1801,6 +2092,7 @@ def build_client_workspace_repair_messages(
 __all__ = [
     "build_client_workspace_repair_messages",
     "has_client_workspace_tools",
+    "has_off_path_acceptance_tool_call",
     "has_redundant_acceptance_tool_call_after_completion",
     "has_suspicious_root_workdir_tool_call",
     "looks_like_client_access_refusal",

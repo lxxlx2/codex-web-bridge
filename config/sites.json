@@ -813,10 +813,10 @@
         },
         "selectors": {
           "generating_indicator": null,
-          "input_box": "#prompt-textarea",
+          "input_box": "css:[role=\"textbox\"][contenteditable=\"true\"][aria-label*=\"ChatGPT\"], #prompt-textarea",
           "message_wrapper": "section[data-testid^=\"conversation-turn-\"]",
           "new_chat_btn": "[data-testid=\"create-new-chat-button\"]",
-          "result_container": "section[data-testid^=\"conversation-turn-\"] .markdown, section[data-testid^=\"conversation-turn-\"] div[id^=\"image-\"]",
+          "result_container": "section[data-testid^=\"conversation-turn-\"] .markdown, section[data-testid^=\"conversation-turn-\"] div[id^=\"image-\"], [class*=\"MarkdownRoot-\"]:not([class*=\"user-message\"] *)",
           "send_btn": "[data-testid=\"send-button\"]",
           "temp_chat_btn": "button[aria-label=\"开启临时聊天\"]"
         },

@@ -1657,7 +1657,7 @@ def test_live_restart_readback_tool_refusal_repairs_into_context_readback(monkey
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"cat context/result.txt"}'
+                '{"cmd":"od -An -tx1 -v context/result.txt"}'
                 ']]></arguments></call></adapter_calls>'
             ),
         ]

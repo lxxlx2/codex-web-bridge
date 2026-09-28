@@ -131,28 +131,43 @@ const visibleRows = rows.filter((row) => row.visible);
 const combined = (row) => norm(`${row.text} ${row.aria}`);
 
 const modelPattern = /gpt\s*[- ]?5\.6\s*sol/i;
-const modelRow = selectedRows.find((row) => modelPattern.test(combined(row))) || visibleRows.find((row) => modelPattern.test(combined(row)));
+const modelRow = selectedRows.find((row) => modelPattern.test(combined(row)))
+  || visibleRows.find((row) =>
+    !['option', 'menuitem', 'menuitemradio'].includes(low(row.el.getAttribute('role')))
+    && modelPattern.test(combined(row))
+  );
 
 const highPattern = /^(high|高)$/i;
 const mediumPattern = /^(medium|中)$/i;
 const reasoningRow = selectedRows.find((row) => highPattern.test(row.text) || highPattern.test(row.aria) || mediumPattern.test(row.text) || mediumPattern.test(row.aria))
   || visibleRows.find((row) => highPattern.test(row.text) || highPattern.test(row.aria) || mediumPattern.test(row.text) || mediumPattern.test(row.aria));
+const sliders = Array.from(document.querySelectorAll('[role="menuitem"][aria-label="强度"] [role="slider"], [role="menuitem"][aria-label="Reasoning intensity"] [role="slider"]'))
+  .filter(visible);
+const slider = sliders.length === 1 && sliders[0].getAttribute('aria-valuemin') === '0'
+  && sliders[0].getAttribute('aria-valuemax') === '2' ? sliders[0] : null;
 
 const tempRows = Array.from(document.querySelectorAll('button,[role="button"]')).map((el) => ({
+  visible: visible(el),
   text: norm(el.innerText || el.textContent),
   aria: norm(el.getAttribute('aria-label')),
-}));
+})).filter((row) => row.visible && (row.aria || row.text));
 const enableTemp = tempRows.find((row) => /开启临时聊天|启用临时聊天|enable temporary chat/i.test(`${row.text} ${row.aria}`));
+const startTemp = tempRows.find((row) => /^(临时聊天|temporary chat)$/i.test(row.aria));
 const disableTemp = tempRows.find((row) => /关闭临时聊天|停用临时聊天|disable temporary chat/i.test(`${row.text} ${row.aria}`));
 let temp = null;
 if (disableTemp) temp = true;
-else if (enableTemp) temp = false;
+else if (enableTemp || startTemp) temp = false;
 
 let reasoning = null;
 if (reasoningRow) {
   const value = norm(reasoningRow.text || reasoningRow.aria);
   if (highPattern.test(value)) reasoning = 'high';
   else if (mediumPattern.test(value)) reasoning = 'medium';
+}
+if (!reasoning && slider) {
+  const value = slider.getAttribute('aria-valuenow');
+  if (value === '2') reasoning = 'high';
+  else if (value === '1') reasoning = 'medium';
 }
 
 return {
@@ -172,7 +187,7 @@ const visible = (el) => {
 };
 const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const relevant = /gpt|model|模型|reason|thinking|思考|high|medium|临时|temporary|^高$|^中$/i;
-const controls = Array.from(document.querySelectorAll('button,[role="button"],[role="option"],[role="menuitem"],[role="menuitemradio"],[aria-label],[data-testid]'))
+const controls = Array.from(document.querySelectorAll('button,[role="button"],[role="option"],[role="menuitem"],[role="menuitemradio"],[role="slider"],[aria-label],[data-testid]'))
   .filter((el) => visible(el))
   .map((el) => ({
     tag: String(el.tagName || '').toLowerCase(),
@@ -184,8 +199,12 @@ const controls = Array.from(document.querySelectorAll('button,[role="button"],[r
     checked: norm(el.getAttribute('aria-checked')).slice(0, 20),
     expanded: norm(el.getAttribute('aria-expanded')).slice(0, 20),
     haspopup: norm(el.getAttribute('aria-haspopup')).slice(0, 40),
+    pressed: norm(el.getAttribute('aria-pressed')).slice(0, 20),
+    value: norm(el.getAttribute('aria-valuenow')).slice(0, 20),
+    value_min: norm(el.getAttribute('aria-valuemin')).slice(0, 20),
+    value_max: norm(el.getAttribute('aria-valuemax')).slice(0, 20),
   }))
-  .filter((item) => relevant.test(`${item.text} ${item.aria} ${item.testid} ${item.role}`))
+  .filter((item) => item.role === 'slider' || relevant.test(`${item.text} ${item.aria} ${item.testid} ${item.role}`))
   .slice(0, 80);
 
 return {
@@ -220,6 +239,7 @@ const exact = values(spec.exact_texts);
 const contains = values(spec.contains_texts);
 const starts = values(spec.starts_with_texts);
 const ariaContains = values(spec.aria_contains);
+const ariaExact = values(spec.aria_exact);
 const testidContains = values(spec.testid_contains);
 const roles = new Set(values(spec.roles));
 
@@ -234,6 +254,7 @@ const candidates = Array.from(document.querySelectorAll('button,[role="button"],
     if (exact.length && exact.includes(text)) return true;
     if (contains.length && contains.some((item) => text.includes(item) || aria.includes(item))) return true;
     if (starts.length && starts.some((item) => text.startsWith(item))) return true;
+    if (ariaExact.length && ariaExact.includes(aria)) return true;
     if (ariaContains.length && ariaContains.some((item) => aria.includes(item))) return true;
     if (testidContains.length && testidContains.some((item) => testid.includes(item))) return true;
     return false;
@@ -259,6 +280,29 @@ return true;
 """
 
 
+_MODEL_MENU_STATE_JS = r"""
+const buttons = Array.from(document.querySelectorAll('button[aria-haspopup="menu"]'));
+const trigger = buttons.find((el) => /选择.*模型|select.*model|choose.*model/i.test(el.getAttribute('aria-label') || ''));
+if (!trigger) return null;
+return trigger.getAttribute('aria-expanded') === 'true' ? 'open' : 'closed';
+"""
+
+
+_REASONING_SLIDER_JS = r"""
+const visible = (el) => {
+  const style = window.getComputedStyle(el);
+  const rect = el.getBoundingClientRect();
+  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+};
+const sliders = Array.from(document.querySelectorAll('[role="menuitem"][aria-label="强度"] [role="slider"], [role="menuitem"][aria-label="Reasoning intensity"] [role="slider"]')).filter(visible);
+if (sliders.length !== 1) return null;
+const slider = sliders[0];
+if (slider.getAttribute('aria-valuemin') !== '0' || slider.getAttribute('aria-valuemax') !== '2') return null;
+const value = slider.getAttribute('aria-valuenow');
+return ['0', '1', '2'].includes(value) ? Number(value) : null;
+"""
+
+
 def _run_js(tab: Any, script: str, *args: Any) -> Any:
     try:
         return tab.run_js(script, *args)
@@ -271,10 +315,64 @@ def _click(tab: Any, **spec: Any) -> Dict[str, Any]:
     return result if isinstance(result, dict) else {"clicked": False}
 
 
+def _model_menu_state(tab: Any) -> Optional[str]:
+    state = _run_js(tab, _MODEL_MENU_STATE_JS)
+    return state if state in {"open", "closed"} else None
+
+
+def _open_model_menu(tab: Any) -> bool:
+    if _model_menu_state(tab) == "open":
+        return True
+    clicked = _click(
+        tab,
+        contains_texts=["选择模型", "模型", "select model", "choose model"],
+        aria_contains=["model", "模型"],
+        testid_contains=["model"],
+    ).get("clicked")
+    if not clicked:
+        return False
+    time.sleep(0.12)
+    return _model_menu_state(tab) == "open"
+
+
+def _close_model_menu(tab: Any) -> bool:
+    if _model_menu_state(tab) == "closed":
+        return True
+    try:
+        tab.actions.key_down("ESCAPE").key_up("ESCAPE")
+    except Exception as exc:
+        raise ChatGPTWebModeError(f"controlled browser keyboard action failed: {exc}") from exc
+    time.sleep(0.08)
+    return _model_menu_state(tab) == "closed"
+
+
 def inspect_chatgpt_web_mode(tab: Optional[Any] = None) -> Dict[str, Any]:
     target = tab or _find_chatgpt_tab()
     result = _run_js(target, _STATE_JS)
     state = result if isinstance(result, dict) else {}
+    if state.get("model") is None or state.get("reasoning") is None:
+        # The current ChatGPT model trigger can show only its mode name while
+        # the chosen model and reasoning intensity remain inside its menu.
+        # Open that menu for a read-only verification, then close it again.
+        was_open = _model_menu_state(target) == "open"
+        if _open_model_menu(target):
+            expanded = {}
+            for _ in range(4):
+                time.sleep(0.12)
+                candidate = _run_js(target, _STATE_JS)
+                if isinstance(candidate, dict):
+                    expanded = candidate
+                    if candidate.get("model") is not None and candidate.get("reasoning") is not None:
+                        break
+            if not was_open:
+                if not _close_model_menu(target):
+                    raise ChatGPTWebModeError("controlled model menu did not close")
+            if isinstance(expanded, dict):
+                state = dict(state)
+                if state.get("model") is None:
+                    state["model"] = expanded.get("model")
+                if state.get("reasoning") is None:
+                    state["reasoning"] = expanded.get("reasoning")
     return {
         "model": state.get("model"),
         "reasoning": state.get("reasoning"),
@@ -304,14 +402,28 @@ def _ensure_temporary_chat(tab: Any) -> None:
     state = inspect_chatgpt_web_mode(tab)
     if state.get("temporary_chat") is True:
         return
+    if state.get("temporary_chat") is not False:
+        return
     clicked = _click(
         tab,
-        contains_texts=["开启临时聊天", "启用临时聊天", "enable temporary chat", "temporary chat"],
-        aria_contains=["开启临时聊天", "启用临时聊天", "enable temporary chat", "temporary chat"],
+        contains_texts=["开启临时聊天", "启用临时聊天", "enable temporary chat"],
+        aria_exact=["临时聊天", "temporary chat"],
+        aria_contains=["开启临时聊天", "启用临时聊天", "enable temporary chat"],
         testid_contains=["temporary", "temp-chat"],
     ).get("clicked")
     if clicked:
-        time.sleep(0.35)
+        # Starting a temporary chat can rebuild the model controls. Wait for
+        # the new mode label and trigger before selecting a model or effort.
+        ready = 0
+        for _ in range(15):
+            time.sleep(0.2)
+            current = _run_js(tab, _STATE_JS)
+            if isinstance(current, dict) and current.get("temporary_chat") is True and _model_menu_state(tab) == "closed":
+                ready += 1
+                if ready == 2:
+                    break
+            else:
+                ready = 0
 
 
 def _ensure_model(tab: Any, desired_model: str) -> None:
@@ -319,12 +431,7 @@ def _ensure_model(tab: Any, desired_model: str) -> None:
     if str(state.get("model") or "").casefold() == desired_model.casefold():
         return
 
-    opened = _click(
-        tab,
-        contains_texts=["选择模型", "模型", "select model", "choose model"],
-        aria_contains=["model", "模型"],
-        testid_contains=["model"],
-    ).get("clicked")
+    opened = _open_model_menu(tab)
     if opened:
         time.sleep(0.25)
 
@@ -339,14 +446,7 @@ def _ensure_model(tab: Any, desired_model: str) -> None:
 
 
 def _open_reasoning_menu(tab: Any) -> bool:
-    return bool(
-        _click(
-            tab,
-            contains_texts=["思考强度", "reasoning", "thinking"],
-            aria_contains=["思考强度", "reasoning", "thinking"],
-            testid_contains=["reasoning", "thinking"],
-        ).get("clicked")
-    )
+    return _open_model_menu(tab)
 
 
 def _ensure_reasoning(tab: Any, effort: str) -> bool:
@@ -354,31 +454,30 @@ def _ensure_reasoning(tab: Any, effort: str) -> bool:
     if state.get("reasoning") == effort:
         return True
 
-    if _open_reasoning_menu(tab):
-        time.sleep(0.2)
-
-    label = "高" if effort == "high" else "中"
-    english = "High" if effort == "high" else "Medium"
-    selected = _click(
-        tab,
-        exact_texts=[label, english],
-        roles=["option", "menuitem", "menuitemradio", "button"],
-    ).get("clicked")
-    if not selected:
-        _run_js(tab, _ESCAPE_JS)
+    if not _open_reasoning_menu(tab):
         return False
-
-    time.sleep(0.3)
-
-    if _open_reasoning_menu(tab):
-        time.sleep(0.2)
-        probe = inspect_chatgpt_web_mode(tab)
-        verified = probe.get("reasoning") == effort
-        _run_js(tab, _ESCAPE_JS)
-        time.sleep(0.1)
-        return verified
-
-    return False
+    target_value = 2 if effort == "high" else 1
+    current = _run_js(tab, _REASONING_SLIDER_JS)
+    if type(current) is not int:
+        _close_model_menu(tab)
+        return False
+    for _ in range(2):
+        if current == target_value:
+            break
+        direction = "RIGHT" if current < target_value else "LEFT"
+        try:
+            tab.ele('css:[role="menuitem"][aria-label="强度"] [role="slider"], [role="menuitem"][aria-label="Reasoning intensity"] [role="slider"]').click()
+            tab.actions.key_down(direction).key_up(direction)
+        except Exception as exc:
+            raise ChatGPTWebModeError(f"controlled browser keyboard action failed: {exc}") from exc
+        time.sleep(0.12)
+        next_value = _run_js(tab, _REASONING_SLIDER_JS)
+        if type(next_value) is not int or next_value != current + (1 if direction == "RIGHT" else -1):
+            _close_model_menu(tab)
+            return False
+        current = next_value
+    verified = current == target_value
+    return verified and _close_model_menu(tab)
 
 
 def _verification_errors(
@@ -391,7 +490,7 @@ def _verification_errors(
     desired_model = target_web_model()
     if str(state.get("model") or "").casefold() != desired_model.casefold():
         errors.append(f"model expected={desired_model!r} actual={state.get('model')!r}")
-    if state.get("reasoning") != effort and not reasoning_verified:
+    if state.get("reasoning") != effort and (state.get("reasoning") is not None or not reasoning_verified):
         errors.append(f"reasoning expected={effort!r} actual={state.get('reasoning')!r}")
     if temporary_chat_enabled() and state.get("temporary_chat") is not True:
         errors.append(f"temporary_chat expected=True actual={state.get('temporary_chat')!r}")

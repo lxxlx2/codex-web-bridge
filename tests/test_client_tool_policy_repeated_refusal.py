@@ -5,6 +5,9 @@ import pytest
 from app.api.chat import ChatRequest, ResponsesRequest
 from app.api.codex_responses_v2 import _browser_delta_chat_request
 from app.services.client_tool_policy import (
+    _command_reads_result_path,
+    _command_writes_result_path,
+    has_off_path_acceptance_tool_call,
     has_redundant_acceptance_tool_call_after_completion,
     looks_like_acceptance_completion_without_exact_sentinel,
     looks_like_incomplete_acceptance_continuation,
@@ -70,6 +73,67 @@ def test_post_tool_tool_list_absence_claim_is_repaired_even_when_latest_user_is_
         assistant_text=refusal,
         parsed=parsed,
     ) is True
+
+
+def test_latest_explicit_acceptance_request_wins_over_generic_system_examples():
+    from app.services.client_tool_policy import _acceptance_state_from_history
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Examples: CONTEXT_PASS with context/result.txt and "
+                "LARGE_CONTEXT_PASS with large_context/result.txt."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Run pwd && test -f .uwa_codex_acceptance && "
+                "test -d large_context, then write large_context/result.txt, "
+                "read its bytes, and reply LARGE_CONTEXT_PASS."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_large_guard",
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": json.dumps({
+                        "cmd": "pwd && test -f .uwa_codex_acceptance && test -d large_context"
+                    }),
+                },
+            }],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_large_guard",
+            "content": "Process exited with code 0\nFinal output: /synthetic",
+        },
+    ]
+    state = _acceptance_state_from_history(messages)
+    assert state == {
+        "marker": "LARGE_CONTEXT_PASS",
+        "result_path": "large_context/result.txt",
+        "validated": True,
+        "written": False,
+        "readback": False,
+    }
+
+    ambiguous = [dict(message) for message in messages]
+    ambiguous[1] = {
+        "role": "user",
+        "content": (
+            "Run pwd && test -f .uwa_codex_acceptance && "
+            "test -d context && test -d large_context; "
+            "write context/result.txt for CONTEXT_PASS and "
+            "large_context/result.txt for LARGE_CONTEXT_PASS."
+        ),
+    }
+    assert _acceptance_state_from_history(ambiguous) is None
 
 
 def test_roundtrip_retries_a_repeated_tool_list_absence_claim_until_exec_command(monkeypatch):
@@ -362,6 +426,66 @@ def test_live_context_pass_after_only_validation_is_repaired(monkeypatch):
         assistant_text="CONTEXT_PASS",
         parsed=parsed,
     ) is True
+
+
+def test_other_result_directory_validation_cannot_authorize_context_pass(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = [{
+        "role": "user",
+        "content": (
+            "Run pwd && test -f .uwa_codex_acceptance && test -d context; "
+            "then write context/result.txt, read its bytes, and reply CONTEXT_PASS."
+        ),
+    }]
+    _append_successful_exec(
+        messages,
+        "call_wrong_guard",
+        "pwd && test -f .uwa_codex_acceptance && test -d large_context",
+    )
+    _append_successful_exec(
+        messages,
+        "call_context_write",
+        "printf '%s\\n' TOKEN > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_context_read",
+        "od -An -tx1 -v context/result.txt",
+    )
+
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="CONTEXT_PASS",
+        parsed={"mode": "final", "content": "CONTEXT_PASS", "tool_calls": []},
+    )
+
+    correct_guard = "pwd && test -f .uwa_codex_acceptance && test -d context"
+    replies = iter([
+        "CONTEXT_PASS",
+        (
+            '<adapter_calls><call name="exec_command">'
+            '<arguments encoding="json"><![CDATA['
+            + json.dumps({"cmd": correct_guard})
+            + ']]></arguments></call></adapter_calls>'
+        ),
+    ])
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages) or next(replies)
+        ),
+    )
+    assert result["mode"] == "tool_calls"
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"])["cmd"] == correct_guard
+    assert correct_guard in seen[1][1]["content"]
 
 
 def test_roundtrip_repairs_live_context_pass_into_next_exec(monkeypatch):
@@ -876,6 +1000,92 @@ def test_premature_pass_requires_readback_after_last_write(monkeypatch):
         "CONTEXT_PASS",
         messages,
     ) is True
+
+
+def test_quoted_readback_diagnostic_does_not_reset_completed_effects(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_readback",
+        (
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "data = Path('context/result.txt').read_bytes()\n"
+            "print(\"diagnostic: > context/result.txt\")\n"
+            "assert data.endswith(b'\\n')\n"
+            "PY"
+        ),
+        "diagnostic: > context/result.txt",
+    )
+    assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+
+    _append_successful_exec(
+        messages,
+        "call_later_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+
+
+@pytest.mark.parametrize(
+    ("command", "writes", "reads"),
+    [
+        ("printf '%s\\n' 'tee context/result.txt'", False, False),
+        ("printf '%s\\n' 'od context/result.txt'", False, False),
+        ("printf '%s\\n' 'read_bytes context/result.txt'", False, False),
+        ("python3 -c \"print('write_text context/result.txt'); "
+         "print('read_bytes context/result.txt')\"", False, False),
+        ("printf '%s\\n' VALUE | tee context/result.txt", True, False),
+        ("od -An -tx1 -v context/result.txt", False, True),
+        ("xxd -p context/result.txt", False, True),
+        ("hexdump -C context/result.txt", False, True),
+        ("tail -c 1 context/result.txt | od -An -t x1", False, True),
+        ("/bin/zsh -lc 'od -An -tx1 -v context/result.txt'", False, True),
+        ("python3 -c \"from pathlib import Path; "
+         "Path('context/result.txt').write_text('VALUE')\"", True, False),
+        ("python3 -c \"from pathlib import Path; "
+         "Path('context/result.txt').write_bytes(b'VALUE')\"", True, False),
+        ("python3 -c \"from pathlib import Path; "
+         "p=Path('context/result.txt'); p.read_bytes()\"", False, True),
+        ("python3 - <<'PY'\nfrom pathlib import Path\n"
+         "data = Path('context/result.txt').read_bytes()\n"
+         "print('od context/result.txt')\nPY", False, True),
+    ],
+)
+def test_acceptance_effect_detector_ignores_quoted_diagnostics(
+    command, writes, reads,
+):
+    path = "context/result.txt"
+    assert _command_writes_result_path(command, path) is writes
+    assert _command_reads_result_path(command, path) is reads
+
+
+def test_quoted_byte_read_diagnostic_cannot_complete_acceptance():
+    messages = _restart_context_history_after_validation()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_diagnostic",
+        "printf '%s\\n' 'od context/result.txt read_bytes'",
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+
+    _append_successful_exec(
+        messages,
+        "call_real_readback",
+        "od -An -tx1 -v context/result.txt",
+    )
+    assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
 
 
 def test_step_execution_stall_after_completed_effects_is_not_unfinished(monkeypatch):
@@ -1912,6 +2122,55 @@ def _completed_context_acceptance_history():
     return messages
 
 
+def test_other_acceptance_directory_cannot_validate_context_final(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = _restart_context_history_after_validation()
+    arguments = messages[1]["tool_calls"][0]["function"]["arguments"]
+    messages[1]["tool_calls"][0]["function"]["arguments"] = arguments.replace(
+        "test -d context", "test -d large_context"
+    )
+    _append_successful_exec(
+        messages, "call_write_wrong_guard",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages, "call_read_wrong_guard", "od -An -tx1 -v context/result.txt",
+    )
+    final = {"mode": "final", "content": "CONTEXT_PASS", "tool_calls": []}
+
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+    assert should_repair_client_workspace_refusal(
+        messages=messages, tools=EXEC_TOOLS, tool_choice="auto",
+        assistant_text="CONTEXT_PASS", parsed=final,
+    )
+
+
+def test_validation_after_write_and_readback_requires_new_ordered_effects():
+    messages = [_restart_context_history_after_validation()[0]]
+    _append_successful_exec(
+        messages, "call_early_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    _append_successful_exec(
+        messages, "call_early_read", "od -An -tx1 -v context/result.txt",
+    )
+    _append_successful_exec(
+        messages, "call_late_validation",
+        "pwd && test -f .uwa_codex_acceptance && test -d context",
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+
+    _append_successful_exec(
+        messages, "call_ordered_write",
+        "printf '%s\\n' 'EMBER-7319' > context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+    _append_successful_exec(
+        messages, "call_ordered_read", "od -An -tx1 -v context/result.txt",
+    )
+    assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
+
+
 def test_completed_acceptance_blocks_redundant_workspace_tool_call(monkeypatch):
     monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
     messages = _completed_context_acceptance_history()
@@ -2025,3 +2284,284 @@ def test_completed_acceptance_exact_marker_remains_allowed(monkeypatch):
         assistant_text="CONTEXT_PASS",
         parsed=parsed,
     ) is False
+
+
+def _post_compaction_large_context_with_snapshot(*, written=False, readback=False):
+    """A compacted checkpoint followed by a private tool-result delta."""
+
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Continue large_context/result.txt and reply LARGE_CONTEXT_PASS "
+                "only after validation, write, and a separate byte readback."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "[Codex client tool result after checkpoint]",
+            "_uwa_function_output_fallback": True,
+            "_uwa_synthetic_acceptance_state": {
+                "marker": "LARGE_CONTEXT_PASS",
+                "result_path": "large_context/result.txt",
+                "validated": True,
+                "written": written,
+                "readback": readback,
+            },
+        },
+    ]
+
+
+def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    messages = _post_compaction_large_context_with_snapshot()
+    _append_successful_exec(
+        messages,
+        "call_write_after_checkpoint",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+
+    premature = {
+        "mode": "final",
+        "content": "LARGE_CONTEXT_PASS",
+        "tool_calls": [],
+    }
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="LARGE_CONTEXT_PASS",
+        parsed=premature,
+    )
+
+    read_command = "od -An -tx1 -v large_context/result.txt"
+    replies = iter(
+        [
+            "LARGE_CONTEXT_PASS",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"od -An -tx1 -v large_context/result.txt"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    seen = []
+    readback = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages) or next(replies)
+        ),
+    )
+    assert readback["mode"] == "tool_calls"
+    assert json.loads(readback["tool_calls"][0]["function"]["arguments"])["cmd"] == read_command
+    assert "Do not rewrite large_context/result.txt" in seen[1][1]["content"]
+    assert "separate byte-level readback" in seen[1][1]["content"]
+
+    _append_successful_exec(
+        messages,
+        "call_read_after_write",
+        read_command,
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+    )
+    assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    assert not should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="LARGE_CONTEXT_PASS",
+        parsed=premature,
+    )
+
+    _append_successful_exec(
+        messages,
+        "call_rewrite_after_readback",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    _append_successful_exec(
+        messages,
+        "call_read_after_last_write",
+        read_command,
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+    )
+    assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_stale_completed_snapshot_cannot_override_later_write():
+    messages = _post_compaction_large_context_with_snapshot(
+        written=True,
+        readback=True,
+    )
+    _append_successful_exec(
+        messages,
+        "call_later_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+@pytest.mark.parametrize("state", [
+    {"marker": "LARGE_CONTEXT_PASS", "result_path": "large_context/result.txt",
+     "validated": True, "written": False, "readback": True},
+    {"marker": "CONTEXT_PASS", "result_path": "context/result.txt",
+     "validated": True, "written": True, "readback": True},
+])
+def test_malformed_or_unrelated_snapshot_does_not_supply_readback(state):
+    messages = _post_compaction_large_context_with_snapshot()
+    messages[-1]["_uwa_synthetic_acceptance_state"] = state
+    _append_successful_exec(
+        messages,
+        "call_validate_after_checkpoint",
+        "pwd && test -f .uwa_codex_acceptance && test -d large_context",
+    )
+    _append_successful_exec(
+        messages,
+        "call_write_after_checkpoint",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_checkpoint_summary_cannot_prove_validation_write_or_readback(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "[Compacted prior context]\n"
+                "[ACTIVE CONTINUATION STATE]\n"
+                "Continue large_context/result.txt and return LARGE_CONTEXT_PASS. "
+                "The summary says validation, write, and byte readback completed."
+            ),
+        }
+    ]
+    premature = {"mode": "final", "content": "LARGE_CONTEXT_PASS", "tool_calls": []}
+
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    assert should_repair_client_workspace_refusal(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        assistant_text="LARGE_CONTEXT_PASS",
+        parsed=premature,
+    )
+
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    replies = iter(
+        [
+            "LARGE_CONTEXT_PASS",
+            (
+                '<adapter_calls><call name="exec_command">'
+                '<arguments encoding="json"><![CDATA['
+                '{"cmd":"pwd && test -f .uwa_codex_acceptance && test -d large_context"}'
+                ']]></arguments></call></adapter_calls>'
+            ),
+        ]
+    )
+    repaired = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda _browser_messages: next(replies),
+    )
+    assert json.loads(repaired["tool_calls"][0]["function"]["arguments"])["cmd"] == (
+        "pwd && test -f .uwa_codex_acceptance && test -d large_context"
+    )
+
+    _append_successful_exec(
+        messages,
+        "call_real_validate",
+        "pwd && test -f .uwa_codex_acceptance && test -d large_context",
+    )
+    _append_successful_exec(
+        messages,
+        "call_real_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_byte_read_comparison_after_path_is_not_a_second_write():
+    messages = _post_compaction_large_context_with_snapshot(
+        written=True,
+        readback=False,
+    )
+    _append_successful_exec(
+        messages,
+        "call_python_byte_read",
+        (
+            "python3 -c \"from pathlib import Path; "
+            "b=Path('large_context/result.txt').read_bytes(); "
+            "assert len(b) > 0 and b.endswith(bytes([10]))\""
+        ),
+        "",
+    )
+    assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_post_compaction_rejects_off_path_tools_until_next_effect(monkeypatch):
+    monkeypatch.setenv("TOOL_CALLING_CLIENT_WORKSPACE_REPAIR", "true")
+    monkeypatch.setenv("TOOL_CALLING_INTERNAL_RETRY_MAX", "2")
+    from app.services.tool_calling_parse import parse_tool_response
+
+    messages = _post_compaction_large_context_with_snapshot()
+    off_path = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"pwd && ls -la large_context"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    write = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"printf \'%s\\n\' SYNTHETIC > large_context/result.txt"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    assert has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(off_path, EXEC_TOOLS)
+    )
+    assert not has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(write, EXEC_TOOLS)
+    )
+
+    replies = iter([off_path, write])
+    seen = []
+    result = complete_tool_calling_roundtrip(
+        messages=messages,
+        tools=EXEC_TOOLS,
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        round_executor=lambda browser_messages: (
+            seen.append(browser_messages) or next(replies)
+        ),
+    )
+    assert result["mode"] == "tool_calls"
+    assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert "successful write" in seen[1][1]["content"]
+
+    _append_successful_exec(
+        messages,
+        "call_write_for_off_path_test",
+        "printf '%s\\n' SYNTHETIC > large_context/result.txt",
+    )
+    assert has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(write, EXEC_TOOLS)
+    )
+    read = (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        '{"cmd":"od -An -tx1 -v large_context/result.txt"}'
+        ']]></arguments></call></adapter_calls>'
+    )
+    assert not has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(read, EXEC_TOOLS)
+    )

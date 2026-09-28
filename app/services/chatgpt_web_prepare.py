@@ -33,12 +33,11 @@ if (!target) {
   const exact = new Set(['新聊天', '新对话', 'new chat']);
   const matches = Array.from(document.querySelectorAll('a,button,[role="button"]'))
     .filter(visible)
-    .filter((el) => {
-      const text = norm(el.innerText || el.textContent);
-      const aria = norm(el.getAttribute('aria-label'));
-      return exact.has(text) || exact.has(aria);
-    });
-  target = matches.length === 1 ? matches[0] : null;
+    .filter((el) => exact.has(norm(el.innerText || el.textContent)) ||
+      exact.has(norm(el.getAttribute('aria-label'))));
+  const labeled = matches.filter((el) => exact.has(norm(el.innerText || el.textContent)));
+  target = labeled.length === 1 ? labeled[0] :
+    labeled.length === 0 && matches.length === 1 ? matches[0] : null;
 }
 
 if (!target) {

@@ -725,6 +725,7 @@ def _attach_acceptance_state_to_tool_delta(
         if isinstance(request_body.messages, list)
         else []
     )
+    selected_index: Optional[int] = None
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
         if not isinstance(message, dict):
@@ -735,12 +736,28 @@ def _attach_acceptance_state_to_tool_delta(
             and message.get("_uwa_function_output_fallback") is not True
         ):
             continue
-        updated = [dict(item) if isinstance(item, dict) else item for item in messages]
-        updated[index][_ACCEPTANCE_STATE_KEY] = state
-        if hasattr(request_body, "model_copy"):
-            return request_body.model_copy(update={"messages": updated})
-        return request_body.copy(update={"messages": updated})
-    return request_body
+        selected_index = index
+        break
+    if selected_index is None:
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if isinstance(message, dict) and str(message.get("role") or "").lower() in {
+                "user", "assistant"
+            }:
+                selected_index = index
+                break
+    if selected_index is None:
+        return request_body
+
+    updated = [dict(item) if isinstance(item, dict) else item for item in messages]
+    updated[selected_index][_ACCEPTANCE_STATE_KEY] = state
+    if str(updated[selected_index].get("role") or "").lower() not in {"tool", "function"} and (
+        updated[selected_index].get("_uwa_function_output_fallback") is not True
+    ):
+        updated[selected_index]["_uwa_verified_acceptance_delta"] = True
+    if hasattr(request_body, "model_copy"):
+        return request_body.model_copy(update={"messages": updated})
+    return request_body.copy(update={"messages": updated})
 
 
 def _browser_delta_chat_request(
@@ -766,7 +783,9 @@ def _browser_delta_chat_request(
 
     call_ids = _function_output_call_ids(browser_source_body.input)
     if not call_ids:
-        return delta_body
+        return _attach_acceptance_state_to_tool_delta(
+            delta_body, state_chat_body.messages
+        )
 
     messages = (
         state_chat_body.messages
@@ -817,7 +836,7 @@ def _browser_delta_chat_request(
     )
 
     if not matching_tool_result:
-        return delta_body
+        return _attach_acceptance_state_to_tool_delta(delta_body, messages)
 
     if hasattr(delta_body, "model_copy"):
         tail_body = delta_body.model_copy(

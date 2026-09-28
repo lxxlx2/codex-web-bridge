@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.chat import ResponsesRequest
+from app.api.chat import ResponsesRequest, _responses_request_to_chat_request
 from app.services import codex_remote_compaction_v2 as remote
 
 
@@ -386,6 +386,168 @@ def test_remote_stream_emits_exactly_one_compaction_and_completed():
     assert response["output"][0]["type"] == "compaction"
     assert response["usage"]["total_tokens"] > 0
     assert capture["body"].tools is None
+
+
+def test_stream_carries_proven_acceptance_progress_through_recursive_compaction(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        remote, "_ACCEPTANCE_CHECKPOINT_KEY_PATH", tmp_path / "checkpoint.key"
+    )
+    fake = _fake_v2({})
+    fake._responses_request_to_chat_request = _responses_request_to_chat_request
+
+    async def compact(items):
+        chunks = []
+        async for chunk in remote._stream_remote_compaction_v2(
+            v2=fake,
+            request=_Request(),
+            body=_trigger_body(input_items=[*items, {"type": "compaction_trigger"}]),
+            authenticated=False,
+        ):
+            chunks.append(chunk)
+        done = next(
+            json.loads(chunk.split("data: ", 1)[1])["item"]
+            for chunk in chunks
+            if "event: response.output_item.done" in chunk
+        )
+        return done
+
+    user = _message(
+        "user",
+        "Run pwd && test -f .uwa_codex_acceptance && test -d context; "
+        "then write context/result.txt, byte-read it separately, and reply CONTEXT_PASS.",
+    )
+    validate = {
+        "type": "function_call",
+        "call_id": "call_validation",
+        "name": "exec_command",
+        "arguments": json.dumps(
+            {"cmd": "pwd && test -f .uwa_codex_acceptance && test -d context"}
+        ),
+    }
+    write = {
+        "type": "function_call",
+        "call_id": "call_write",
+        "name": "exec_command",
+        "arguments": json.dumps(
+            {"cmd": "printf '%s\\n' SYNTHETIC-7319 > context/result.txt"}
+        ),
+    }
+    zero_validation = {
+        "type": "function_call_output",
+        "call_id": "call_validation",
+        "output": "Process exited with code 0\nFinal output: /synthetic",
+    }
+    zero_write = {
+        "type": "function_call_output",
+        "call_id": "call_write",
+        "output": "Process exited with code 0\nFinal output:",
+    }
+    first = asyncio.run(compact([user, validate, zero_validation, write, zero_write]))
+    first_state = remote._decode_compaction_envelope_payload(
+        first["encrypted_content"]
+    )["acceptance_state"]
+    assert first_state == {
+        "marker": "CONTEXT_PASS",
+        "result_path": "context/result.txt",
+        "validated": True,
+        "written": True,
+        "readback": False,
+    }
+
+    read = {
+        "type": "function_call",
+        "call_id": "call_read_after_compaction",
+        "name": "exec_command",
+        "arguments": json.dumps({"cmd": "od -An -tx1 -v context/result.txt"}),
+    }
+    zero_read = {
+        "type": "function_call_output",
+        "call_id": "call_read_after_compaction",
+        "output": "Process exited with code 0\nFinal output: 53 59 4e 54 48 0a",
+    }
+    second = asyncio.run(compact([user, first, read, zero_read]))
+    second_state = remote._decode_compaction_envelope_payload(
+        second["encrypted_content"]
+    )["acceptance_state"]
+    assert second_state == {**first_state, "readback": True}
+    assert remote.compaction_lineage([first]) == remote.compaction_lineage([second])
+
+
+def test_compaction_summary_restores_contract_intent_but_tool_pair_proves_validation(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        remote, "_ACCEPTANCE_CHECKPOINT_KEY_PATH", tmp_path / "checkpoint.key"
+    )
+    fake = _fake_v2({})
+    fake._responses_request_to_chat_request = _responses_request_to_chat_request
+
+    async def summarize(**_kwargs):
+        return 200, {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": (
+                        "[ACTIVE CONTINUATION STATE]\n"
+                        "Continue large_context/result.txt and reply LARGE_CONTEXT_PASS "
+                        "only after the pending write and byte readback."
+                    ),
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {},
+        }
+
+    fake._run_chat_completion_final = summarize
+    validate = {
+        "type": "function_call",
+        "call_id": "call_guard",
+        "name": "exec_command",
+        "arguments": json.dumps({
+            "cmd": "pwd && test -f .uwa_codex_acceptance && test -d large_context"
+        }),
+    }
+    zero = {
+        "type": "function_call_output",
+        "call_id": "call_guard",
+        "output": "Process exited with code 0\nFinal output: /synthetic",
+    }
+
+    async def compact(items):
+        chunks = []
+        async for chunk in remote._stream_remote_compaction_v2(
+            v2=fake,
+            request=_Request(),
+            body=_trigger_body(input_items=[*items, {"type": "compaction_trigger"}]),
+            authenticated=False,
+        ):
+            chunks.append(chunk)
+        return next(
+            json.loads(chunk.split("data: ", 1)[1])["item"]
+            for chunk in chunks
+            if "event: response.output_item.done" in chunk
+        )
+
+    # The source no longer has the original acceptance request. Summary text
+    # supplies the contract only; a real paired exit-zero command supplies proof.
+    compacted = asyncio.run(compact([_message("user", "Continue."), validate, zero]))
+    state = remote._decode_compaction_envelope_payload(
+        compacted["encrypted_content"]
+    )["acceptance_state"]
+    assert state == {
+        "marker": "LARGE_CONTEXT_PASS",
+        "result_path": "large_context/result.txt",
+        "validated": True,
+        "written": False,
+        "readback": False,
+    }
+
+    no_proof = asyncio.run(compact([_message("user", "Continue.")]))
+    assert remote._decode_compaction_envelope_payload(
+        no_proof["encrypted_content"]
+    )["acceptance_state"] is None
 
 def test_rewrite_compaction_history_bounds_large_codex_retained_prefix():
     summary = "durable compact state"
