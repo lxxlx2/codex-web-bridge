@@ -1977,3 +1977,44 @@ macos-compat      PASS
 
 The candidate is ready for S3 live accumulation. S3 count remains 0/3 before
 the first full live run on this exact SHA.
+
+## 2026-09-28 canonical candidate S3 #1 failed on exact result bytes
+
+Canonical candidate remained:
+
+```text
+6504248b3a0c86de61a285ca1952f30773fa3d92
+codex-cli 0.156.0
+```
+
+The first full S3 run on this exact SHA passed release/browser/repo preflight,
+local gates, restart continuity, compaction cooldown, and reached
+post-compaction recovery. It then failed with:
+
+```text
+FAILURE_CLASS=post_compaction_recovery
+FAILURE_DETAIL=result_missing_trailing_newline
+PRIVATE_EVIDENCE_RECORDED=YES
+```
+
+The runner checks this only after exact final reply, real client-tool activity,
+a successful write, and a successful byte-oriented readback after the last
+write. Therefore this failure shape means the recovery turn returned exact
+`LARGE_CONTEXT_PASS`, had write/readback evidence in the trace, and the final
+on-disk file existed but equaled the token bytes without the required trailing
+`0x0a`.
+
+Do not count this run. S3 remains 0/3 for `6504248b...`.
+
+A new isolated branch was created for diagnosis and repair:
+
+```text
+codex/0156-post-compaction-newline-fix
+base 6504248b3a0c86de61a285ca1952f30773fa3d92
+```
+
+Do not change `standalone-dev` while diagnosing. Inspect the private
+post-compaction recovery trace first and determine whether the write command
+itself omitted the newline, whether a later command mutated the file without
+being classified as a write, or whether the byte-readback proof accepted output
+that did not actually prove the required final byte.
