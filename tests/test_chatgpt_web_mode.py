@@ -20,9 +20,9 @@ def test_web_mode_defaults_to_sol_high_and_temporary_chat(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
 
-    assert target_web_model() == "GPT-5.6 Sol"
-    assert default_reasoning_effort() == "high"
-    assert normalize_reasoning_effort(None) == "high"
+    assert target_web_model() == "auto-best"
+    assert default_reasoning_effort() == "max"
+    assert normalize_reasoning_effort(None) == "max"
     assert temporary_chat_enabled() is True
     assert web_mode_strict() is True
 
@@ -58,6 +58,11 @@ def test_model_verification_reads_checked_picker_option_and_closes_menu(
             )
         if script == web_mode._MODEL_MENU_STATE_JS:
             return menu["state"]
+        if script == web_mode._MODEL_OPTIONS_JS:
+            return ([{"label": selected_model, "checked": True, "disabled": False}]
+                    if selected_model else [])
+        if script == web_mode._REASONING_DETAILS_JS:
+            return {"min": 0, "max": 2, "now": 2}
         raise AssertionError("unexpected script")
 
     def click(*_args, **_kwargs):
@@ -68,6 +73,7 @@ def test_model_verification_reads_checked_picker_option_and_closes_menu(
         menu["state"] = "closed"
         return True
 
+    monkeypatch.setattr(web_mode, "target_web_model", lambda: "GPT-5.6 Sol")
     monkeypatch.setattr(web_mode, "_run_js", run_js)
     monkeypatch.setattr(web_mode, "_click", click)
     monkeypatch.setattr(web_mode, "_close_model_menu", close)
@@ -84,13 +90,25 @@ def test_model_verification_reads_checked_picker_option_and_closes_menu(
 
 def test_temporary_chat_only_clicks_explicit_inactive_control(monkeypatch):
     clicks = []
-    monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"temporary_chat": None})
-    monkeypatch.setattr(web_mode, "_click", lambda *_args, **kwargs: clicks.append(kwargs))
+    state = {"temporary_chat": None}
+
+    monkeypatch.setattr(
+        web_mode,
+        "_run_js",
+        lambda _tab, script, *_args: dict(state)
+        if script == web_mode._STATE_JS
+        else None,
+    )
+    monkeypatch.setattr(
+        web_mode,
+        "_click",
+        lambda *_args, **kwargs: clicks.append(kwargs) or {"clicked": False},
+    )
+
     web_mode._ensure_temporary_chat(object())
     assert clicks == []
 
-    monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"temporary_chat": False})
-    monkeypatch.setattr(web_mode, "_click", lambda *_args, **kwargs: clicks.append(kwargs) or {"clicked": False})
+    state["temporary_chat"] = False
     web_mode._ensure_temporary_chat(object())
     assert clicks[0]["aria_exact"] == ["临时聊天", "temporary chat"]
 
@@ -120,10 +138,11 @@ def test_reasoning_slider_moves_one_step_and_reads_back(monkeypatch):
             assert '[role="slider"]' in selector
             return Slider()
 
+    monkeypatch.setattr(web_mode, "target_web_model", lambda: "GPT-5.6 Sol")
     monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"reasoning": "medium"})
     monkeypatch.setattr(web_mode, "_open_reasoning_menu", lambda _tab: True)
     monkeypatch.setattr(web_mode, "_close_model_menu", lambda _tab: True)
-    monkeypatch.setattr(web_mode, "_run_js", lambda _tab, script: value["now"] if script == web_mode._REASONING_SLIDER_JS else None)
+    monkeypatch.setattr(web_mode, "_run_js", lambda _tab, script: {"min": 0, "max": 2, "now": value["now"]} if script == web_mode._REASONING_DETAILS_JS else None)
     monkeypatch.setattr(web_mode.time, "sleep", lambda *_args: None)
 
     assert web_mode._ensure_reasoning(Tab(), "high") is True
@@ -132,6 +151,7 @@ def test_reasoning_slider_moves_one_step_and_reads_back(monkeypatch):
 
 
 def test_reasoning_slider_fails_closed_without_verified_value(monkeypatch):
+    monkeypatch.setattr(web_mode, "target_web_model", lambda: "GPT-5.6 Sol")
     monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"reasoning": "medium"})
     monkeypatch.setattr(web_mode, "_open_reasoning_menu", lambda _tab: True)
     monkeypatch.setattr(web_mode, "_close_model_menu", lambda _tab: True)

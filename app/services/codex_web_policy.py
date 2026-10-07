@@ -39,9 +39,8 @@ _REASONING_ALIASES = {
     "extra-high": "high",
     "extra_high": "high",
     "extra high": "high",
-    "max": "high",
 }
-_SUPPORTED_REASONING = {"medium", "high"}
+_SUPPORTED_REASONING = {"medium", "high", "max"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -56,21 +55,25 @@ def temporary_chat_strict() -> bool:
 
 
 def normalize_codex_reasoning(value: Any) -> str:
+    # Default max is a browser-side policy, not a claim that the Codex wire
+    # used a higher reasoning effort. It applies even when Codex sends high.
+    configured = default_reasoning_effort()
+    if configured == "max":
+        return "max"
     effort = ""
     if isinstance(value, dict):
         effort = str(value.get("effort") or "").strip().lower()
     else:
         effort = str(value or "").strip().lower()
-
     if not effort:
-        effort = default_reasoning_effort()
-
+        effort = configured
     effort = _REASONING_ALIASES.get(effort, effort)
     if effort not in _SUPPORTED_REASONING:
         raise ChatGPTWebModeError(
-            f"unsupported Codex reasoning effort: {effort}; supported=medium,high"
+            f"unsupported Codex reasoning effort: {effort}; supported=medium,high,max"
         )
     return effort
+
 
 
 def _is_sol_target(value: Any) -> bool:
@@ -78,52 +81,62 @@ def _is_sol_target(value: Any) -> bool:
 
 
 def evaluate_codex_web_state(state: Dict[str, Any], effort: str) -> Dict[str, Any]:
-    """Evaluate current browser state without changing the page."""
-    desired_model = target_web_model()
+    """Evaluate inspected DOM evidence without a hidden-model assumption."""
+    configured_model = target_web_model()
+    desired_model = state.get("resolved_model") if configured_model == "auto-best" else configured_model
     actual_reasoning = str(state.get("reasoning") or "").strip().lower() or None
-    reasoning_ok = actual_reasoning == effort
+    slider = state.get("reasoning_slider")
+    if effort == "max":
+        reasoning_ok = bool(
+            isinstance(slider, dict)
+            and type(slider.get("now")) is int
+            and type(slider.get("max")) is int
+            and type(slider.get("min")) is int
+            and slider["min"] < slider["max"]
+            and slider["now"] == slider["max"]
+        )
+    else:
+        reasoning_ok = actual_reasoning == effort
 
-    direct_model_ok = (
-        str(state.get("model") or "").strip().casefold()
-        == desired_model.strip().casefold()
+    direct_model_ok = bool(
+        desired_model
+        and str(state.get("model") or "").strip().casefold() == str(desired_model).casefold()
     )
-    mapped_model_ok = bool(_is_sol_target(desired_model) and reasoning_ok)
+    # Historical compatibility is only valid for an explicitly pinned Sol.
+    # Auto-selection MUST prove the actual selected model radio.
+    mapped_model_ok = bool(
+        configured_model != "auto-best"
+        and _is_sol_target(desired_model)
+        and not state.get("model")
+        and reasoning_ok
+    )
     model_ok = direct_model_ok or mapped_model_ok
-
     temp_requested = temporary_chat_enabled()
     temp_verified = state.get("temporary_chat") is True
     temp_required = bool(temp_requested and temporary_chat_strict())
-    temp_ok = temp_verified if temp_required else True
-
     errors: list[str] = []
     if not reasoning_ok:
         errors.append(f"reasoning expected={effort!r} actual={state.get('reasoning')!r}")
     if not model_ok:
         errors.append(f"model expected={desired_model!r} actual={state.get('model')!r}")
     if temp_required and not temp_verified:
-        errors.append(
-            f"temporary_chat expected=True actual={state.get('temporary_chat')!r}"
-        )
-
+        errors.append(f"temporary_chat expected=True actual={state.get('temporary_chat')!r}")
     verified = not errors
     result = dict(state)
-    result.update(
-        {
-            "model": desired_model if mapped_model_ok and not state.get("model") else state.get("model"),
-            "requested_reasoning": effort,
-            "reasoning_verified": reasoning_ok,
-            "model_verified": model_ok,
-            "model_verification": (
-                "dom" if direct_model_ok else "official-reasoning-mapping" if mapped_model_ok else None
-            ),
-            "temporary_chat_requested": temp_requested,
-            "temporary_chat_verified": temp_verified,
-            "temporary_chat_strict": temp_required,
-            "verified": verified,
-            "verification_errors": errors,
-        }
-    )
+    result.update({
+        "model": desired_model if mapped_model_ok and not state.get("model") else state.get("model"),
+        "requested_reasoning": effort,
+        "reasoning_verified": reasoning_ok,
+        "model_verified": model_ok,
+        "model_verification": "dom" if direct_model_ok else "official-reasoning-mapping" if mapped_model_ok else None,
+        "temporary_chat_requested": temp_requested,
+        "temporary_chat_verified": temp_verified,
+        "temporary_chat_strict": temp_required,
+        "verified": verified,
+        "verification_errors": errors,
+    })
     return result
+
 
 
 def inspect_codex_web_mode_status(reasoning: Any = None) -> Dict[str, Any]:
@@ -162,7 +175,7 @@ def prepare_and_verify_codex_web_mode(reasoning: Any = None) -> Dict[str, Any]:
     reasoning_selected = _ensure_reasoning(tab, effort)
 
     state = inspect_chatgpt_web_mode(tab)
-    if reasoning_selected and state.get("reasoning") is None:
+    if reasoning_selected and effort != "max" and state.get("reasoning") is None:
         state["reasoning"] = effort
         state["reasoning_verification"] = "selected-menu-state"
 
