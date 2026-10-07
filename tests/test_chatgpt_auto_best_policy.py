@@ -72,3 +72,54 @@ def test_slider_range_validation_is_generic(monkeypatch):
 def test_no_selection_from_only_disabled_radio():
     with pytest.raises(web.ChatGPTWebModeError, match="no selectable"):
         web._best_available_model([{"label": "GPT-8 Pro", "disabled": True}])
+
+
+def test_english_retirement_prose_is_not_parsed_as_model_family():
+    parts = web._model_parts("GPT-5.5 retires Oct 14")
+    assert parts is not None
+    assert parts[0] == "GPT-5.5"
+    assert parts[2] == ""
+
+    selected = web._best_available_model([
+        {"label": "GPT-5.6 Sol", "disabled": False},
+        {"label": "GPT-5.5 retires Oct 14", "disabled": False},
+    ])
+    assert selected["name"] == "GPT-5.6 Sol"
+
+
+def test_unknown_same_version_family_competitor_fails_closed():
+    with pytest.raises(web.ChatGPTWebModeError, match="ambiguous"):
+        web._best_available_model([
+            {"label": "GPT-6 Pro", "disabled": False},
+            {"label": "GPT-6 Ultra", "disabled": False},
+        ])
+
+    selected = web._best_available_model([
+        {"label": "GPT-6 Pro", "disabled": False},
+        {"label": "GPT-7 Ultra", "disabled": False},
+    ])
+    assert selected["name"] == "GPT-7 Ultra"
+
+
+def test_temporary_chat_probe_does_not_open_model_picker(monkeypatch):
+    monkeypatch.setattr(web, "temporary_chat_enabled", lambda: True)
+    monkeypatch.setattr(
+        web,
+        "_run_js",
+        lambda _tab, script, *_args: {
+            "model": None,
+            "reasoning": None,
+            "temporary_chat": True,
+        } if script == web._STATE_JS else (_ for _ in ()).throw(
+            AssertionError("unexpected model-picker probe")
+        ),
+    )
+    monkeypatch.setattr(
+        web,
+        "inspect_chatgpt_web_mode",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("full inspector should not run")
+        ),
+    )
+
+    web._ensure_temporary_chat(object())

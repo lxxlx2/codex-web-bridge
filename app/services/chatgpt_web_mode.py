@@ -409,23 +409,47 @@ def _close_model_menu(tab: Any) -> bool:
 
 
 _MODEL_IDENTITY = re.compile(
-    r"^\s*GPT[- ]?(\d+(?:\.\d+)*)(?:\s+([A-Za-z][A-Za-z0-9_-]*))?(?=$|\s)",
+    r"^\s*GPT[- ]?(\d+(?:\.\d+)*)(?=$|\s)",
     re.IGNORECASE,
 )
 _MODEL_TIER_RANK = {"pro": 4, "astra": 3, "sol": 2, "luna": 1}
+_MODEL_FAMILY_TOKEN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)(?:\s+|$)")
 
 
 def _model_parts(label: str) -> tuple[str, tuple[int, ...], str] | None:
-    """Parse only GPT radio labels, ignoring descriptions like retirement dates."""
-    match = _MODEL_IDENTITY.match(str(label or ""))
+    """Parse a GPT radio label without mistaking descriptive prose for a tier."""
+    raw = str(label or "").strip()
+    match = _MODEL_IDENTITY.match(raw)
     if not match:
         return None
     version = tuple(int(x) for x in match.group(1).split("."))
     if len(version) > 4:
         return None
-    family = (match.group(2) or "").lower()
-    # A non-ASCII sentence following GPT-5.5 is a description, not a tier.
-    canonical = f"GPT-{match.group(1)}" + (f" {match.group(2)}" if family else "")
+
+    remainder = raw[match.end():].strip()
+    family = ""
+    family_display = ""
+    if remainder:
+        token_match = _MODEL_FAMILY_TOKEN.match(remainder)
+        if token_match:
+            token = token_match.group(1)
+            token_key = token.casefold()
+            trailing = remainder[token_match.end():].strip()
+            if token_key in _MODEL_TIER_RANK:
+                # Known family names remain part of the canonical model even
+                # when the UI appends a short recommendation/deprecation note.
+                family = token_key
+                family_display = token
+            elif not trailing:
+                # A single unknown ASCII token may be a future model family.
+                # Preserve it, but ranking will fail closed if it competes with
+                # another model on the same version.
+                family = token_key
+                family_display = token
+            # Otherwise the text is descriptive prose such as
+            # "retires Oct 14"; do not turn its first word into a model family.
+
+    canonical = f"GPT-{match.group(1)}" + (f" {family_display}" if family_display else "")
     return canonical, version + (0,) * (4 - len(version)), family
 
 
@@ -443,11 +467,25 @@ def _best_available_model(options: list[dict[str, Any]]) -> dict[str, Any]:
             # Do not silently ignore newly named, potentially stronger options.
             raise ChatGPTWebModeError(f"unrecognized enabled model option: {label[:80]!r}")
         name, version, family = parts
-        ranked.append((version, _MODEL_TIER_RANK.get(family, 0), name, label))
+        ranked.append(
+            (version, _MODEL_TIER_RANK.get(family, 0), name, label, family)
+        )
     if not ranked:
         raise ChatGPTWebModeError("no selectable GPT model radio options found")
+
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     winner = ranked[0]
+    strongest_version = winner[0]
+    peers = [item for item in ranked if item[0] == strongest_version]
+
+    # Never let a hard-coded historical family ranking silently beat a newly
+    # introduced same-version family whose capability ordering is unknown.
+    unknown_family_competitor = any(
+        item[4] and item[4] not in _MODEL_TIER_RANK for item in peers
+    )
+    if len(peers) > 1 and unknown_family_competitor:
+        raise ChatGPTWebModeError("ambiguous strongest model option")
+
     if len(ranked) > 1 and ranked[1][:2] == winner[:2]:
         raise ChatGPTWebModeError("ambiguous strongest model option")
     return {"name": winner[2], "label": winner[3]}
@@ -551,7 +589,11 @@ def inspect_chatgpt_web_mode_diagnostics(tab: Optional[Any] = None) -> Dict[str,
 def _ensure_temporary_chat(tab: Any) -> None:
     if not temporary_chat_enabled():
         return
-    state = inspect_chatgpt_web_mode(tab)
+    # Temporary-chat state is visible outside the model picker. Avoid a full
+    # auto-best model/slider probe here so fresh requests do not open and close
+    # the picker just to inspect this independent toggle.
+    raw_state = _run_js(tab, _STATE_JS)
+    state = raw_state if isinstance(raw_state, dict) else {}
     if state.get("temporary_chat") is True:
         return
     if state.get("temporary_chat") is not False:
