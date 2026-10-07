@@ -333,6 +333,113 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             run_mock.assert_called_once()
             self.assertEqual(run_mock.call_args.args[0], ["open", "-a", "Codex"])
 
+    def test_target_reset_creates_replacement_before_closing_old_target(self) -> None:
+        events = []
+        state = {
+            "old_open": True,
+            "fresh_visible": False,
+        }
+
+        def targets():
+            result = []
+            if state["old_open"]:
+                result.append(
+                    {
+                        "id": "old-target",
+                        "type": "page",
+                        "url": "https://chatgpt.com/",
+                    }
+                )
+            if state["fresh_visible"]:
+                result.append(
+                    {
+                        "id": "fresh-target",
+                        "type": "page",
+                        "url": "https://chatgpt.com/",
+                    }
+                )
+            events.append(
+                (
+                    "list",
+                    tuple(item["id"] for item in result),
+                )
+            )
+            return result
+
+        def create(path, *, method="GET", timeout=10.0):
+            self.assertEqual(method, "PUT")
+            self.assertTrue(path.startswith("/json/new?"))
+            events.append(("create", path))
+            state["fresh_visible"] = True
+            return {"id": "fresh-target"}
+
+        def close(path, *, timeout=10.0):
+            events.append(("close", path))
+            self.assertTrue(state["fresh_visible"])
+            self.assertIn("old-target", path)
+            state["old_open"] = False
+
+        with (
+            patch.object(s3.core, "_health_ready", return_value={}),
+            patch.object(s3, "_chatgpt_page_targets", side_effect=targets),
+            patch.object(s3, "_cdp_json", side_effect=create),
+            patch.object(s3, "_cdp_close", side_effect=close),
+            patch.object(s3.time, "sleep"),
+        ):
+            result = s3._reset_acceptance_chatgpt_target()
+
+        self.assertEqual(
+            result,
+            {"closed_targets": 1, "fresh_target": True},
+        )
+        create_index = next(
+            index
+            for index, event in enumerate(events)
+            if event[0] == "create"
+        )
+        close_index = next(
+            index
+            for index, event in enumerate(events)
+            if event[0] == "close"
+        )
+        self.assertLess(create_index, close_index)
+
+    def test_target_reset_never_closes_old_target_until_fresh_is_visible(self) -> None:
+        old = {
+            "id": "old-target",
+            "type": "page",
+            "url": "https://chatgpt.com/",
+        }
+
+        with (
+            patch.object(s3.core, "_health_ready", return_value={}),
+            patch.object(
+                s3,
+                "_chatgpt_page_targets",
+                return_value=[old],
+            ),
+            patch.object(
+                s3,
+                "_cdp_json",
+                return_value={"id": "fresh-target"},
+            ),
+            patch.object(s3, "_cdp_close") as close_mock,
+            patch.object(
+                s3.time,
+                "monotonic",
+                side_effect=[0.0, 16.0],
+            ),
+            patch.object(s3.time, "sleep"),
+        ):
+            with self.assertRaises(s3.GateFailure) as raised:
+                s3._reset_acceptance_chatgpt_target()
+
+        self.assertEqual(
+            raised.exception.detail,
+            "fresh_target_not_visible_before_swap",
+        )
+        close_mock.assert_not_called()
+
     def test_surface_failure_stops_before_core_live_gate(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             private_root = Path(raw) / "private"
