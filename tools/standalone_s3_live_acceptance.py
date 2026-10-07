@@ -173,10 +173,46 @@ def _chatgpt_page_targets() -> list[dict[str, Any]]:
 def _reset_acceptance_chatgpt_target() -> dict[str, Any]:
     core._health_ready(require_clean=True)
 
+    # Keep at least one ChatGPT page target alive throughout the reset. On some
+    # Chromium builds, closing the final page target can leave the DevTools
+    # HTTP endpoint listening while /json/* stops responding. Create and prove
+    # the replacement first, then retire only the targets that existed before
+    # the swap.
+    previous = _chatgpt_page_targets()
+    previous_ids = {
+        str(item.get("id") or "").strip()
+        for item in previous
+        if str(item.get("id") or "").strip()
+    }
+
+    encoded = urllib.parse.quote("https://chatgpt.com/", safe=":/")
+    created = _cdp_json("/json/new?" + encoded, method="PUT", timeout=10.0)
+    fresh_id = str(created.get("id") or "").strip() if isinstance(created, dict) else ""
+    if not fresh_id:
+        raise GateFailure("chatgpt_target_missing", "fresh_target_create_failed")
+
+    deadline = time.monotonic() + 15.0
+    fresh_visible = False
+    while time.monotonic() < deadline:
+        latest = _chatgpt_page_targets()
+        latest_ids = {
+            str(item.get("id") or "").strip()
+            for item in latest
+            if str(item.get("id") or "").strip()
+        }
+        if fresh_id in latest_ids:
+            fresh_visible = True
+            break
+        time.sleep(0.25)
+    if not fresh_visible:
+        raise GateFailure(
+            "chatgpt_target_missing",
+            "fresh_target_not_visible_before_swap",
+        )
+
     closed = 0
-    for item in _chatgpt_page_targets():
-        target_id = str(item.get("id") or "").strip()
-        if not target_id:
+    for target_id in sorted(previous_ids):
+        if target_id == fresh_id:
             continue
         try:
             _cdp_close(
@@ -189,27 +225,24 @@ def _reset_acceptance_chatgpt_target() -> dict[str, Any]:
             pass
 
     deadline = time.monotonic() + 8.0
-    while time.monotonic() < deadline and _chatgpt_page_targets():
-        time.sleep(0.2)
-    if _chatgpt_page_targets():
-        raise GateFailure("chatgpt_target_ambiguous", "stale_target_close_failed")
-
-    encoded = urllib.parse.quote("https://chatgpt.com/", safe=":/")
-    created = _cdp_json("/json/new?" + encoded, method="PUT", timeout=10.0)
-    if not isinstance(created, dict) or not str(created.get("id") or "").strip():
-        raise GateFailure("chatgpt_target_missing", "fresh_target_create_failed")
-
-    deadline = time.monotonic() + 15.0
-    latest: list[dict[str, Any]] = []
+    latest_ids: set[str] = set()
     while time.monotonic() < deadline:
         latest = _chatgpt_page_targets()
-        if len(latest) == 1:
+        latest_ids = {
+            str(item.get("id") or "").strip()
+            for item in latest
+            if str(item.get("id") or "").strip()
+        }
+        if latest_ids == {fresh_id}:
             return {"closed_targets": closed, "fresh_target": True}
-        if len(latest) > 1:
-            raise GateFailure("chatgpt_target_ambiguous", f"target_count={len(latest)}")
-        time.sleep(0.25)
+        if fresh_id not in latest_ids:
+            raise GateFailure("chatgpt_target_missing", "fresh_target_lost_after_swap")
+        time.sleep(0.2)
 
-    raise GateFailure("chatgpt_target_missing", "fresh_target_not_visible")
+    raise GateFailure(
+        "chatgpt_target_ambiguous",
+        "stale_target_close_failed",
+    )
 
 
 def _parse_surface_preflight(text: str) -> dict[str, Any]:
