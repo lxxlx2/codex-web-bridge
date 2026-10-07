@@ -90,13 +90,25 @@ def test_model_verification_reads_checked_picker_option_and_closes_menu(
 
 def test_temporary_chat_only_clicks_explicit_inactive_control(monkeypatch):
     clicks = []
-    monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"temporary_chat": None})
-    monkeypatch.setattr(web_mode, "_click", lambda *_args, **kwargs: clicks.append(kwargs))
+    state = {"temporary_chat": None}
+
+    monkeypatch.setattr(
+        web_mode,
+        "_run_js",
+        lambda _tab, script, *_args: dict(state)
+        if script == web_mode._STATE_JS
+        else None,
+    )
+    monkeypatch.setattr(
+        web_mode,
+        "_click",
+        lambda *_args, **kwargs: clicks.append(kwargs) or {"clicked": False},
+    )
+
     web_mode._ensure_temporary_chat(object())
     assert clicks == []
 
-    monkeypatch.setattr(web_mode, "inspect_chatgpt_web_mode", lambda _tab: {"temporary_chat": False})
-    monkeypatch.setattr(web_mode, "_click", lambda *_args, **kwargs: clicks.append(kwargs) or {"clicked": False})
+    state["temporary_chat"] = False
     web_mode._ensure_temporary_chat(object())
     assert clicks[0]["aria_exact"] == ["临时聊天", "temporary chat"]
 
