@@ -232,6 +232,16 @@ def test_affinity_structured_tool_delta_carries_private_compacted_context():
     )
 
 
+def _synthetic_exact_bytes_readback(path="context/result.txt", token="SYNTHETIC-7319"):
+    return (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        f"data = Path('{path}').read_bytes()\n"
+        f"assert data == b'{token}\\n'\n"
+        "PY"
+    )
+
+
 def _synthetic_restart_response_history(*, include_readback: bool) -> ResponsesRequest:
     """Use Responses items shaped like a restart turn, with synthetic values only."""
 
@@ -286,7 +296,7 @@ def _synthetic_restart_response_history(*, include_readback: bool) -> ResponsesR
                     "call_id": "call_synthetic_read",
                     "name": "exec_command",
                     "arguments": json.dumps(
-                        {"cmd": "od -An -tx1 -v context/result.txt"}
+                        {"cmd": _synthetic_exact_bytes_readback()}
                     ),
                 },
                 {
@@ -294,7 +304,7 @@ def _synthetic_restart_response_history(*, include_readback: bool) -> ResponsesR
                     "call_id": "call_synthetic_read",
                     "output": (
                         "Process exited with code 0\n"
-                        "Final output: 53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a\n"
+                        "Final output: VERIFIED\n"
                     ),
                 },
             ]
@@ -453,6 +463,7 @@ def test_authenticated_checkpoint_restores_write_then_tracks_later_byte_readback
         "validated": True,
         "written": True,
         "readback": False,
+        "effect_proof_version": 1,
     }
     checkpoint = {
         "type": "compaction",
@@ -480,6 +491,7 @@ def test_authenticated_checkpoint_restores_write_then_tracks_later_byte_readback
     )
     assert "_uwa_synthetic_acceptance_state" not in json.dumps(browser_messages)
     assert "_uwa_compaction_acceptance_envelope" not in json.dumps(browser_messages)
+    assert "effect_proof_version" not in json.dumps(browser_messages)
 
     full = _responses_request_to_chat_request(
         ResponsesRequest(
@@ -517,12 +529,12 @@ def test_authenticated_checkpoint_restores_write_then_tracks_later_byte_readback
             "type": "function_call",
             "call_id": "call_readback_after_checkpoint",
             "name": "exec_command",
-            "arguments": json.dumps({"cmd": "od -An -tx1 -v context/result.txt"}),
+            "arguments": json.dumps({"cmd": _synthetic_exact_bytes_readback()}),
         },
         {
             "type": "function_call_output",
             "call_id": "call_readback_after_checkpoint",
-            "output": "Process exited with code 0\nFinal output: 53 59 4e 54 48 0a",
+            "output": "Process exited with code 0\nFinal output: VERIFIED",
         },
     ]
     completed = replay([checkpoint, *readback])
@@ -551,6 +563,86 @@ def test_authenticated_checkpoint_restores_write_then_tracks_later_byte_readback
     )
 
 
+def test_legacy_authenticated_effects_require_new_write_and_exact_readback(
+    monkeypatch, tmp_path
+):
+    from app.services import codex_remote_compaction_v2 as remote
+    from app.services.client_tool_policy import _acceptance_state_from_history
+
+    monkeypatch.setattr(
+        remote, "_ACCEPTANCE_CHECKPOINT_KEY_PATH", tmp_path / "checkpoint.key"
+    )
+    legacy = {
+        "marker": "CONTEXT_PASS",
+        "result_path": "context/result.txt",
+        "validated": True,
+        "written": True,
+        "readback": True,
+    }
+    checkpoint = {
+        "type": "compaction",
+        "encrypted_content": encode_compaction_envelope(
+            "[ACTIVE CONTINUATION STATE]\nContinue context/result.txt before CONTEXT_PASS.",
+            lineage="4" * 32,
+            acceptance_state=legacy,
+        ),
+    }
+
+    def replay(items):
+        return _responses_request_to_chat_request(
+            ResponsesRequest(
+                model="chatgpt",
+                input=rewrite_uwa_compaction_history(items),
+                tools=[_tool("exec_command")],
+            ),
+            stream=False,
+        ).messages
+
+    before = replay([checkpoint])
+    assert looks_like_premature_acceptance_success("CONTEXT_PASS", before)
+    assert _acceptance_state_from_history(before) == {
+        **legacy,
+        "written": False,
+        "readback": False,
+        "effect_proof_version": 1,
+    }
+    assert "effect_proof_version" not in json.dumps(
+        build_browser_messages_for_tools(
+            messages=before, tools=[_tool("exec_command")], tool_choice="auto"
+        )
+    )
+
+    effects = [
+        {
+            "type": "function_call",
+            "call_id": "call_rewrite_after_legacy",
+            "name": "exec_command",
+            "arguments": json.dumps(
+                {"cmd": "printf '%s\\n' SYNTHETIC-7319 > context/result.txt"}
+            ),
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_rewrite_after_legacy",
+            "output": "Process exited with code 0\nFinal output:",
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_check_after_legacy",
+            "name": "exec_command",
+            "arguments": json.dumps({"cmd": _synthetic_exact_bytes_readback()}),
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_check_after_legacy",
+            "output": "Process exited with code 0\nFinal output: VERIFIED",
+        },
+    ]
+    assert not looks_like_premature_acceptance_success(
+        "CONTEXT_PASS", replay([checkpoint, *effects])
+    )
+
+
 def test_unverified_compaction_snapshot_cannot_claim_effects(monkeypatch, tmp_path):
     from app.services import codex_remote_compaction_v2 as remote
 
@@ -567,6 +659,7 @@ def test_unverified_compaction_snapshot_cannot_claim_effects(monkeypatch, tmp_pa
         "validated": True,
         "written": True,
         "readback": True,
+        "effect_proof_version": 1,
     }
     envelope = encode_compaction_envelope(
         summary, lineage="2" * 32, acceptance_state=state
@@ -632,6 +725,7 @@ def test_completed_authenticated_checkpoint_survives_recursive_compaction(
         "validated": True,
         "written": True,
         "readback": True,
+        "effect_proof_version": 1,
     }
     checkpoint = {
         "type": "compaction",
@@ -675,12 +769,12 @@ def test_completed_authenticated_checkpoint_survives_recursive_compaction(
             "type": "function_call",
             "call_id": "call_fresh_readback",
             "name": "exec_command",
-            "arguments": json.dumps({"cmd": "od -An -tx1 -v context/result.txt"}),
+            "arguments": json.dumps({"cmd": _synthetic_exact_bytes_readback()}),
         },
         {
             "type": "function_call_output",
             "call_id": "call_fresh_readback",
-            "output": "Process exited with code 0\nFinal output: 53 59 4e 54 48 0a",
+            "output": "Process exited with code 0\nFinal output: VERIFIED",
         },
     ])
     assert not looks_like_premature_acceptance_success(

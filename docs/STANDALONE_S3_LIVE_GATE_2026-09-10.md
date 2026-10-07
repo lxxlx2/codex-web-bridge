@@ -1657,3 +1657,44 @@ ChatGPT Web produces the bounded continuation summary, and the adapter returns o
 `type=compaction` output item carrying the UWA-owned envelope. The retained
 `/v1/responses/compact` endpoint is legacy compatibility and is not the primary
 V2 path.
+
+
+## 2026-10-07 Codex CLI 0.160.1 release-baseline binding
+
+The current standalone release candidate is now bound to Codex CLI **0.160.1**
+for all new release-grade live acceptance.
+
+Local non-live validation completed successfully:
+
+- focused acceptance regression: 218 passed, 12 subtests passed
+- broad Codex regression: 328 passed, 12 subtests passed
+- full repository suite: 676 passed, 12 subtests passed
+- public repository safety: PASS
+- standalone dependency audit: PASS
+- standalone import boundary: PASS
+- changed Python compile check: PASS
+- git diff --check: PASS
+
+The S3 release gate now requires `codex-cli 0.160.1`.
+
+Compatibility review also found and fixed a Codex 0.160.1 command-result
+format change: `Process exited with code N` appears inside the authoritative
+metadata header after Chunk ID / Wall time. Exit-status parsing now reads
+that metadata prefix and does not allow command output to spoof success.
+
+Synthetic acceptance proof was hardened so result writes require the
+trailing newline, byte display alone is insufficient, failed exact-byte
+verification invalidates the prior write, and a fresh write plus fresh
+successful readback is required.
+
+Historical Codex CLI 0.156.0 evidence remains historical evidence and is
+not counted as live verification for this 0.160.1 candidate.
+
+**Current live status:**
+
+- Codex CLI 0.160.1 standalone S3: PENDING
+- post-compaction real ChatGPT Web continuity: PENDING
+- multi-window release S3 evidence: PENDING
+
+Live S3 must be executed from a clean canonical `standalone-dev` candidate
+after review, CI, and merge.
