@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.services.client_tool_policy import (
@@ -25,6 +27,25 @@ EXEC_TOOLS = [
         },
     }
 ]
+
+
+def _adapter_exec(command):
+    return (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        + json.dumps({"cmd": command})
+        + ']]></arguments></call></adapter_calls>'
+    )
+
+
+def _exact_bytes_readback(path, token):
+    return (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        f"data = Path('{path}').read_bytes()\n"
+        f"assert data == b'{token}\\n'\n"
+        "PY"
+    )
 
 
 def _successful_read_history():
@@ -794,13 +815,7 @@ def test_roundtrip_repairs_recursive_compaction_refusal_into_next_exec(monkeypat
                 "当前 ChatGPT 会话里没有 exec_command，"
                 "所以即使记得 ORBIT-5921 也无法真实写入并回读结果文件。"
             ),
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
-                '&& cat large_context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec("printf '%s\\n' ORBIT-5921 > large_context/result.txt"),
         ]
     )
 
@@ -1195,13 +1210,7 @@ def test_false_acceptance_workspace_mismatch_repairs_into_pending_write(monkeypa
     replies = iter(
         [
             "ACCEPTANCE_WORKSPACE_MISMATCH",
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"echo ORBIT-5921 > large_context/result.txt '
-                '&& cat large_context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec("printf '%s\\n' ORBIT-5921 > large_context/result.txt"),
         ]
     )
 
@@ -1319,13 +1328,7 @@ def test_false_restart_workspace_mismatch_repairs_into_pending_context_write(mon
     replies = iter(
         [
             "ACCEPTANCE_WORKSPACE_MISMATCH",
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"echo CONTEXT-REMEMBERED > context/result.txt '
-                '&& cat context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec("printf '%s\\n' CONTEXT-REMEMBERED > context/result.txt"),
         ]
     )
 
@@ -1654,12 +1657,7 @@ def test_live_restart_readback_tool_refusal_repairs_into_context_readback(monkey
     replies = iter(
         [
             LIVE_RESTART_READBACK_TOOL_REFUSAL,
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"od -An -tx1 -v context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec(_exact_bytes_readback("context/result.txt", "CONTEXT-REMEMBERED")),
         ]
     )
 
@@ -1680,4 +1678,3 @@ def test_live_restart_readback_tool_refusal_repairs_into_context_readback(monkey
     assert len(seen) == 2
     assert "prior workspace client tool call/result" in seen[1][0]["content"]
     assert "context/result.txt" in seen[1][1]["content"]
-

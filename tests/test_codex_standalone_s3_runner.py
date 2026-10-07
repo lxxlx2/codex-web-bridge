@@ -39,7 +39,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=["codex", "--version"],
             returncode=0,
-            stdout="codex-cli 0.156.0\n",
+            stdout="codex-cli 0.160.1\n",
         )
         with (
             patch.object(
@@ -56,7 +56,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             path, version = s3.core._codex_cli_identity()
 
         self.assertEqual(path, "/tmp/codex")
-        self.assertEqual(version, "0.156.0")
+        self.assertEqual(version, "0.160.1")
 
     def test_expected_codex_cli_version_rejects_other_versions(self) -> None:
         with patch.object(
@@ -72,7 +72,7 @@ class StandaloneS3RunnerTests(unittest.TestCase):
             "codex_cli_version",
         )
         self.assertIn(
-            "expected=0.156.0",
+            "expected=0.160.1",
             ctx.exception.detail,
         )
         self.assertIn(
@@ -84,14 +84,14 @@ class StandaloneS3RunnerTests(unittest.TestCase):
         with patch.object(
             s3.core,
             "_codex_cli_identity",
-            return_value=("/tmp/codex", "0.156.0"),
+            return_value=("/tmp/codex", "0.160.1"),
         ):
             path, version = (
                 s3.core._assert_expected_codex_cli_version()
             )
 
         self.assertEqual(path, "/tmp/codex")
-        self.assertEqual(version, "0.156.0")
+        self.assertEqual(version, "0.160.1")
 
     def test_codex_jsonl_parser_keeps_only_gate_metadata(self) -> None:
         events = [

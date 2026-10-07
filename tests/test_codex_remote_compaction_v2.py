@@ -17,6 +17,16 @@ def _message(role: str, text: str):
     }
 
 
+def _synthetic_exact_bytes_readback(path="context/result.txt", token="SYNTHETIC-7319"):
+    return (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        f"data = Path('{path}').read_bytes()\n"
+        f"assert data == b'{token}\\n'\n"
+        "PY"
+    )
+
+
 def _trigger_body(*, input_items=None, tools=None):
     return ResponsesRequest(
         model="chatgpt",
@@ -454,18 +464,19 @@ def test_stream_carries_proven_acceptance_progress_through_recursive_compaction(
         "validated": True,
         "written": True,
         "readback": False,
+        "effect_proof_version": 1,
     }
 
     read = {
         "type": "function_call",
         "call_id": "call_read_after_compaction",
         "name": "exec_command",
-        "arguments": json.dumps({"cmd": "od -An -tx1 -v context/result.txt"}),
+        "arguments": json.dumps({"cmd": _synthetic_exact_bytes_readback()}),
     }
     zero_read = {
         "type": "function_call_output",
         "call_id": "call_read_after_compaction",
-        "output": "Process exited with code 0\nFinal output: 53 59 4e 54 48 0a",
+        "output": "Process exited with code 0\nFinal output: VERIFIED",
     }
     second = asyncio.run(compact([user, first, read, zero_read]))
     second_state = remote._decode_compaction_envelope_payload(
@@ -542,6 +553,7 @@ def test_compaction_summary_restores_contract_intent_but_tool_pair_proves_valida
         "validated": True,
         "written": False,
         "readback": False,
+        "effect_proof_version": 1,
     }
 
     no_proof = asyncio.run(compact([_message("user", "Continue.")]))

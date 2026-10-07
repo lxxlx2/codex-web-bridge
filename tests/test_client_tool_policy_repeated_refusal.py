@@ -121,6 +121,7 @@ def test_latest_explicit_acceptance_request_wins_over_generic_system_examples():
         "validated": True,
         "written": False,
         "readback": False,
+        "effect_proof_version": 1,
     }
 
     ambiguous = [dict(message) for message in messages]
@@ -373,6 +374,32 @@ def _append_successful_exec(messages, call_id, command, output="ok"):
     )
 
 
+def _append_failed_exec(messages, call_id, command, output="assertion failed"):
+    _append_successful_exec(messages, call_id, command, output)
+    messages[-1]["content"] = messages[-1]["content"].replace(
+        "Process exited with code 0", "Process exited with code 1", 1
+    )
+
+
+def _exact_bytes_readback_command(path, token):
+    return (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        f"data = Path('{path}').read_bytes()\n"
+        f"assert data == b'{token}\\n'\n"
+        "PY"
+    )
+
+
+def _adapter_exec(command):
+    return (
+        '<adapter_calls><call name="exec_command">'
+        '<arguments encoding="json"><![CDATA['
+        + json.dumps({"cmd": command})
+        + ']]></arguments></call></adapter_calls>'
+    )
+
+
 def _restart_context_affinity_delta(messages, call_id):
     """Keep the latest Responses tool-result delta and trusted state separate."""
 
@@ -495,12 +522,7 @@ def test_roundtrip_repairs_live_context_pass_into_next_exec(monkeypatch):
     replies = iter(
         [
             "CONTEXT_PASS",
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"printf \'%s\\n\' \'EMBER-7319\' > context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec("printf '%s\\n' 'EMBER-7319' > context/result.txt"),
         ]
     )
     seen = []
@@ -535,8 +557,8 @@ def test_context_pass_allowed_after_successful_write_and_separate_readback(monke
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
-        "EMBER-7319",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
 
     parsed = {
@@ -598,12 +620,7 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
     replies = iter(
         [
             "ACCEPTANCE_INCOMPLETE",
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec(_exact_bytes_readback_command("context/result.txt", "EMBER-7319")),
         ]
     )
     seen = []
@@ -624,11 +641,10 @@ def test_roundtrip_repairs_acceptance_incomplete_to_separate_readback(monkeypatc
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     arguments = result["tool_calls"][0]["function"]["arguments"]
     assert "context/result.txt" in arguments
-    assert "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1" in arguments
-    assert "od -An -t x1" in arguments
+    assert _exact_bytes_readback_command("context/result.txt", "EMBER-7319") == json.loads(arguments)["cmd"]
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
-    assert "separate client-tool readback" in seen[1][1]["content"]
+    assert "standalone Python command" in seen[1][1]["content"]
 
 
 def test_live_step_execution_stall_after_validation_continues_to_write(monkeypatch):
@@ -690,7 +706,7 @@ def test_roundtrip_repairs_live_step_execution_stall_into_write(monkeypatch):
     assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
     assert len(seen) == 2
     assert "workspace validation already completed successfully" in seen[1][1]["content"].lower()
-    assert "successful write of context/result.txt has not yet been proven" in seen[1][1]["content"]
+    assert "newline-preserving write of context/result.txt has not yet been proven" in seen[1][1]["content"]
 
 
 def test_step_execution_stall_without_synthetic_contract_is_not_repaired(monkeypatch):
@@ -762,12 +778,7 @@ def test_roundtrip_repairs_live_third_step_stall_without_rewriting_result(monkey
     replies = iter(
         [
             refusal,
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec(_exact_bytes_readback_command("context/result.txt", "EMBER-7319")),
         ]
     )
     seen = []
@@ -787,11 +798,11 @@ def test_roundtrip_repairs_live_third_step_stall_without_rewriting_result(monkey
     assert result["mode"] == "tool_calls"
     arguments = result["tool_calls"][0]["function"]["arguments"]
     assert "context/result.txt" in arguments
-    assert "od -An -t x1" in arguments
+    assert json.loads(arguments)["cmd"] == _exact_bytes_readback_command("context/result.txt", "EMBER-7319")
     assert "printf '%s\\n' 'EMBER-7319' > context/result.txt" not in arguments
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
-    assert "separate client-tool readback" in seen[1][1]["content"]
+    assert "standalone Python command" in seen[1][1]["content"]
 
 
 def test_affinity_restart_post_write_refusal_repairs_to_readback_then_exact_pass(monkeypatch):
@@ -805,14 +816,16 @@ def test_affinity_restart_post_write_refusal_repairs_to_readback_then_exact_pass
     )
     post_write = _restart_context_affinity_delta(messages, "call_synthetic_write")
     refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
-    readback_command = "od -An -tx1 -v context/result.txt"
+    readback_command = _exact_bytes_readback_command(
+        "context/result.txt", "SYNTHETIC-7319"
+    )
     replies = iter(
         [
             refusal,
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"od -An -tx1 -v context/result.txt"}'
+                f'{json.dumps({"cmd": readback_command})}'
                 ']]></arguments></call></adapter_calls>'
             ),
         ]
@@ -838,14 +851,14 @@ def test_affinity_restart_post_write_refusal_repairs_to_readback_then_exact_pass
     )["cmd"] == readback_command
     assert len(seen) == 2
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
-    assert "separate byte-level readback" in seen[1][1]["content"]
+    assert "separate Python byte assertion" in seen[1][1]["content"]
 
     readback_call_id = readback["tool_calls"][0]["id"]
     _append_successful_exec(
         messages,
         readback_call_id,
         readback_command,
-        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+        "VERIFIED",
     )
     post_readback = _restart_context_affinity_delta(messages, readback_call_id)
     redundant_rewrite = (
@@ -889,12 +902,7 @@ def test_full_history_post_write_generic_tool_refusal_targets_readback(monkeypat
     replies = iter(
         [
             refusal,
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"od -An -tx1 -v context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec(_exact_bytes_readback_command("context/result.txt", "SYNTHETIC-7319")),
         ]
     )
     seen = []
@@ -912,9 +920,9 @@ def test_full_history_post_write_generic_tool_refusal_targets_readback(monkeypat
     )
 
     assert result["mode"] == "tool_calls"
-    assert "od -An -tx1 -v context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"])["cmd"] == _exact_bytes_readback_command("context/result.txt", "SYNTHETIC-7319")
     assert "Do not rewrite context/result.txt" in seen[1][1]["content"]
-    assert "separate byte-level readback" in seen[1][1]["content"]
+    assert "separate Python byte assertion" in seen[1][1]["content"]
 
 
 @pytest.mark.parametrize(
@@ -965,8 +973,8 @@ def test_live_third_step_stall_after_completed_effects_is_not_unfinished(monkeyp
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
-        "EMBER-7319",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
     refusal = "第三步无法在当前执行环境完成验证，因此不能回复 CONTEXT_PASS。"
 
@@ -987,9 +995,10 @@ def test_premature_pass_requires_readback_after_last_write(monkeypatch):
     _append_successful_exec(
         messages,
         "call_read_1",
-        "od -An -t x1 context/result.txt",
-        "45 4d 42 45 52 2d 37 33 31 39 0a",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
+    assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
     _append_successful_exec(
         messages,
         "call_write_2",
@@ -1013,14 +1022,13 @@ def test_quoted_readback_diagnostic_does_not_reset_completed_effects(monkeypatch
     _append_successful_exec(
         messages,
         "call_readback",
-        (
-            "python3 - <<'PY'\n"
-            "from pathlib import Path\n"
-            "data = Path('context/result.txt').read_bytes()\n"
-            "print(\"diagnostic: > context/result.txt\")\n"
-            "assert data.endswith(b'\\n')\n"
-            "PY"
-        ),
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
+    )
+    _append_successful_exec(
+        messages,
+        "call_quoted_diagnostic",
+        "printf '%s\\n' 'diagnostic: > context/result.txt'",
         "diagnostic: > context/result.txt",
     )
     assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
@@ -1083,7 +1091,8 @@ def test_quoted_byte_read_diagnostic_cannot_complete_acceptance():
     _append_successful_exec(
         messages,
         "call_real_readback",
-        "od -An -tx1 -v context/result.txt",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
     assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
 
@@ -1099,8 +1108,8 @@ def test_step_execution_stall_after_completed_effects_is_not_unfinished(monkeypa
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
-        "EMBER-7319",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
     refusal = "第三步未能通过客户端 `exec_command` 执行，因此不能回复 `CONTEXT_PASS`。"
 
@@ -1194,12 +1203,7 @@ def test_roundtrip_repairs_live_acceptance_capability_refusal_into_missing_write
     replies = iter(
         [
             refusal,
-            (
-                '<adapter_calls><call name="exec_command">'
-                '<arguments encoding="json"><![CDATA['
-                '{"cmd":"printf \'ORBIT-5921\\n\' > large_context/result.txt"}'
-                ']]></arguments></call></adapter_calls>'
-            ),
+            _adapter_exec("printf '%s\\n' 'ORBIT-5921' > large_context/result.txt"),
         ]
     )
     seen = []
@@ -1220,7 +1224,7 @@ def test_roundtrip_repairs_live_acceptance_capability_refusal_into_missing_write
     assert result["tool_calls"][0]["function"]["name"] == "exec_command"
     assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
     assert len(seen) == 2
-    assert "successful write of large_context/result.txt has not yet been proven" in seen[1][1]["content"]
+    assert "newline-preserving write of large_context/result.txt has not yet been proven" in seen[1][1]["content"]
 
 
 def test_acceptance_capability_refusal_without_successful_validation_is_not_repaired(monkeypatch):
@@ -1261,8 +1265,8 @@ def test_acceptance_capability_refusal_after_write_and_later_readback_is_not_unf
     _append_successful_exec(
         messages,
         "call_large_read",
-        "cat large_context/result.txt && od -An -tx1 -v large_context/result.txt",
-        "ORBIT-5921",
+        _exact_bytes_readback_command("large_context/result.txt", "ORBIT-5921"),
+        "VERIFIED",
     )
     refusal = (
         "当前运行环境无法访问工作区，并且没有实际可调用的 exec_command 客户端工具，"
@@ -1311,7 +1315,7 @@ def test_acceptance_incomplete_after_validation_continues_to_write(monkeypatch):
     assert result["mode"] == "tool_calls"
     assert "context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
     assert len(seen) == 2
-    assert "successful write of context/result.txt has not yet been proven" in seen[1][1]["content"]
+    assert "newline-preserving write of context/result.txt has not yet been proven" in seen[1][1]["content"]
     assert "do not repeat the successful workspace validation" in seen[1][1]["content"].lower()
 
 
@@ -1326,8 +1330,8 @@ def test_acceptance_incomplete_after_write_and_readback_repairs_to_exact_sentine
     _append_successful_exec(
         messages,
         "call_read",
-        "cat context/result.txt && tail -c 1 context/result.txt | od -An -t x1",
-        "EMBER-7319",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
     parsed = {
         "mode": "final",
@@ -2112,11 +2116,7 @@ def _completed_context_acceptance_history():
     _append_successful_exec(
         messages,
         "call_read_complete",
-        (
-            "python3 -c \"from pathlib import Path; "
-            "b=Path('context/result.txt').read_bytes(); "
-            "assert b == b'EMBER-7319\\\\n'\""
-        ),
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
         "VALID",
     )
     return messages
@@ -2166,7 +2166,10 @@ def test_validation_after_write_and_readback_requires_new_ordered_effects():
     )
     assert looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
     _append_successful_exec(
-        messages, "call_ordered_read", "od -An -tx1 -v context/result.txt",
+        messages,
+        "call_ordered_read",
+        _exact_bytes_readback_command("context/result.txt", "EMBER-7319"),
+        "VERIFIED",
     )
     assert not looks_like_premature_acceptance_success("CONTEXT_PASS", messages)
 
@@ -2309,9 +2312,95 @@ def _post_compaction_large_context_with_snapshot(*, written=False, readback=Fals
                 "validated": True,
                 "written": written,
                 "readback": readback,
+                "effect_proof_version": 1,
             },
         },
     ]
+
+
+def test_post_compaction_missing_newline_never_authorizes_exact_pass():
+    messages = _post_compaction_large_context_with_snapshot()
+    _append_successful_exec(
+        messages,
+        "call_write_without_newline",
+        "printf '%s' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+    _append_successful_exec(
+        messages,
+        "call_display_missing_newline",
+        "od -An -tx1 -v large_context/result.txt",
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+    _append_failed_exec(
+        messages,
+        "call_exact_readback_fails",
+        _exact_bytes_readback_command(
+            "large_context/result.txt", "SYNTHETIC-7319"
+        ),
+        "assertion failed; quoted diagnostic: Process exited with code 0",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_post_compaction_exit_zero_diagnostic_is_not_byte_proof():
+    messages = _post_compaction_large_context_with_snapshot()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_diagnostic",
+        (
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "data = Path('large_context/result.txt').read_bytes()\n"
+            "print('MISSING_NEWLINE' if not data.endswith(b'\\n') else 'OK')\n"
+            "PY"
+        ),
+        "MISSING_NEWLINE",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_failed_exact_byte_assertion_requires_rewrite_and_fresh_readback():
+    from app.services.tool_calling_parse import parse_tool_response
+
+    messages = _post_compaction_large_context_with_snapshot()
+    write = "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt"
+    check = _exact_bytes_readback_command(
+        "large_context/result.txt", "SYNTHETIC-7319"
+    )
+    _append_successful_exec(messages, "call_write", write)
+    _append_failed_exec(messages, "call_failed_assertion", check)
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    assert not has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(_adapter_exec(write), EXEC_TOOLS)
+    )
+    _append_successful_exec(messages, "call_rewrite", write)
+    _append_successful_exec(messages, "call_fresh_assertion", check, "VERIFIED")
+    assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+
+
+def test_post_compaction_byte_display_without_assertion_is_not_proof():
+    messages = _post_compaction_large_context_with_snapshot()
+    _append_successful_exec(
+        messages,
+        "call_write",
+        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+    )
+    _append_successful_exec(
+        messages,
+        "call_display",
+        "od -An -tx1 -v large_context/result.txt",
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
 
 
 def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch):
@@ -2338,14 +2427,16 @@ def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch
         parsed=premature,
     )
 
-    read_command = "od -An -tx1 -v large_context/result.txt"
+    read_command = _exact_bytes_readback_command(
+        "large_context/result.txt", "SYNTHETIC-7319"
+    )
     replies = iter(
         [
             "LARGE_CONTEXT_PASS",
             (
                 '<adapter_calls><call name="exec_command">'
                 '<arguments encoding="json"><![CDATA['
-                '{"cmd":"od -An -tx1 -v large_context/result.txt"}'
+                f'{json.dumps({"cmd": read_command})}'
                 ']]></arguments></call></adapter_calls>'
             ),
         ]
@@ -2363,13 +2454,13 @@ def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch
     assert readback["mode"] == "tool_calls"
     assert json.loads(readback["tool_calls"][0]["function"]["arguments"])["cmd"] == read_command
     assert "Do not rewrite large_context/result.txt" in seen[1][1]["content"]
-    assert "separate byte-level readback" in seen[1][1]["content"]
+    assert "separate Python byte assertion" in seen[1][1]["content"]
 
     _append_successful_exec(
         messages,
         "call_read_after_write",
         read_command,
-        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+        "VERIFIED",
     )
     assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
     assert not should_repair_client_workspace_refusal(
@@ -2383,6 +2474,20 @@ def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch
     _append_successful_exec(
         messages,
         "call_rewrite_after_readback",
+        "python3 -c \"from pathlib import Path; "
+        "Path('large_context/result.txt').write_bytes(b'SYNTHETIC-7319')\"",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    _append_successful_exec(
+        messages,
+        "call_print_only_after_bad_rewrite",
+        "od -An -tx1 -v large_context/result.txt",
+        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39",
+    )
+    assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
+    _append_successful_exec(
+        messages,
+        "call_repair_valid_write",
         "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
     )
     assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
@@ -2390,7 +2495,7 @@ def test_post_compaction_write_requires_later_separate_byte_readback(monkeypatch
         messages,
         "call_read_after_last_write",
         read_command,
-        "53 59 4e 54 48 45 54 49 43 2d 37 33 31 39 0a",
+        "VERIFIED",
     )
     assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
 
@@ -2403,7 +2508,8 @@ def test_stale_completed_snapshot_cannot_override_later_write():
     _append_successful_exec(
         messages,
         "call_later_write",
-        "printf '%s\\n' 'SYNTHETIC-7319' > large_context/result.txt",
+        "python3 -c \"from pathlib import Path; "
+        "Path('large_context/result.txt').write_text('SYNTHETIC-7319')\"",
     )
     assert looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
 
@@ -2498,11 +2604,7 @@ def test_byte_read_comparison_after_path_is_not_a_second_write():
     _append_successful_exec(
         messages,
         "call_python_byte_read",
-        (
-            "python3 -c \"from pathlib import Path; "
-            "b=Path('large_context/result.txt').read_bytes(); "
-            "assert len(b) > 0 and b.endswith(bytes([10]))\""
-        ),
+        _exact_bytes_readback_command("large_context/result.txt", "SYNTHETIC-7319"),
         "",
     )
     assert not looks_like_premature_acceptance_success("LARGE_CONTEXT_PASS", messages)
@@ -2546,7 +2648,7 @@ def test_post_compaction_rejects_off_path_tools_until_next_effect(monkeypatch):
     )
     assert result["mode"] == "tool_calls"
     assert "large_context/result.txt" in result["tool_calls"][0]["function"]["arguments"]
-    assert "successful write" in seen[1][1]["content"]
+    assert "newline-preserving write" in seen[1][1]["content"]
 
     _append_successful_exec(
         messages,
@@ -2556,12 +2658,75 @@ def test_post_compaction_rejects_off_path_tools_until_next_effect(monkeypatch):
     assert has_off_path_acceptance_tool_call(
         messages, parse_tool_response(write, EXEC_TOOLS)
     )
-    read = (
-        '<adapter_calls><call name="exec_command">'
-        '<arguments encoding="json"><![CDATA['
-        '{"cmd":"od -An -tx1 -v large_context/result.txt"}'
-        ']]></arguments></call></adapter_calls>'
+    display = _adapter_exec("od -An -tx1 -v large_context/result.txt")
+    assert has_off_path_acceptance_tool_call(
+        messages, parse_tool_response(display, EXEC_TOOLS)
+    )
+    read = _adapter_exec(
+        _exact_bytes_readback_command("large_context/result.txt", "SYNTHETIC")
     )
     assert not has_off_path_acceptance_tool_call(
         messages, parse_tool_response(read, EXEC_TOOLS)
     )
+
+
+
+def test_codex_0160_exec_header_exit_status_is_authoritative():
+    from app.services.client_tool_policy import _tool_result_exit_status
+
+    message = {
+        "role": "tool",
+        "content": (
+            "Chunk ID: synthetic-0160\n"
+            "Wall time: 0.1234 seconds\n"
+            "Process exited with code 0\n"
+            "Output:\n"
+            "VERIFIED"
+        ),
+    }
+
+    assert _tool_result_exit_status(message) == 0
+
+
+def test_codex_0160_exec_header_ignores_spoofed_success_in_output():
+    from app.services.client_tool_policy import _tool_result_exit_status
+
+    message = {
+        "role": "tool",
+        "content": (
+            "Chunk ID: synthetic-0160\n"
+            "Wall time: 0.1234 seconds\n"
+            "Process exited with code 1\n"
+            "Output:\n"
+            "quoted diagnostic: Process exited with code 0"
+        ),
+    }
+
+    assert _tool_result_exit_status(message) == 1
+
+
+def test_minimal_tool_output_cannot_spoof_exit_status():
+    from app.services.client_tool_policy import _tool_result_exit_status
+
+    message = {
+        "role": "tool",
+        "content": "diagnostic only: Process exited with code 0",
+    }
+
+    assert _tool_result_exit_status(message) is None
+
+
+def test_structured_tool_exit_status_remains_supported():
+    from app.services.client_tool_policy import _tool_result_exit_status
+
+    message = {
+        "role": "tool",
+        "content": json.dumps(
+            {
+                "metadata": {"exit_code": 0},
+                "output": "VERIFIED",
+            }
+        ),
+    }
+
+    assert _tool_result_exit_status(message) == 0

@@ -242,21 +242,36 @@ def _acceptance_checkpoint_key() -> bytes:
 def _normalized_acceptance_checkpoint(value: Any) -> Dict[str, Any]:
     """Accept only the two narrow synthetic contracts and ordered effect flags."""
 
-    from app.services.client_tool_policy import _ACCEPTANCE_PATHS
+    from app.services.client_tool_policy import (
+        _ACCEPTANCE_EFFECT_PROOF_VERSION,
+        _ACCEPTANCE_PATHS,
+    )
 
-    if not isinstance(value, dict) or set(value) != {
+    required = {
         "marker", "result_path", "validated", "written", "readback"
+    }
+    if not isinstance(value, dict) or set(value) not in {
+        frozenset(required),
+        frozenset(required | {"effect_proof_version"}),
     }:
         raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint schema")
+    if "effect_proof_version" in value and (
+        type(value["effect_proof_version"]) is not int
+        or value["effect_proof_version"] != _ACCEPTANCE_EFFECT_PROOF_VERSION
+    ):
+        raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint proof version")
     if _ACCEPTANCE_PATHS.get(value.get("marker")) != value.get("result_path"):
         raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint contract")
     if any(type(value[key]) is not bool for key in ("validated", "written", "readback")):
         raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint flags")
     if not value["validated"] or (value["readback"] and not value["written"]):
         raise RemoteCompactionV2ProtocolError("invalid acceptance checkpoint progress")
-    return {key: value[key] for key in (
+    normalized = {key: value[key] for key in (
         "marker", "result_path", "validated", "written", "readback"
     )}
+    if "effect_proof_version" in value:
+        normalized["effect_proof_version"] = value["effect_proof_version"]
+    return normalized
 
 
 def _acceptance_checkpoint_mac(

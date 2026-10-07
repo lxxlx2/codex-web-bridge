@@ -37,6 +37,7 @@ _EXEC_LIKE_TOOLS = {"exec_command", "shell_command", "local_shell"}
 # Responses history. It is carried on the current tool-result delta for local
 # policy decisions and is never serialized into the browser prompt.
 _ACCEPTANCE_STATE_KEY = "_uwa_synthetic_acceptance_state"
+_ACCEPTANCE_EFFECT_PROOF_VERSION = 1
 _ACCEPTANCE_PATHS = {
     "CONTEXT_PASS": "context/result.txt",
     "LARGE_CONTEXT_PASS": "large_context/result.txt",
@@ -602,25 +603,71 @@ def looks_like_post_tool_unavailable_claim(text: str) -> bool:
 
 
 def _tool_result_exit_zero(message: Dict[str, Any]) -> bool:
+    return _tool_result_exit_status(message) == 0
+
+
+def _tool_result_exit_status(message: Dict[str, Any]) -> int | None:
     if not isinstance(message, dict):
-        return False
+        return None
     role = str(message.get("role") or "").strip().lower()
     if role not in {"tool", "function"}:
-        return False
+        return None
 
     text = _message_content_text(message)
     if not text:
-        return False
+        return None
 
-    patterns = (
-        r"Process exited with code 0\b",
-        r"exit(?:ed)?(?:\s+with)?(?:\s+code)?\s*[:=]?\s*0\b",
-        r"\"exit_code\"\s*:\s*0\b",
+    value = text.replace("\r\n", "\n").strip()
+
+    # Preserve support for structured tool-result payloads, but only when the
+    # entire result is JSON. Never regex-search arbitrary command output.
+    try:
+        payload = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+
+    if isinstance(payload, dict):
+        status = payload.get("exit_code")
+        if type(status) is int:
+            return status
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            status = metadata.get("exit_code")
+            if type(status) is int:
+                return status
+
+    # Codex 0.160.1 exec results contain an authoritative metadata header such
+    # as:
+    #   Chunk ID: ...
+    #   Wall time: ...
+    #   Process exited with code N
+    #   Output:
+    #
+    # Some bridge fixtures use "Final output:" instead. Inspect only the
+    # metadata prefix so command output cannot spoof a successful exit line.
+    boundaries = [
+        position
+        for marker in ("\nOutput:", "\nFinal output:")
+        if (position := value.find(marker)) >= 0
+    ]
+    if boundaries:
+        header = value[:min(boundaries)]
+        statuses = []
+        for line in header.splitlines():
+            match = re.fullmatch(
+                r"\s*Process exited with code (-?\d+)\s*",
+                line,
+            )
+            if match:
+                statuses.append(int(match.group(1)))
+        return statuses[0] if len(statuses) == 1 else None
+
+    # Narrow compatibility for minimal synthetic/legacy tool results.
+    match = re.fullmatch(
+        r"\s*Process exited with code (-?\d+)\s*",
+        value,
     )
-    return any(
-        re.search(pattern, text, re.IGNORECASE)
-        for pattern in patterns
-    )
+    return int(match.group(1)) if match else None
 
 
 def _command_validates_acceptance_workspace(
@@ -701,13 +748,13 @@ def looks_like_false_acceptance_workspace_mismatch(
     )
 
 
-def _successful_workspace_commands(
+def _completed_workspace_commands(
     messages: List[Dict[str, Any]],
-) -> List[tuple[int, str]]:
-    """Return exit-zero exec commands with their tool-result positions."""
+) -> List[tuple[int, str, bool]]:
+    """Return paired exec commands, ordered by result, with exit status."""
 
     calls: Dict[str, str] = {}
-    successful: List[tuple[int, str]] = []
+    completed: List[tuple[int, str, bool]] = []
 
     for index, message in enumerate(messages or []):
         if not isinstance(message, dict):
@@ -740,10 +787,11 @@ def _successful_workspace_commands(
             or ""
         ).strip()
         command = calls.get(call_id, "")
-        if command and _tool_result_exit_zero(message):
-            successful.append((index, command))
+        status = _tool_result_exit_status(message)
+        if command and status is not None:
+            completed.append((index, command, status == 0))
 
-    return successful
+    return completed
 
 
 def _acceptance_success_contract(
@@ -781,6 +829,15 @@ def _private_acceptance_state_with_index(
         state = message.get(_ACCEPTANCE_STATE_KEY)
         if not isinstance(state, dict):
             return None
+        required = {"marker", "result_path", "validated", "written", "readback"}
+        versioned = set(state) == required | {"effect_proof_version"}
+        if set(state) != required and not versioned:
+            return None
+        if versioned and (
+            type(state["effect_proof_version"]) is not int
+            or state["effect_proof_version"] != _ACCEPTANCE_EFFECT_PROOF_VERSION
+        ):
+            return None
         role = str(message.get("role") or "").strip().lower()
         if (
             role not in {"tool", "function"}
@@ -805,6 +862,11 @@ def _private_acceptance_state_with_index(
             return None
         if not state["validated"] or (state["readback"] and not state["written"]):
             return None
+        if not versioned:
+            # Older authenticated checkpoints could count a newline-free write
+            # and a print-only byte read as complete. Preserve the validated
+            # workspace, then require a new proven write and readback.
+            return index, {**state, "written": False, "readback": False}
         return index, state
     return None
 
@@ -939,7 +1001,7 @@ def _acceptance_effect_progress(
 ) -> tuple[bool, bool]:
     """Return ordered validation, write, and later byte readback effects."""
 
-    commands = _successful_workspace_commands(messages)
+    commands = _completed_workspace_commands(messages)
     snapshot = _private_acceptance_state_with_index(messages)
     snapshot_index = -1
     written = False
@@ -953,22 +1015,27 @@ def _acceptance_effect_progress(
         # establish this acceptance contract, even if all three commands exist.
         snapshot_index = next(
             (
-                index for index, command in commands
-                if _command_validates_acceptance_workspace(command, result_path)
+                index for index, command, succeeded in commands
+                if succeeded and _command_validates_acceptance_workspace(command, result_path)
             ),
             -1,
         )
         if snapshot_index < 0:
             return False, False
 
-    for index, command in commands:
+    for index, command, succeeded in commands:
         if index <= snapshot_index:
             continue
         if _command_writes_result_path(command, result_path):
-            written = True
+            # A failed command may already have truncated or replaced the file.
+            written = succeeded and _command_writes_result_with_newline(command, result_path)
             readback = False
-        elif written and _command_reads_result_path(command, result_path):
-            readback = True
+        elif written and _command_asserts_exact_result_bytes(command, result_path):
+            if succeeded:
+                readback = True
+            else:
+                written = False
+                readback = False
 
     return written, readback
 
@@ -994,6 +1061,7 @@ def _acceptance_state_from_history(
         "validated": True,
         "written": written,
         "readback": readback,
+        "effect_proof_version": _ACCEPTANCE_EFFECT_PROOF_VERSION,
     }
 
 
@@ -1360,6 +1428,272 @@ def _command_reads_result_path(command: str, result_path: str) -> bool:
     )
 
 
+def _single_effect_command(command: str, *, depth: int = 0) -> str:
+    """Unwrap only an entire shell -c command, never a command suffix."""
+
+    if depth >= 2:
+        return command
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return command
+    if (
+        len(words) == 3
+        and words[0].rsplit("/", 1)[-1] in {"sh", "bash", "zsh"}
+        and words[1] in {"-c", "-lc", "-cl"}
+    ):
+        return _single_effect_command(words[2], depth=depth + 1)
+    return command
+
+
+def _python_effect_code(command: str) -> str | None:
+    """Extract code only from one unmasked Python invocation."""
+
+    actual = _single_effect_command(command)
+    heredoc = re.fullmatch(
+        r"\s*(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-\s+<<-?\s*"
+        r"(?P<quote>['\"]?)(?P<tag>[A-Za-z_]\w*)(?P=quote)[ \t]*\r?\n"
+        r"(?P<code>.*?)\r?\n(?P=tag)[ \t]*(?:\r?\n)?\s*",
+        actual,
+        re.DOTALL,
+    )
+    if heredoc:
+        return heredoc.group("code")
+    try:
+        words = shlex.split(actual)
+    except ValueError:
+        return None
+    if (
+        len(words) == 3
+        and re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", words[0].rsplit("/", 1)[-1])
+        and words[1] == "-c"
+    ):
+        return words[2]
+    return None
+
+
+def _literal_python_value(node: ast.AST) -> str | bytes | None:
+    """Evaluate only literals used in a synthetic result-byte comparison."""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _literal_python_value(node.left)
+        right = _literal_python_value(node.right)
+        if type(left) is type(right) and isinstance(left, (str, bytes)):
+            return left + right
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "encode"
+        and not node.keywords
+        and (
+            not node.args
+            or (
+                len(node.args) == 1
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value in {"utf-8", "UTF-8"}
+            )
+        )
+    ):
+        value = _literal_python_value(node.func.value)
+        if isinstance(value, str):
+            return value.encode("utf-8")
+    return None
+
+
+def _one_newline_value(value: str | bytes | None) -> bool:
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return bool(
+        isinstance(value, bytes)
+        and len(value) > 1
+        and value.endswith(b"\n")
+        and b"\n" not in value[:-1]
+        and b"\r" not in value
+    )
+
+
+def _target_path_call(node: ast.AST, result_path: str) -> bool:
+    return bool(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Path"
+        and len(node.args) == 1
+        and not node.keywords
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == result_path
+    )
+
+
+def _target_path_method(
+    node: ast.AST, method: str, result_path: str, path_names: set[str]
+) -> bool:
+    return bool(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == method
+        and (
+            _target_path_call(node.func.value, result_path)
+            or (
+                isinstance(node.func.value, ast.Name)
+                and node.func.value.id in path_names
+            )
+        )
+    )
+
+
+def _python_effect_statements(command: str) -> list[ast.stmt] | None:
+    code = _python_effect_code(command)
+    if code is None:
+        return None
+    try:
+        return ast.parse(code).body
+    except SyntaxError:
+        return None
+
+
+def _command_writes_result_with_newline(command: str, result_path: str) -> bool:
+    """Accept a completed write only when its source preserves exactly one LF."""
+
+    if not _command_writes_result_path(command, result_path):
+        return False
+    actual = _single_effect_command(command)
+    try:
+        lexer = shlex.shlex(actual, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        words = list(lexer)
+    except ValueError:
+        words = []
+    # The acceptance directory already exists after validation, but Codex may
+    # defensively create it again immediately before writing the result.
+    if words[:4] == ["mkdir", "-p", result_path.split("/", 1)[0], "&&"]:
+        words = words[4:]
+    if len(words) >= 4 and words[-2:] == [">", result_path]:
+        utility = words[0].rsplit("/", 1)[-1]
+        body = words[1:-2]
+        if utility == "printf":
+            if len(body) == 2 and body[0] in {r"%s\n", "%s\n"}:
+                return _one_newline_value(body[1] + "\n")
+            if (
+                len(body) == 1
+                and body[0].endswith(r"\n")
+                and "%" not in body[0]
+                and "\\" not in body[0][:-2]
+            ):
+                return _one_newline_value(body[0][:-2] + "\n")
+        if utility == "echo" and len(body) == 1:
+            return bool(
+                body[0]
+                and not body[0].startswith("-")
+                and "\\" not in body[0]
+                and _one_newline_value(body[0] + "\n")
+            )
+
+    statements = _python_effect_statements(command)
+    if statements is None:
+        return False
+    path_names: set[str] = set()
+    wrote = False
+    for statement in statements:
+        if (
+            isinstance(statement, ast.ImportFrom)
+            and statement.module == "pathlib"
+            and len(statement.names) == 1
+            and statement.names[0].name == "Path"
+            and statement.names[0].asname is None
+        ):
+            continue
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and _target_path_call(statement.value, result_path)
+            and not wrote
+        ):
+            path_names.add(statement.targets[0].id)
+            continue
+        if isinstance(statement, ast.Expr) and not wrote:
+            call = statement.value
+            for method in ("write_text", "write_bytes"):
+                if (
+                    _target_path_method(call, method, result_path, path_names)
+                    and len(call.args) == 1
+                    and not call.keywords
+                ):
+                    value = _literal_python_value(call.args[0])
+                    if (method == "write_text" and isinstance(value, str)) or (
+                        method == "write_bytes" and isinstance(value, bytes)
+                    ):
+                        wrote = _one_newline_value(value)
+                    break
+            if wrote:
+                continue
+        return False
+    return wrote
+
+
+def _command_asserts_exact_result_bytes(command: str, result_path: str) -> bool:
+    """Require a separate Python byte read whose mismatch exits non-zero."""
+
+    statements = _python_effect_statements(command)
+    if statements is None:
+        return False
+    path_names: set[str] = set()
+    read_name = ""
+    asserted = False
+    for statement in statements:
+        if (
+            isinstance(statement, ast.ImportFrom)
+            and statement.module == "pathlib"
+            and len(statement.names) == 1
+            and statement.names[0].name == "Path"
+            and statement.names[0].asname is None
+            and not asserted
+        ):
+            continue
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and not asserted
+        ):
+            name = statement.targets[0].id
+            if _target_path_call(statement.value, result_path) and not read_name:
+                path_names.add(name)
+                continue
+            if (
+                not read_name
+                and _target_path_method(statement.value, "read_bytes", result_path, path_names)
+                and not statement.value.args
+                and not statement.value.keywords
+            ):
+                read_name = name
+                continue
+        if isinstance(statement, ast.Assert) and read_name and not asserted:
+            comparison = statement.test
+            if (
+                isinstance(comparison, ast.Compare)
+                and len(comparison.ops) == 1
+                and isinstance(comparison.ops[0], ast.Eq)
+                and len(comparison.comparators) == 1
+            ):
+                left, right = comparison.left, comparison.comparators[0]
+                expected_node = (
+                    right if isinstance(left, ast.Name) and left.id == read_name
+                    else left if isinstance(right, ast.Name) and right.id == read_name
+                    else None
+                )
+                if expected_node is not None and _one_newline_value(
+                    _literal_python_value(expected_node)
+                ):
+                    asserted = True
+                    continue
+        return False
+    return asserted
+
+
 def _completed_acceptance_contract(
     messages: List[Dict[str, Any]],
 ) -> tuple[str, str] | None:
@@ -1435,10 +1769,10 @@ def has_off_path_acceptance_tool_call(
     if not command:
         return True
     if not written:
-        return not _command_writes_result_path(command, result_path)
+        return not _command_writes_result_with_newline(command, result_path)
     return (
         _command_writes_result_path(command, result_path)
-        or not _command_reads_result_path(command, result_path)
+        or not _command_asserts_exact_result_bytes(command, result_path)
     )
 
 
@@ -1935,8 +2269,10 @@ def build_client_workspace_repair_messages(
                 "The previous reply stopped the synthetic acceptance request even though it still has one "
                 "demonstrably unfinished workspace effect. The result-file write already completed successfully. "
                 f"Do not rewrite {result_path}. The next required effect is a separate client-tool "
-                "readback/verification of the existing result file, including the trailing-newline requirement "
-                "from the original acceptance request."
+                "readback of the existing result file. Run a standalone Python command that reads the file "
+                "with Path.read_bytes() and asserts equality to the remembered token encoded as UTF-8 plus "
+                "one LF byte. The assertion must cause a non-zero exit on any byte mismatch; printing or "
+                "displaying bytes alone does not verify them."
             )
             if repeated:
                 correction += (
@@ -1944,15 +2280,18 @@ def build_client_workspace_repair_messages(
                     "another acknowledgement before the independent readback completes."
                 )
             action = (
-                f"Call {preferred_name} now to perform a separate byte-level readback and verify the existing {result_path}, "
-                "including the trailing newline. Return only the corrected tool-call output."
+                f"Call {preferred_name} now with a separate Python byte assertion for {result_path}: "
+                "data = Path(path).read_bytes(); assert data == b'<remembered-token>\\n'. "
+                "Replace the placeholder with the exact remembered token. Return only the corrected tool call."
             )
         else:
             correction = (
                 "The previous reply stopped the synthetic acceptance request while required workspace effects "
                 "remain unfinished. The workspace validation already completed successfully, "
-                f"but a successful write of {result_path} has not yet been proven. Continue from that next "
-                "unfinished step; do not repeat the successful workspace validation."
+                f"but a newline-preserving write of {result_path} has not yet been proven. Use a "
+                "write form such as printf '%s\\n' with the exact remembered token redirected to that "
+                "path. Do not use printf '%s', echo -n, or Path.write_text(token) without a newline. "
+                "Continue from that next unfinished step; do not repeat the successful workspace validation."
             )
             if repeated:
                 correction += (
@@ -1961,7 +2300,7 @@ def build_client_workspace_repair_messages(
                 )
             action = (
                 f"Call {preferred_name} now to create {result_path} exactly as required by the Original user "
-                "request. Return only the corrected tool-call output."
+                "request, including exactly one trailing LF byte. Return only the corrected tool-call output."
             )
     elif looks_like_premature_acceptance_success(
         assistant_text,
