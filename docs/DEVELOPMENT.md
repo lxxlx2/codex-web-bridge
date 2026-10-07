@@ -118,3 +118,25 @@ Before pruning:
 - run live parity if browser/runtime behavior could change.
 
 The first stable release intentionally favors conservative retention over aggressive slimming.
+
+## 自动模型与思考强度策略 (auto-best / max)
+
+在 standalone 的受控 ChatGPT Web 路径，模型默认从当前账号实际呈现的
+`menuitemradio` 可选选项中动态选取。当前策略以 GPT 数字版本优先，
+同版本以 Pro、Astra、Sol、Luna 的已知能力系列排序。
+页面自身未声明“最强”时，这只是明确、可复现的工程排序策略，
+不能视为 OpenAI 官方模型质量排行榜。
+
+默认值为 `UWA_CODEX_WEB_MODEL=auto-best` 和
+`UWA_CODEX_REASONING_DEFAULT=max`。`max` 会使用页面实际滑块的
+`aria-valuemax`，即便 Codex 请求指定 `high` 也采用最高可验证的 Web 档位；
+Codex wire 上的 reasoning effort 保持原样、单独审计。
+
+按需可以设置 `UWA_CODEX_WEB_MODEL=GPT-5.6 Sol` 固定目标，或设置
+`UWA_CODEX_REASONING_DEFAULT=high` 以恢复按客户端请求解释 Web 档位的行为。
+可见 radio 无法可信区分、缺少 slider metadata、目标 disabled、
+出现无法识别的新模型类别或选择后未确认为选中态时默认 fail closed，
+不静默切到低版本、不使用官方 API fallback、不发送额外对话。
+
+这是新的 release candidate 源码变更。先在新分支完成回归、CI 与合并，
+再重新绑定 exact-SHA S3 / Desktop E2E / 后续 release evidence。

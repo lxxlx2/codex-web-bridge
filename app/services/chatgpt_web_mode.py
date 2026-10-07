@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -24,9 +25,9 @@ from app.core.config import get_logger
 
 logger = get_logger("CODEX.WEBMODE")
 
-DEFAULT_WEB_MODEL = "GPT-5.6 Sol"
-DEFAULT_REASONING = "high"
-_SUPPORTED_REASONING = {"medium", "high"}
+DEFAULT_WEB_MODEL = "auto-best"
+DEFAULT_REASONING = "max"
+_SUPPORTED_REASONING = {"medium", "high", "max"}
 
 
 class ChatGPTWebModeError(RuntimeError):
@@ -72,7 +73,7 @@ def normalize_reasoning_effort(value: Any) -> str:
         return default_reasoning_effort()
     if effort not in _SUPPORTED_REASONING:
         raise ChatGPTWebModeError(
-            f"unsupported Codex reasoning effort: {effort}; supported=medium,high"
+            f"unsupported Codex reasoning effort: {effort}; supported=medium,high,max"
         )
     return effort
 
@@ -130,12 +131,9 @@ const selectedRows = rows.filter((row) => row.checked);
 const visibleRows = rows.filter((row) => row.visible);
 const combined = (row) => norm(`${row.text} ${row.aria}`);
 
-const modelPattern = /gpt\s*[- ]?5\.6\s*sol/i;
-const modelRow = selectedRows.find((row) => modelPattern.test(combined(row)))
-  || visibleRows.find((row) =>
-    !['option', 'menuitem', 'menuitemradio'].includes(low(row.el.getAttribute('role')))
-    && modelPattern.test(combined(row))
-  );
+const modelPattern = /^gpt\s*[- ]?\d+(?:\.\d+)*/i;
+const modelRow = selectedRows.find((row) =>
+  row.el.getAttribute('role') === 'menuitemradio' && modelPattern.test(row.text));
 
 const highPattern = /^(high|高)$/i;
 const mediumPattern = /^(medium|中)$/i;
@@ -171,10 +169,74 @@ if (!reasoning && slider) {
 }
 
 return {
-  model: modelRow ? 'GPT-5.6 Sol' : null,
+  model: modelRow ? norm(modelRow.text) : null,
   reasoning,
   temporary_chat: temp,
 };
+"""
+
+
+_MODEL_OPTIONS_JS = r"""
+const visible = (el) => {
+  const s = window.getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  return s.display !== 'none' && s.visibility !== 'hidden'
+    && r.width > 0 && r.height > 0;
+};
+const norm = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+return Array.from(document.querySelectorAll('[role="menuitemradio"]'))
+  .filter(visible)
+  .slice(0, 40)
+  .map(el => ({
+    label: norm(el.innerText || el.textContent).slice(0, 150),
+    checked: el.getAttribute('aria-checked') === 'true'
+      || el.getAttribute('data-state') === 'checked',
+    disabled: el.matches(':disabled,[disabled],[aria-disabled="true"],[data-disabled]')
+      || !!el.closest('[aria-disabled="true"]'),
+  }));
+"""
+
+
+_MODEL_SELECT_JS = r"""
+const wanted = String(arguments[0] || '').trim();
+const norm = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+const visible = (el) => {
+  const s = window.getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  return s.display !== 'none' && s.visibility !== 'hidden'
+    && r.width > 0 && r.height > 0;
+};
+const matches = Array.from(document.querySelectorAll('[role="menuitemradio"]'))
+  .filter(visible)
+  .filter(el => norm(el.innerText || el.textContent) === wanted)
+  .filter(el => !el.matches(':disabled,[disabled],[aria-disabled="true"],[data-disabled]')
+    && !el.closest('[aria-disabled="true"]'));
+if (matches.length !== 1) return {clicked: false};
+matches[0].click();
+return {clicked: true};
+"""
+
+
+_REASONING_DETAILS_JS = r"""
+const visible = (el) => {
+  const s = window.getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  return s.display !== 'none' && s.visibility !== 'hidden'
+    && r.width > 0 && r.height > 0;
+};
+const sliders = Array.from(document.querySelectorAll(
+  '[role="menuitem"][aria-label="强度"] [role="slider"], '
+  + '[role="menuitem"][aria-label="Reasoning intensity"] [role="slider"]'
+)).filter(visible);
+if (sliders.length !== 1) return null;
+const slider = sliders[0];
+const min = Number(slider.getAttribute('aria-valuemin'));
+const max = Number(slider.getAttribute('aria-valuemax'));
+const now = Number(slider.getAttribute('aria-valuenow'));
+if (![min, max, now].every(Number.isInteger)
+    || min < 0 || max <= min || max > 10 || now < min || now > max)
+  return null;
+return {min, max, now};
 """
 
 
@@ -346,41 +408,131 @@ def _close_model_menu(tab: Any) -> bool:
     return _model_menu_state(tab) == "closed"
 
 
+_MODEL_IDENTITY = re.compile(
+    r"^\s*GPT[- ]?(\d+(?:\.\d+)*)(?:\s+([A-Za-z][A-Za-z0-9_-]*))?(?=$|\s)",
+    re.IGNORECASE,
+)
+_MODEL_TIER_RANK = {"pro": 4, "astra": 3, "sol": 2, "luna": 1}
+
+
+def _model_parts(label: str) -> tuple[str, tuple[int, ...], str] | None:
+    """Parse only GPT radio labels, ignoring descriptions like retirement dates."""
+    match = _MODEL_IDENTITY.match(str(label or ""))
+    if not match:
+        return None
+    version = tuple(int(x) for x in match.group(1).split("."))
+    if len(version) > 4:
+        return None
+    family = (match.group(2) or "").lower()
+    # A non-ASCII sentence following GPT-5.5 is a description, not a tier.
+    canonical = f"GPT-{match.group(1)}" + (f" {match.group(2)}" if family else "")
+    return canonical, version + (0,) * (4 - len(version)), family
+
+
+def _best_available_model(options: list[dict[str, Any]]) -> dict[str, Any]:
+    """Deterministic account-visible model ranking; unknown competitors fail closed."""
+    ranked = []
+    for option in options:
+        label = str(option.get("label") or "").strip()
+        if option.get("disabled"):
+            continue
+        if label.casefold() in {"auto", "automatic", "自动", "instant", "即时"}:
+            continue
+        parts = _model_parts(label)
+        if parts is None:
+            # Do not silently ignore newly named, potentially stronger options.
+            raise ChatGPTWebModeError(f"unrecognized enabled model option: {label[:80]!r}")
+        name, version, family = parts
+        ranked.append((version, _MODEL_TIER_RANK.get(family, 0), name, label))
+    if not ranked:
+        raise ChatGPTWebModeError("no selectable GPT model radio options found")
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    winner = ranked[0]
+    if len(ranked) > 1 and ranked[1][:2] == winner[:2]:
+        raise ChatGPTWebModeError("ambiguous strongest model option")
+    return {"name": winner[2], "label": winner[3]}
+
+
+def _visible_model_options(tab: Any) -> list[dict[str, Any]]:
+    raw = _run_js(tab, _MODEL_OPTIONS_JS)
+    if not isinstance(raw, list) or len(raw) > 40:
+        raise ChatGPTWebModeError("invalid controlled model options")
+    if any(not isinstance(x, dict) for x in raw):
+        raise ChatGPTWebModeError("invalid model option entry")
+    return raw
+
+
+def _reasoning_details(tab: Any) -> dict[str, int] | None:
+    raw = _run_js(tab, _REASONING_DETAILS_JS)
+    if not isinstance(raw, dict):
+        return None
+    try:
+        values = {key: raw[key] for key in ("min", "max", "now")}
+    except KeyError:
+        return None
+    if any(type(value) is not int for value in values.values()):
+        return None
+    if not (0 <= values["min"] < values["max"] <= 10 and values["min"] <= values["now"] <= values["max"]):
+        return None
+    return values
+
+
+def _resolved_model_from_state(state: dict[str, Any]) -> str | None:
+    configured = target_web_model()
+    return state.get("resolved_model") if configured == "auto-best" else configured
+
+
 def inspect_chatgpt_web_mode(tab: Optional[Any] = None) -> Dict[str, Any]:
     target = tab or _find_chatgpt_tab()
     result = _run_js(target, _STATE_JS)
     state = result if isinstance(result, dict) else {}
-    if state.get("model") is None or state.get("reasoning") is None:
-        # The current ChatGPT model trigger can show only its mode name while
-        # the chosen model and reasoning intensity remain inside its menu.
-        # Open that menu for a read-only verification, then close it again.
+    options: list[dict[str, Any]] = []
+    slider = None
+    # The model label and slider live inside the picker on the current Web UI.
+    # Inspection may open/close the menu but never changes a model or sends text.
+    should_probe = (
+        target_web_model() == "auto-best"
+        or state.get("model") is None
+        or state.get("reasoning") is None
+    )
+    if should_probe:
         was_open = _model_menu_state(target) == "open"
-        if _open_model_menu(target):
-            expanded = {}
-            for _ in range(4):
-                time.sleep(0.12)
-                candidate = _run_js(target, _STATE_JS)
-                if isinstance(candidate, dict):
-                    expanded = candidate
-                    if candidate.get("model") is not None and candidate.get("reasoning") is not None:
+        if was_open or _open_model_menu(target):
+            try:
+                for _ in range(4):
+                    expanded = _run_js(target, _STATE_JS)
+                    if isinstance(expanded, dict):
+                        state = expanded
+                    options = _visible_model_options(target)
+                    slider = _reasoning_details(target)
+                    if options and slider is not None:
                         break
-            if not was_open:
-                if not _close_model_menu(target):
+                    time.sleep(0.12)
+            finally:
+                if not was_open and not _close_model_menu(target):
                     raise ChatGPTWebModeError("controlled model menu did not close")
-            if isinstance(expanded, dict):
-                state = dict(state)
-                if state.get("model") is None:
-                    state["model"] = expanded.get("model")
-                if state.get("reasoning") is None:
-                    state["reasoning"] = expanded.get("reasoning")
+
+    checked = [x for x in options if x.get("checked")]
+    if len(checked) > 1:
+        raise ChatGPTWebModeError("multiple model radio options selected")
+    selected = _model_parts(checked[0]["label"]) if checked else _model_parts(str(state.get("model") or ""))
+    selected_name = selected[0] if selected else None
+    resolved = None
+    if target_web_model() == "auto-best" and options:
+        resolved = _best_available_model(options)["name"]
+    else:
+        resolved = target_web_model() if target_web_model() != "auto-best" else None
     return {
-        "model": state.get("model"),
+        "model": selected_name,
         "reasoning": state.get("reasoning"),
+        "reasoning_slider": slider,
         "temporary_chat": state.get("temporary_chat"),
         "target_model": target_web_model(),
+        "resolved_model": resolved,
         "target_reasoning_default": default_reasoning_effort(),
         "strict": web_mode_strict(),
     }
+
 
 
 def inspect_chatgpt_web_mode_diagnostics(tab: Optional[Any] = None) -> Dict[str, Any]:
@@ -428,21 +580,34 @@ def _ensure_temporary_chat(tab: Any) -> None:
 
 def _ensure_model(tab: Any, desired_model: str) -> None:
     state = inspect_chatgpt_web_mode(tab)
-    if str(state.get("model") or "").casefold() == desired_model.casefold():
+    chosen = _resolved_model_from_state(state) if desired_model == "auto-best" else desired_model
+    if not chosen:
+        raise ChatGPTWebModeError("model selection has no verified target")
+    if str(state.get("model") or "").casefold() == chosen.casefold():
         return
-
-    opened = _open_model_menu(tab)
-    if opened:
-        time.sleep(0.25)
-
-    selected = _click(
-        tab,
-        exact_texts=[desired_model],
-        contains_texts=[desired_model],
-        roles=["option", "menuitem", "menuitemradio", "button"],
-    ).get("clicked")
-    if selected:
+    if not _open_model_menu(tab):
+        raise ChatGPTWebModeError("model picker unavailable")
+    try:
+        options = _visible_model_options(tab)
+        if desired_model == "auto-best":
+            selected = _best_available_model(options)
+        else:
+            matches = [x for x in options if not x.get("disabled") and
+                       (_model_parts(str(x.get("label") or "")) or (None,))[0] == chosen]
+            if len(matches) != 1:
+                raise ChatGPTWebModeError(f"target model not uniquely selectable: {chosen!r}")
+            selected = {"name": chosen, "label": matches[0]["label"]}
+        clicked = _run_js(tab, _MODEL_SELECT_JS, selected["label"])
+        if not isinstance(clicked, dict) or not clicked.get("clicked"):
+            raise ChatGPTWebModeError("controlled model click not proven")
         time.sleep(0.35)
+    finally:
+        if _model_menu_state(tab) == "open" and not _close_model_menu(tab):
+            raise ChatGPTWebModeError("controlled model menu did not close")
+    confirmed = inspect_chatgpt_web_mode(tab)
+    if str(confirmed.get("model") or "").casefold() != selected["name"].casefold():
+        raise ChatGPTWebModeError("selected model was not confirmed by checked radio")
+
 
 
 def _open_reasoning_menu(tab: Any) -> bool:
@@ -451,33 +616,47 @@ def _open_reasoning_menu(tab: Any) -> bool:
 
 def _ensure_reasoning(tab: Any, effort: str) -> bool:
     state = inspect_chatgpt_web_mode(tab)
-    if state.get("reasoning") == effort:
+    if effort != "max" and state.get("reasoning") == effort:
         return True
+    if effort == "max" and isinstance(state.get("reasoning_slider"), dict):
+        values = state["reasoning_slider"]
+        if values["now"] == values["max"]:
+            return True
 
     if not _open_reasoning_menu(tab):
         return False
-    target_value = 2 if effort == "high" else 1
-    current = _run_js(tab, _REASONING_SLIDER_JS)
-    if type(current) is not int:
+    details = _reasoning_details(tab)
+    if details is None:
         _close_model_menu(tab)
         return False
-    for _ in range(2):
-        if current == target_value:
+    if effort == "max":
+        target = details["max"]
+    else:
+        # Explicit medium/high is only mapped on the known 0..2 UI. If
+        # ChatGPT changes the scale, fail closed instead of guessing.
+        if (details["min"], details["max"]) != (0, 2):
+            _close_model_menu(tab)
+            return False
+        target = 2 if effort == "high" else 1
+    current = details["now"]
+    for _ in range(10):
+        if current == target:
             break
-        direction = "RIGHT" if current < target_value else "LEFT"
+        direction = "RIGHT" if current < target else "LEFT"
         try:
             tab.ele('css:[role="menuitem"][aria-label="强度"] [role="slider"], [role="menuitem"][aria-label="Reasoning intensity"] [role="slider"]').click()
             tab.actions.key_down(direction).key_up(direction)
         except Exception as exc:
             raise ChatGPTWebModeError(f"controlled browser keyboard action failed: {exc}") from exc
         time.sleep(0.12)
-        next_value = _run_js(tab, _REASONING_SLIDER_JS)
-        if type(next_value) is not int or next_value != current + (1 if direction == "RIGHT" else -1):
+        after = _reasoning_details(tab)
+        expected = current + (1 if direction == "RIGHT" else -1)
+        if after is None or after["now"] != expected or after["max"] != details["max"]:
             _close_model_menu(tab)
             return False
-        current = next_value
-    verified = current == target_value
-    return verified and _close_model_menu(tab)
+        current = after["now"]
+    return current == target and _close_model_menu(tab)
+
 
 
 def _verification_errors(
@@ -487,14 +666,22 @@ def _verification_errors(
     reasoning_verified: bool = False,
 ) -> list[str]:
     errors: list[str] = []
-    desired_model = target_web_model()
-    if str(state.get("model") or "").casefold() != desired_model.casefold():
-        errors.append(f"model expected={desired_model!r} actual={state.get('model')!r}")
-    if state.get("reasoning") != effort and (state.get("reasoning") is not None or not reasoning_verified):
+    desired = _resolved_model_from_state(state)
+    if not desired or str(state.get("model") or "").casefold() != desired.casefold():
+        errors.append(f"model expected={desired!r} actual={state.get('model')!r}")
+    slider = state.get("reasoning_slider")
+    if effort == "max":
+        reasoning_ok = bool(isinstance(slider, dict) and slider.get("now") == slider.get("max")
+                            and type(slider.get("max")) is int and slider["max"] > slider.get("min", slider["max"]))
+    else:
+        reasoning_ok = state.get("reasoning") == effort or (
+            reasoning_verified and state.get("reasoning") is None)
+    if not reasoning_ok:
         errors.append(f"reasoning expected={effort!r} actual={state.get('reasoning')!r}")
     if temporary_chat_enabled() and state.get("temporary_chat") is not True:
         errors.append(f"temporary_chat expected=True actual={state.get('temporary_chat')!r}")
     return errors
+
 
 
 def ensure_codex_chatgpt_web_mode(reasoning: Any = None) -> Dict[str, Any]:
@@ -516,7 +703,7 @@ def ensure_codex_chatgpt_web_mode(reasoning: Any = None) -> Dict[str, Any]:
     reasoning_verified = _ensure_reasoning(tab, effort)
 
     state = inspect_chatgpt_web_mode(tab)
-    if reasoning_verified and state.get("reasoning") is None:
+    if reasoning_verified and effort != "max" and state.get("reasoning") is None:
         state["reasoning"] = effort
         state["reasoning_verification"] = "selected-menu-state"
 
